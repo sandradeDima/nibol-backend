@@ -18,8 +18,8 @@ const permissionActions = [...PERMISSION_ACTIONS];
 const seedEnvSchema = z.object({
   DATABASE_URL: z.string().min(1),
   SEED_ADMIN_NAME: z.string().min(1).default("System Administrator"),
-  SEED_ADMIN_EMAIL: z.email().default("admin@example.com"),
-  SEED_ADMIN_PASSWORD: z.string().min(8).default("Admin123!"),
+  SEED_ADMIN_EMAIL: z.email().default("admin@gmail.com"),
+  SEED_ADMIN_PASSWORD: z.string().min(8).default("Mipassword!"),
   SEED_APP_NAME: z.string().min(1).default("SaaS Base Project"),
   SEED_SUPPORT_EMAIL: z.email().default("support@example.com"),
   SEED_TIMEZONE: z.string().min(1).default("UTC"),
