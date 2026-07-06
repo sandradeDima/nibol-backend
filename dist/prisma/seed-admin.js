@@ -1,21 +1,13 @@
 import "dotenv/config";
 import bcrypt from "bcryptjs";
 import { v5 as uuidv5 } from "uuid";
-import { z } from "zod";
+import { getAdminSeedIds, resolveAdminSeedConfigs, SEED_NAMESPACE, } from "./admin-seed-config.js";
 import { ADMIN_ROLE_NAME, buildPermissionName, PERMISSION_ACTIONS, PERMISSION_RESOURCES, } from "../src/permissions/definitions.js";
 import { logger } from "../src/utils/logger.js";
 import { prisma } from "../src/utils/prisma.js";
-const SEED_NAMESPACE = "f7f9b6d0-5603-4ce2-a745-9dceb8bbf57f";
-const seedAdminEnvSchema = z.object({
-    SEED_ADMIN_NAME: z.string().min(1).default("System Administrator"),
-    SEED_ADMIN_EMAIL: z.email().default("admin@gmail.com"),
-    SEED_ADMIN_PASSWORD: z.string().min(8).default("Mipassword!"),
-});
-const env = seedAdminEnvSchema.parse(process.env);
+const adminSeeds = resolveAdminSeedConfigs(process.env);
 const ids = {
-    adminAccount: uuidv5("account:default-admin", SEED_NAMESPACE),
     adminRole: uuidv5("role:admin", SEED_NAMESPACE),
-    adminUser: uuidv5("user:default-admin", SEED_NAMESPACE),
 };
 const adminPermissions = PERMISSION_RESOURCES.flatMap((resource) => PERMISSION_ACTIONS.map((action) => ({
     description: `${resource} ${action} permission.`,
@@ -29,7 +21,6 @@ const getErrorMessage = (error) => {
     return String(error);
 };
 const recreateAdmin = async () => {
-    const passwordHash = await bcrypt.hash(env.SEED_ADMIN_PASSWORD, 12);
     const summary = await prisma.$transaction(async (tx) => {
         const role = await tx.role.upsert({
             create: {
@@ -75,89 +66,99 @@ const recreateAdmin = async () => {
                 },
             });
         }
-        const user = await tx.user.upsert({
-            create: {
-                avatar: null,
-                deletedAt: null,
-                email: env.SEED_ADMIN_EMAIL,
-                emailVerified: true,
-                id: ids.adminUser,
-                isActive: true,
-                name: env.SEED_ADMIN_NAME,
-                password: passwordHash,
-            },
-            update: {
-                avatar: null,
-                deletedAt: null,
-                emailVerified: true,
-                isActive: true,
-                name: env.SEED_ADMIN_NAME,
-                password: passwordHash,
-            },
-            where: {
-                email: env.SEED_ADMIN_EMAIL,
-            },
-        });
-        const existingCredentialAccount = await tx.account.findFirst({
-            select: {
-                id: true,
-            },
-            where: {
-                providerId: "credential",
-                userId: user.id,
-            },
-        });
-        if (existingCredentialAccount) {
-            await tx.account.update({
-                data: {
-                    accessToken: null,
-                    accessTokenExpiresAt: null,
-                    accountId: user.id,
-                    idToken: null,
+        const admins = [];
+        for (const adminSeed of adminSeeds) {
+            const passwordHash = await bcrypt.hash(adminSeed.password, 12);
+            const adminSeedIds = getAdminSeedIds(adminSeed);
+            const user = await tx.user.upsert({
+                create: {
+                    avatar: null,
+                    deletedAt: null,
+                    email: adminSeed.email,
+                    emailVerified: true,
+                    id: adminSeedIds.userId,
+                    isActive: true,
+                    name: adminSeed.name,
                     password: passwordHash,
-                    refreshToken: null,
-                    refreshTokenExpiresAt: null,
-                    scope: null,
-                    userId: user.id,
+                },
+                update: {
+                    avatar: null,
+                    deletedAt: null,
+                    emailVerified: true,
+                    isActive: true,
+                    name: adminSeed.name,
+                    password: passwordHash,
                 },
                 where: {
-                    id: existingCredentialAccount.id,
+                    email: adminSeed.email,
                 },
             });
-        }
-        else {
-            await tx.account.create({
-                data: {
-                    accountId: user.id,
-                    id: ids.adminAccount,
-                    password: passwordHash,
+            const existingCredentialAccount = await tx.account.findFirst({
+                select: {
+                    id: true,
+                },
+                where: {
                     providerId: "credential",
                     userId: user.id,
                 },
             });
-        }
-        await tx.userRole.upsert({
-            create: {
-                id: uuidv5(`user-role:${user.id}:${role.id}`, SEED_NAMESPACE),
-                roleId: role.id,
-                userId: user.id,
-            },
-            update: {},
-            where: {
-                userId_roleId: {
+            if (existingCredentialAccount) {
+                await tx.account.update({
+                    data: {
+                        accessToken: null,
+                        accessTokenExpiresAt: null,
+                        accountId: user.id,
+                        idToken: null,
+                        password: passwordHash,
+                        refreshToken: null,
+                        refreshTokenExpiresAt: null,
+                        scope: null,
+                        userId: user.id,
+                    },
+                    where: {
+                        id: existingCredentialAccount.id,
+                    },
+                });
+            }
+            else {
+                await tx.account.create({
+                    data: {
+                        accountId: user.id,
+                        id: adminSeedIds.accountId,
+                        password: passwordHash,
+                        providerId: "credential",
+                        userId: user.id,
+                    },
+                });
+            }
+            await tx.userRole.upsert({
+                create: {
+                    id: uuidv5(`user-role:${user.id}:${role.id}`, SEED_NAMESPACE),
                     roleId: role.id,
                     userId: user.id,
                 },
-            },
-        });
+                update: {},
+                where: {
+                    userId_roleId: {
+                        roleId: role.id,
+                        userId: user.id,
+                    },
+                },
+            });
+            admins.push({
+                email: user.email,
+                source: adminSeed.source,
+                userId: user.id,
+            });
+        }
         return {
-            email: user.email,
+            admins,
+            adminCount: admins.length,
             permissions: adminPermissions.length,
             role: role.name,
-            userId: user.id,
         };
     });
-    logger.info("Cuenta administradora recreada.", summary);
+    logger.info("Cuentas administradoras aseguradas.", summary);
 };
 void recreateAdmin()
     .catch((error) => {

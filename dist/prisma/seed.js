@@ -3,15 +3,12 @@ import bcrypt from "bcryptjs";
 import { createConnection } from "mysql2/promise";
 import { v5 as uuidv5 } from "uuid";
 import { z } from "zod";
+import { getAdminSeedIds, getPrimaryAdminSeed, resolveAdminSeedConfigs, SEED_NAMESPACE, } from "./admin-seed-config.js";
 import { buildPermissionName, PERMISSION_ACTIONS, PERMISSION_RESOURCES, } from "../src/permissions/definitions.js";
-const SEED_NAMESPACE = "f7f9b6d0-5603-4ce2-a745-9dceb8bbf57f";
 const permissionResources = [...PERMISSION_RESOURCES];
 const permissionActions = [...PERMISSION_ACTIONS];
 const seedEnvSchema = z.object({
     DATABASE_URL: z.string().min(1),
-    SEED_ADMIN_NAME: z.string().min(1).default("System Administrator"),
-    SEED_ADMIN_EMAIL: z.email().default("admin@gmail.com"),
-    SEED_ADMIN_PASSWORD: z.string().min(8).default("Mipassword!"),
     SEED_APP_NAME: z.string().min(1).default("SaaS Base Project"),
     SEED_SUPPORT_EMAIL: z.email().default("support@example.com"),
     SEED_TIMEZONE: z.string().min(1).default("UTC"),
@@ -22,6 +19,8 @@ const seedEnvSchema = z.object({
     SEED_LOGO: z.string().optional(),
 });
 const env = seedEnvSchema.parse(process.env);
+const adminSeeds = resolveAdminSeedConfigs(process.env);
+const primaryAdminSeed = getPrimaryAdminSeed(adminSeeds);
 const roles = [
     {
         key: "admin",
@@ -380,9 +379,7 @@ const permissions = permissionResources.flatMap((resource) => permissionActions.
     description: `${resource} ${action} permission.`,
 })));
 const ids = {
-    adminAccount: uuidv5("account:default-admin", SEED_NAMESPACE),
     settings: uuidv5("settings:default", SEED_NAMESPACE),
-    adminUser: uuidv5("user:default-admin", SEED_NAMESPACE),
 };
 const roleIdByKey = new Map(roles.map((role) => [role.key, uuidv5(`role:${role.key}`, SEED_NAMESPACE)]));
 const permissionIdByName = new Map(permissions.map((permission) => [
@@ -721,8 +718,9 @@ const seedAdminRolePermissions = async (connection, roleMap, permissionMap) => {
       `, [uuidv5(`role-permission:${adminRoleId}:${permissionId}`, SEED_NAMESPACE), adminRoleId, permissionId]);
     }
 };
-const seedAdminUser = async (connection) => {
-    const passwordHash = await bcrypt.hash(env.SEED_ADMIN_PASSWORD, 12);
+const seedAdminUser = async (connection, adminSeed) => {
+    const passwordHash = await bcrypt.hash(adminSeed.password, 12);
+    const adminIds = getAdminSeedIds(adminSeed);
     await connection.execute(`
       INSERT INTO users (
         id,
@@ -747,13 +745,13 @@ const seedAdminUser = async (connection) => {
         email_verified = VALUES(email_verified),
         deleted_at = NULL,
         updated_at = NOW(3)
-    `, [ids.adminUser, env.SEED_ADMIN_NAME, env.SEED_ADMIN_EMAIL, passwordHash]);
+    `, [adminIds.userId, adminSeed.name, adminSeed.email, passwordHash]);
     const [rows] = await connection.execute(`
       SELECT id
       FROM users
       WHERE email = ?
       LIMIT 1
-    `, [env.SEED_ADMIN_EMAIL]);
+    `, [adminSeed.email]);
     const adminUser = rows[0];
     if (!adminUser) {
         throw new Error("Admin user not found after seeding.");
@@ -772,8 +770,9 @@ const seedAdminUserRole = async (connection, adminUserId, roleMap) => {
         updated_at = NOW(3)
     `, [uuidv5(`user-role:${adminUserId}:${adminRoleId}`, SEED_NAMESPACE), adminUserId, adminRoleId]);
 };
-const seedAdminAccount = async (connection, adminUserId) => {
-    const passwordHash = await bcrypt.hash(env.SEED_ADMIN_PASSWORD, 12);
+const seedAdminAccount = async (connection, adminUserId, adminSeed) => {
+    const passwordHash = await bcrypt.hash(adminSeed.password, 12);
+    const adminIds = getAdminSeedIds(adminSeed);
     await connection.execute(`
       INSERT INTO accounts (
         id,
@@ -795,7 +794,7 @@ const seedAdminAccount = async (connection, adminUserId) => {
         user_id = VALUES(user_id),
         password = VALUES(password),
         updated_at = NOW(3)
-    `, [ids.adminAccount, adminUserId, adminUserId, passwordHash]);
+    `, [adminIds.accountId, adminUserId, adminUserId, passwordHash]);
 };
 const seedDefaultSettings = async (connection) => {
     await connection.execute(`
@@ -1044,14 +1043,26 @@ const main = async () => {
         const riskLevelMap = await getRiskLevelMap(connection);
         const statusMap = await getObservationStatusMap(connection);
         await seedAdminRolePermissions(connection, roleMap, permissionMap);
-        const adminUserId = await seedAdminUser(connection);
-        await seedAdminAccount(connection, adminUserId);
-        await seedAdminUserRole(connection, adminUserId, roleMap);
+        const seededAdmins = [];
+        for (const adminSeed of adminSeeds) {
+            const adminUserId = await seedAdminUser(connection, adminSeed);
+            await seedAdminAccount(connection, adminUserId, adminSeed);
+            await seedAdminUserRole(connection, adminUserId, roleMap);
+            seededAdmins.push({
+                email: adminSeed.email,
+                userId: adminUserId,
+            });
+        }
+        const primaryAdminUserId = seededAdmins.find((admin) => admin.email === primaryAdminSeed.email)?.userId ??
+            seededAdmins[0]?.userId;
+        if (!primaryAdminUserId) {
+            throw new Error("No admin users were seeded.");
+        }
         await seedDefaultSettings(connection);
-        await seedAreas(connection, adminUserId);
+        await seedAreas(connection, primaryAdminUserId);
         const areaMap = await getAreaMap(connection);
         const seededObservations = await seedSampleObservationsIfEmpty(connection, {
-            adminUserId,
+            adminUserId: primaryAdminUserId,
             areaMap,
             riskLevelMap,
             statusMap,
@@ -1062,9 +1073,10 @@ const main = async () => {
             roles: roles.length,
             permissions: permissions.length,
             rolePermissions: permissions.length,
-            adminUsers: 1,
-            accounts: 1,
-            userRoles: 1,
+            adminUsers: seededAdmins.length,
+            adminEmails: seededAdmins.map((admin) => admin.email),
+            accounts: seededAdmins.length,
+            userRoles: seededAdmins.length,
             settings: 1,
             riskLevels: riskLevels.length,
             observationStatuses: observationStatuses.length,

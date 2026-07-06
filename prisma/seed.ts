@@ -6,20 +6,23 @@ import { v5 as uuidv5 } from "uuid";
 import { z } from "zod";
 
 import {
+  getAdminSeedIds,
+  getPrimaryAdminSeed,
+  resolveAdminSeedConfigs,
+  SEED_NAMESPACE,
+  type AdminSeedConfig,
+} from "./admin-seed-config.js";
+import {
   buildPermissionName,
   PERMISSION_ACTIONS,
   PERMISSION_RESOURCES,
 } from "../src/permissions/definitions.js";
 
-const SEED_NAMESPACE = "f7f9b6d0-5603-4ce2-a745-9dceb8bbf57f";
 const permissionResources = [...PERMISSION_RESOURCES];
 const permissionActions = [...PERMISSION_ACTIONS];
 
 const seedEnvSchema = z.object({
   DATABASE_URL: z.string().min(1),
-  SEED_ADMIN_NAME: z.string().min(1).default("System Administrator"),
-  SEED_ADMIN_EMAIL: z.email().default("admin@gmail.com"),
-  SEED_ADMIN_PASSWORD: z.string().min(8).default("Mipassword!"),
   SEED_APP_NAME: z.string().min(1).default("SaaS Base Project"),
   SEED_SUPPORT_EMAIL: z.email().default("support@example.com"),
   SEED_TIMEZONE: z.string().min(1).default("UTC"),
@@ -31,6 +34,8 @@ const seedEnvSchema = z.object({
 });
 
 const env = seedEnvSchema.parse(process.env);
+const adminSeeds = resolveAdminSeedConfigs(process.env);
+const primaryAdminSeed = getPrimaryAdminSeed(adminSeeds);
 
 type SeedRole = {
   key: "admin" | "non_admin";
@@ -483,9 +488,7 @@ const permissions: SeedPermission[] = permissionResources.flatMap((resource) =>
 );
 
 const ids = {
-  adminAccount: uuidv5("account:default-admin", SEED_NAMESPACE),
   settings: uuidv5("settings:default", SEED_NAMESPACE),
-  adminUser: uuidv5("user:default-admin", SEED_NAMESPACE),
 };
 
 const roleIdByKey = new Map(
@@ -984,8 +987,10 @@ const seedAdminRolePermissions = async (
 
 const seedAdminUser = async (
   connection: Awaited<ReturnType<typeof createConnection>>,
+  adminSeed: AdminSeedConfig,
 ): Promise<string> => {
-  const passwordHash = await bcrypt.hash(env.SEED_ADMIN_PASSWORD, 12);
+  const passwordHash = await bcrypt.hash(adminSeed.password, 12);
+  const adminIds = getAdminSeedIds(adminSeed);
 
   await connection.execute(
     `
@@ -1013,7 +1018,7 @@ const seedAdminUser = async (
         deleted_at = NULL,
         updated_at = NOW(3)
     `,
-    [ids.adminUser, env.SEED_ADMIN_NAME, env.SEED_ADMIN_EMAIL, passwordHash],
+    [adminIds.userId, adminSeed.name, adminSeed.email, passwordHash],
   );
 
   const [rows] = await connection.execute<UserRow[]>(
@@ -1023,7 +1028,7 @@ const seedAdminUser = async (
       WHERE email = ?
       LIMIT 1
     `,
-    [env.SEED_ADMIN_EMAIL],
+    [adminSeed.email],
   );
 
   const adminUser = rows[0];
@@ -1060,8 +1065,10 @@ const seedAdminUserRole = async (
 const seedAdminAccount = async (
   connection: Awaited<ReturnType<typeof createConnection>>,
   adminUserId: string,
+  adminSeed: AdminSeedConfig,
 ): Promise<void> => {
-  const passwordHash = await bcrypt.hash(env.SEED_ADMIN_PASSWORD, 12);
+  const passwordHash = await bcrypt.hash(adminSeed.password, 12);
+  const adminIds = getAdminSeedIds(adminSeed);
 
   await connection.execute(
     `
@@ -1086,7 +1093,7 @@ const seedAdminAccount = async (
         password = VALUES(password),
         updated_at = NOW(3)
     `,
-    [ids.adminAccount, adminUserId, adminUserId, passwordHash],
+    [adminIds.accountId, adminUserId, adminUserId, passwordHash],
   );
 };
 
@@ -1384,15 +1391,32 @@ const main = async (): Promise<void> => {
 
     await seedAdminRolePermissions(connection, roleMap, permissionMap);
 
-    const adminUserId = await seedAdminUser(connection);
-    await seedAdminAccount(connection, adminUserId);
-    await seedAdminUserRole(connection, adminUserId, roleMap);
+    const seededAdmins: Array<{ email: string; userId: string }> = [];
+
+    for (const adminSeed of adminSeeds) {
+      const adminUserId = await seedAdminUser(connection, adminSeed);
+      await seedAdminAccount(connection, adminUserId, adminSeed);
+      await seedAdminUserRole(connection, adminUserId, roleMap);
+      seededAdmins.push({
+        email: adminSeed.email,
+        userId: adminUserId,
+      });
+    }
+
+    const primaryAdminUserId =
+      seededAdmins.find((admin) => admin.email === primaryAdminSeed.email)?.userId ??
+      seededAdmins[0]?.userId;
+
+    if (!primaryAdminUserId) {
+      throw new Error("No admin users were seeded.");
+    }
+
     await seedDefaultSettings(connection);
-    await seedAreas(connection, adminUserId);
+    await seedAreas(connection, primaryAdminUserId);
 
     const areaMap = await getAreaMap(connection);
     const seededObservations = await seedSampleObservationsIfEmpty(connection, {
-      adminUserId,
+      adminUserId: primaryAdminUserId,
       areaMap,
       riskLevelMap,
       statusMap,
@@ -1407,9 +1431,10 @@ const main = async (): Promise<void> => {
           roles: roles.length,
           permissions: permissions.length,
           rolePermissions: permissions.length,
-          adminUsers: 1,
-          accounts: 1,
-          userRoles: 1,
+          adminUsers: seededAdmins.length,
+          adminEmails: seededAdmins.map((admin) => admin.email),
+          accounts: seededAdmins.length,
+          userRoles: seededAdmins.length,
           settings: 1,
           riskLevels: riskLevels.length,
           observationStatuses: observationStatuses.length,
