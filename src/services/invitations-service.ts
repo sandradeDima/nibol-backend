@@ -77,7 +77,7 @@ const getInvitationStatus = (invitation: {
 };
 
 const formatDateTime = (value: Date): string => {
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat("es-BO", {
     dateStyle: "long",
     timeStyle: "short",
   }).format(value);

@@ -5,12 +5,16 @@ import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { toNodeHandler } from "better-auth/node";
 
-import { emailService } from "../../emails/EmailService.js";
 import { activityLogService } from "../../services/activity-log-service.js";
 import { notificationService } from "../../services/notification-service.js";
 import { env } from "../../utils/env.js";
 import { logger } from "../../utils/logger.js";
 import { prisma } from "../../utils/prisma.js";
+import {
+  EMAIL_VERIFICATION_EXPIRES_IN_SECONDS,
+  sendVerificationEmailToUser,
+} from "./verification-email.js";
+import { emailService } from "../../emails/EmailService.js";
 
 const syncCredentialPassword = async (
   userId: string,
@@ -132,18 +136,17 @@ export const auth = betterAuth({
   },
   emailVerification: {
     autoSignInAfterVerification: true,
-    expiresIn: 60 * 60 * 24,
+    expiresIn: EMAIL_VERIFICATION_EXPIRES_IN_SECONDS,
     sendOnSignIn: true,
     sendOnSignUp: true,
     sendVerificationEmail: async ({ url, user }) => {
-      await emailService.sendTemplate({
-        template: "emailVerification",
-        to: user.email,
-        variables: {
-          userName: user.name,
-          verificationLink: url,
+      await sendVerificationEmailToUser(
+        {
+          email: user.email,
+          name: user.name,
         },
-      });
+        url,
+      );
     },
   },
   hooks: {

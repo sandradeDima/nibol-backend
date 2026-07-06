@@ -5,17 +5,18 @@ export const invitationEmailTemplate = {
     render: ({ brand, variables }) => {
         const appName = variables.appName?.trim() || brand.appName;
         const roleLine = variables.roleName
-            ? `<p style="margin: 0 0 16px;">You have been invited to join as <strong>${escapeHtml(variables.roleName)}</strong>.</p>`
+            ? `<p style="margin: 0 0 16px;">Su acceso quedara habilitado con el rol <strong>${escapeHtml(variables.roleName)}</strong>.</p>`
             : "";
         const invitedByLine = variables.invitedByName
-            ? `<p style="margin: 0 0 16px;">Invitation sent by ${escapeHtml(variables.invitedByName)}.</p>`
+            ? `<p style="margin: 0 0 16px;">Invitacion enviada por ${escapeHtml(variables.invitedByName)}.</p>`
             : "";
         const expiryLine = variables.expiresAt
-            ? `<p style="margin: 0 0 16px;">This invitation expires on ${escapeHtml(variables.expiresAt)}.</p>`
+            ? `<p style="margin: 0 0 16px;">Esta invitacion vence el ${escapeHtml(variables.expiresAt)}.</p>`
             : "";
         const contentHtml = `
       <p style="margin: 0 0 16px;">${escapeHtml(greeting(variables.userName))}</p>
-      <p style="margin: 0 0 16px;">You have been invited to join ${escapeHtml(appName)}.</p>
+      <p style="margin: 0 0 16px;">Ha recibido una invitacion para ingresar a ${escapeHtml(appName)}.</p>
+      <p style="margin: 0 0 16px;">Complete el proceso para activar su cuenta y comenzar a operar dentro de la plataforma.</p>
       ${roleLine}
       ${invitedByLine}
       ${expiryLine}
@@ -24,29 +25,29 @@ export const invitationEmailTemplate = {
           href="${escapeHtml(variables.invitationLink)}"
           style="background: ${brand.primaryColor}; border-radius: 10px; color: #ffffff; display: inline-block; font-weight: 700; padding: 14px 20px; text-decoration: none;"
         >
-          Accept Invitation
+          Aceptar invitacion
         </a>
       </p>
-      <p style="margin: 0 0 16px;">If the button does not work, open this link:</p>
+      <p style="margin: 0 0 16px;">Si el boton no funciona, abra este enlace:</p>
       <p style="margin: 0;"><a href="${escapeHtml(variables.invitationLink)}" style="color: ${brand.primaryColor};">${escapeHtml(variables.invitationLink)}</a></p>
     `;
         return {
             html: renderBaseEmailLayout({
                 brand,
                 contentHtml,
-                previewText: `You are invited to join ${appName}.`,
+                previewText: `Tiene una invitacion pendiente en ${appName}.`,
             }),
-            subject: `You are invited to join ${appName}`,
-            text: joinTextBlocks(greeting(variables.userName), `You have been invited to join ${appName}.`, variables.roleName ? `Role: ${variables.roleName}` : undefined, variables.invitedByName ? `Invitation sent by ${variables.invitedByName}.` : undefined, variables.expiresAt ? `Expires on ${variables.expiresAt}.` : undefined, variables.invitationLink),
+            subject: `Invitacion de acceso a ${appName}`,
+            text: joinTextBlocks(greeting(variables.userName), `Ha recibido una invitacion para ingresar a ${appName}.`, "Complete el proceso para activar su cuenta y comenzar a operar dentro de la plataforma.", variables.roleName ? `Rol asignado: ${variables.roleName}.` : undefined, variables.invitedByName ? `Invitacion enviada por ${variables.invitedByName}.` : undefined, variables.expiresAt ? `Esta invitacion vence el ${variables.expiresAt}.` : undefined, variables.invitationLink),
         };
     },
     sampleVariables: {
-        appName: "SaaS Base Project",
-        expiresAt: "June 30, 2026",
+        appName: "NIBOL | Sistema de Seguimiento de Riesgos",
+        expiresAt: "30 de junio de 2026",
         invitationLink: "https://app.example.com/invitations/accept?token=demo",
-        invitedByName: "Admin User",
-        roleName: "Admin",
-        userName: "Taylor",
+        invitedByName: "Administrador NIBOL",
+        roleName: "Administrador",
+        userName: "Sandra",
     },
 };
 //# sourceMappingURL=invitation-email.js.map

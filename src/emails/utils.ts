@@ -17,7 +17,7 @@ export const toParagraphHtml = (value: string): string => {
 };
 
 export const greeting = (userName: string): string => {
-  return userName.trim() ? `Hi ${userName.trim()},` : "Hi,";
+  return userName.trim() ? `Hola ${userName.trim()},` : "Hola,";
 };
 
 export const joinTextBlocks = (...blocks: Array<string | undefined>): string => {

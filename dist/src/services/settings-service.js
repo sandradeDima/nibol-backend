@@ -8,7 +8,7 @@ import { prisma } from "../utils/prisma.js";
 import { activityLogService } from "./activity-log-service.js";
 import { auditLogService } from "./audit-log-service.js";
 import { notificationService } from "./notification-service.js";
-const DEFAULT_PRIMARY_COLOR = "#1f2937";
+const DEFAULT_PRIMARY_COLOR = "#07142d";
 const SETTINGS_CACHE_TTL_MS = 5 * 60 * 1000;
 const resolveLogoUrl = (logo) => {
     if (!logo) {

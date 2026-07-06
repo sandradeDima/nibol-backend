@@ -102,6 +102,12 @@ usersRouter.get("/users/:userId", requirePermission("users.view"), asyncHandler(
     const user = await usersService.getUserById(getRequiredUserId(request.params.userId));
     sendSuccess(response, user);
 }));
+usersRouter.post("/users/:userId/resend-verification", requirePermission("users.edit"), asyncHandler(async (request, response) => {
+    await usersService.resendVerificationEmail(getRequiredUserId(request.params.userId), getRequestLogActorContext(request));
+    sendSuccess(response, {
+        resent: true,
+    });
+}));
 usersRouter.post("/users", requirePermission("users.create"), asyncHandler(async (request, response) => {
     const payload = createUserSchema.parse(request.body);
     const user = await usersService.createUser(payload, getRequestLogActorContext(request));

@@ -184,6 +184,21 @@ usersRouter.get(
 );
 
 usersRouter.post(
+  "/users/:userId/resend-verification",
+  requirePermission("users.edit"),
+  asyncHandler(async (request, response) => {
+    await usersService.resendVerificationEmail(
+      getRequiredUserId(request.params.userId),
+      getRequestLogActorContext(request),
+    );
+
+    sendSuccess(response, {
+      resent: true,
+    });
+  }),
+);
+
+usersRouter.post(
   "/users",
   requirePermission("users.create"),
   asyncHandler(async (request, response) => {

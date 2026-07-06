@@ -3,7 +3,10 @@ import "dotenv/config";
 import { z } from "zod";
 
 const envSchema = z.object({
-  APP_NAME: z.string().min(1).default("SaaS Base API"),
+  APP_NAME: z
+    .string()
+    .min(1)
+    .default("NIBOL | Sistema de Seguimiento de Riesgos"),
   BETTER_AUTH_SECRET: z
     .string()
     .min(32)
@@ -15,7 +18,7 @@ const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(4000),
   SMTP_FROM_EMAIL: z.email().default("no-reply@example.com"),
-  SMTP_FROM_NAME: z.string().min(1).default("SaaS Base Project"),
+  SMTP_FROM_NAME: z.string().min(1).default("NIBOL"),
   SMTP_HOST: z.string().min(1).optional(),
   SMTP_PASS: z.string().min(1).optional(),
   SMTP_PORT: z.coerce.number().int().positive().optional(),

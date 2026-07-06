@@ -16,7 +16,7 @@ import { auditLogService } from "./audit-log-service.js";
 import type { LogActorContext } from "./logging-utils.js";
 import { notificationService } from "./notification-service.js";
 
-const DEFAULT_PRIMARY_COLOR = "#1f2937";
+const DEFAULT_PRIMARY_COLOR = "#07142d";
 const SETTINGS_CACHE_TTL_MS = 5 * 60 * 1000;
 
 type SettingsSnapshot = {

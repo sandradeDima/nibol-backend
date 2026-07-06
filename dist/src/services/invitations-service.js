@@ -50,7 +50,7 @@ const getInvitationStatus = (invitation) => {
     return "Pending";
 };
 const formatDateTime = (value) => {
-    return new Intl.DateTimeFormat("en-US", {
+    return new Intl.DateTimeFormat("es-BO", {
         dateStyle: "long",
         timeStyle: "short",
     }).format(value);

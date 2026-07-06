@@ -3,6 +3,7 @@ import { unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import bcrypt from "bcryptjs";
 import { ADMIN_ROLE_NAME } from "../permissions/definitions.js";
+import { resendVerificationEmailToUser } from "../modules/auth/verification-email.js";
 import { activityLogService } from "./activity-log-service.js";
 import { auditLogService } from "./audit-log-service.js";
 import { AppError } from "../utils/app-error.js";
@@ -669,6 +670,40 @@ export const usersService = {
             },
         });
         return users;
+    },
+    async resendVerificationEmail(userId, context) {
+        const user = await prisma.user.findFirst({
+            select: {
+                email: true,
+                emailVerified: true,
+                id: true,
+                name: true,
+            },
+            where: {
+                deletedAt: null,
+                id: userId,
+            },
+        });
+        if (!user) {
+            throw new AppError("User not found.", 404);
+        }
+        if (user.emailVerified) {
+            throw new AppError("Este usuario ya verifico su correo.", 400);
+        }
+        await resendVerificationEmailToUser({
+            email: user.email,
+            name: user.name,
+        });
+        await activityLogService.logUserAction({
+            ...context,
+            action: "Verification email resent",
+            entityId: user.id,
+            entityType: "user",
+            metadata: {
+                email: user.email,
+                summary: `Se reenvio un correo de verificacion a ${user.name}.`,
+            },
+        });
     },
     async setUserActiveState(userId, isActive, context) {
         const user = await prisma.user.findFirst({

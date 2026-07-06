@@ -15,7 +15,7 @@ export const toParagraphHtml = (value) => {
         .join("");
 };
 export const greeting = (userName) => {
-    return userName.trim() ? `Hi ${userName.trim()},` : "Hi,";
+    return userName.trim() ? `Hola ${userName.trim()},` : "Hola,";
 };
 export const joinTextBlocks = (...blocks) => {
     return blocks.filter((block) => Boolean(block?.trim())).join("\n\n");

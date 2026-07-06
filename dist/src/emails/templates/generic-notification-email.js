@@ -24,7 +24,7 @@ export const genericNotificationEmailTemplate = {
         <p style="font-size: 20px; font-weight: 700; margin: 0 0 16px;">${escapeHtml(variables.title)}</p>
         ${toParagraphHtml(variables.message)}
         ${actionHtml}
-        <p style="margin: 16px 0 0;">This message was sent from ${escapeHtml(appName)}.</p>
+        <p style="margin: 16px 0 0;">Este mensaje fue generado por ${escapeHtml(appName)}.</p>
       `;
         return {
             html: renderBaseEmailLayout({
@@ -33,16 +33,16 @@ export const genericNotificationEmailTemplate = {
                 previewText: variables.title,
             }),
             subject: variables.title,
-            text: joinTextBlocks(greeting(variables.userName), variables.title, variables.message, actionText, `This message was sent from ${appName}.`),
+            text: joinTextBlocks(greeting(variables.userName), variables.title, variables.message, actionText, `Este mensaje fue generado por ${appName}.`),
         };
     },
     sampleVariables: {
-        actionLabel: "View Details",
+        actionLabel: "Ver detalle",
         actionLink: "https://app.example.com/notifications/demo",
-        appName: "SaaS Base Project",
-        message: "A new activity requires your attention.\nOpen the application to review the latest update.",
-        title: "New Notification",
-        userName: "Taylor",
+        appName: "NIBOL | Sistema de Seguimiento de Riesgos",
+        message: "Se registro una nueva actividad que requiere su atencion.\nAbra la plataforma para revisar la ultima actualizacion.",
+        title: "Nueva notificacion",
+        userName: "Sandra",
     },
 };
 //# sourceMappingURL=generic-notification-email.js.map

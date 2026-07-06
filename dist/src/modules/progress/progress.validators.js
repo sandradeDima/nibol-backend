@@ -49,7 +49,10 @@ const progressUpdateMutationSchema = z.object({
     type: z.enum(progressUpdateTypeValues),
 });
 const addFinalizationProgressIssue = (value, context) => {
-    if (value.type === "FINALIZATION" && value.progressPercent !== null && value.progressPercent !== undefined && value.progressPercent < 100) {
+    if (value.type === "FINALIZATION" &&
+        value.progressPercent !== null &&
+        value.progressPercent !== undefined &&
+        value.progressPercent < 100) {
         context.addIssue({
             code: "custom",
             message: "La finalizacion debe registrar 100% de avance.",

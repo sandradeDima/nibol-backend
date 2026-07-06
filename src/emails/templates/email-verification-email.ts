@@ -9,16 +9,17 @@ export const emailVerificationEmailTemplate: EmailTemplateDefinition<"emailVerif
       const appName = variables.appName?.trim() || brand.appName;
       const contentHtml = `
         <p style="margin: 0 0 16px;">${escapeHtml(greeting(variables.userName))}</p>
-        <p style="margin: 0 0 16px;">Verify your email address to finish setting up your ${escapeHtml(appName)} account.</p>
+        <p style="margin: 0 0 16px;">Confirme su correo electronico para activar su cuenta en ${escapeHtml(appName)}.</p>
+        <p style="margin: 0 0 16px;">Este paso protege el acceso a la plataforma y valida que la direccion registrada le pertenece.</p>
         <p style="margin: 24px 0;">
           <a
             href="${escapeHtml(variables.verificationLink)}"
             style="background: ${brand.primaryColor}; border-radius: 10px; color: #ffffff; display: inline-block; font-weight: 700; padding: 14px 20px; text-decoration: none;"
           >
-            Verify Email
+            Verificar correo
           </a>
         </p>
-        <p style="margin: 0 0 16px;">If the button does not work, open this link:</p>
+        <p style="margin: 0 0 16px;">Si el boton no funciona, abra este enlace:</p>
         <p style="margin: 0;"><a href="${escapeHtml(variables.verificationLink)}" style="color: ${brand.primaryColor};">${escapeHtml(variables.verificationLink)}</a></p>
       `;
 
@@ -26,19 +27,20 @@ export const emailVerificationEmailTemplate: EmailTemplateDefinition<"emailVerif
         html: renderBaseEmailLayout({
           brand,
           contentHtml,
-          previewText: `Verify your ${appName} email address.`,
+          previewText: `Verifique su cuenta en ${appName}.`,
         }),
-        subject: `Verify your ${appName} account`,
+        subject: `Verifique su cuenta de ${appName}`,
         text: joinTextBlocks(
           greeting(variables.userName),
-          `Verify your email address to finish setting up your ${appName} account.`,
+          `Confirme su correo electronico para activar su cuenta en ${appName}.`,
+          "Este paso protege el acceso a la plataforma y valida que la direccion registrada le pertenece.",
           variables.verificationLink,
         ),
       };
     },
     sampleVariables: {
-      appName: "SaaS Base Project",
-      userName: "Taylor",
+      appName: "NIBOL | Sistema de Seguimiento de Riesgos",
+      userName: "Sandra",
       verificationLink: "https://app.example.com/verify-email?token=demo",
     },
   };
