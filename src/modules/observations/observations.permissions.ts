@@ -1,0 +1,12 @@
+import { OBSERVATIONS_PERMISSION_RESOURCE } from "./observations.constants.js";
+
+export const OBSERVATIONS_PERMISSIONS = {
+  create: `${OBSERVATIONS_PERMISSION_RESOURCE}.create`,
+  delete: `${OBSERVATIONS_PERMISSION_RESOURCE}.delete`,
+  edit: `${OBSERVATIONS_PERMISSION_RESOURCE}.edit`,
+  view: `${OBSERVATIONS_PERMISSION_RESOURCE}.view`,
+} as const;
+
+export const OBSERVATIONS_PERMISSION_NAMES = Object.values(
+  OBSERVATIONS_PERMISSIONS,
+);

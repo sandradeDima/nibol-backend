@@ -1,0 +1,668 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+enum NotificationType {
+  INFO    @map("info")
+  SUCCESS @map("success")
+  WARNING @map("warning")
+  ERROR   @map("error")
+}
+
+enum RemediationPlanStatus {
+  DRAFT
+  SENT_TO_AUDIT
+  APPROVED
+  RETURNED
+  CLOSED
+}
+
+enum CommitmentStatus {
+  PENDING
+  IN_PROGRESS
+  SENT_TO_AUDIT
+  APPROVED
+  RETURNED
+  COMPLETED
+  OVERDUE
+}
+
+enum ProgressUpdateType {
+  ADVANCE
+  FINALIZATION
+  CORRECTION
+}
+
+enum ProgressUpdateStatus {
+  DRAFT
+  SENT_TO_AUDIT
+  APPROVED
+  RETURNED
+  REJECTED
+}
+
+enum CommentVisibility {
+  INTERNAL_AUDIT
+  AREA_VISIBLE
+  SYSTEM
+}
+
+enum ProgressReviewAction {
+  SENT
+  APPROVED
+  RETURNED
+  REJECTED
+}
+
+model User {
+  id               String         @id @default(uuid()) @db.Char(36)
+  name             String         @db.VarChar(191)
+  email            String         @unique @db.VarChar(191)
+  password         String?        @db.VarChar(255)
+  avatar           String?        @db.VarChar(255)
+  isActive         Boolean        @default(true) @map("is_active")
+  emailVerified    Boolean        @default(false) @map("email_verified")
+  lastLoginAt      DateTime?      @map("last_login_at")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+  deletedAt        DateTime?      @map("deleted_at")
+  accounts         Account[]
+  sessions         Session[]
+  createdInvites   Invitation[]   @relation("InvitationCreatedBy")
+  userRoles        UserRole[]
+  notifications    Notification[]
+  activityLogs     ActivityLog[]
+  changedAuditLogs AuditLog[]     @relation("AuditLogChangedBy")
+  managedAreas     Area[]         @relation("AreaManager")
+  responsibleObservations Observation[] @relation("ObservationResponsible")
+  auditedObservations Observation[] @relation("ObservationAuditor")
+  observationAreaAssignments ObservationAreaAssignment[] @relation("ObservationAreaResponsible")
+  remediationPlanOwners      RemediationPlan[]           @relation("RemediationPlanOwner")
+  createdRemediationPlans    RemediationPlan[]           @relation("RemediationPlanCreatedBy")
+  approvedRemediationPlans   RemediationPlan[]           @relation("RemediationPlanApprovedBy")
+  returnedRemediationPlans   RemediationPlan[]           @relation("RemediationPlanReturnedBy")
+  commitmentAssignments      Commitment[]                @relation("CommitmentResponsible")
+  submittedProgressUpdates   ProgressUpdate[]            @relation("ProgressUpdateSubmittedBy")
+  reviewedProgressUpdates    ProgressUpdate[]            @relation("ProgressUpdateReviewedBy")
+  uploadedEvidenceFiles      EvidenceFile[]              @relation("EvidenceUploadedBy")
+  observationComments        ObservationComment[]        @relation("ObservationCommentAuthor")
+  progressReviewHistoryItems ProgressReviewHistory[]     @relation("ProgressReviewHistoryActor")
+
+  @@index([deletedAt])
+  @@map("users")
+}
+
+model Role {
+  id              String           @id @default(uuid()) @db.Char(36)
+  name            String           @unique @db.VarChar(191)
+  description     String?          @db.VarChar(255)
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+  deletedAt       DateTime?        @map("deleted_at")
+  userRoles       UserRole[]
+  rolePermissions RolePermission[]
+  invitations     Invitation[]
+
+  @@index([deletedAt])
+  @@map("roles")
+}
+
+model Permission {
+  id              String           @id @default(uuid()) @db.Char(36)
+  name            String           @unique @db.VarChar(191)
+  description     String?          @db.VarChar(255)
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+  deletedAt       DateTime?        @map("deleted_at")
+  rolePermissions RolePermission[]
+
+  @@index([deletedAt])
+  @@map("permissions")
+}
+
+model UserRole {
+  id        String   @id @default(uuid()) @db.Char(36)
+  userId    String   @map("user_id") @db.Char(36)
+  roleId    String   @map("role_id") @db.Char(36)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+  @@index([roleId])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  id           String     @id @default(uuid()) @db.Char(36)
+  roleId       String     @map("role_id") @db.Char(36)
+  permissionId String     @map("permission_id") @db.Char(36)
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
+model Invitation {
+  id          String    @id @default(uuid()) @db.Char(36)
+  email       String    @db.VarChar(191)
+  token       String    @unique @db.VarChar(191)
+  roleId      String    @map("role_id") @db.Char(36)
+  expiresAt   DateTime  @map("expires_at")
+  acceptedAt  DateTime? @map("accepted_at")
+  createdById String    @map("created_by") @db.Char(36)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+  role        Role      @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  createdBy   User      @relation("InvitationCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([email])
+  @@index([roleId])
+  @@index([createdById])
+  @@index([deletedAt])
+  @@map("invitations")
+}
+
+model Setting {
+  id           String    @id @default(uuid()) @db.Char(36)
+  appName      String    @map("app_name") @db.VarChar(191)
+  logo         String?   @db.VarChar(255)
+  primaryColor String?   @map("primary_color") @db.VarChar(32)
+  supportEmail String    @map("support_email") @db.VarChar(191)
+  timezone     String    @db.VarChar(100)
+  dateFormat   String    @map("date_format") @db.VarChar(50)
+  senderName   String    @map("sender_name") @db.VarChar(191)
+  senderEmail  String    @map("sender_email") @db.VarChar(191)
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  deletedAt    DateTime? @map("deleted_at")
+
+  @@index([deletedAt])
+  @@map("settings")
+}
+
+model Notification {
+  id        String    @id @default(uuid()) @db.Char(36)
+  userId    String    @map("user_id") @db.Char(36)
+  title     String    @db.VarChar(191)
+  message   String    @db.Text
+  type      NotificationType @default(INFO)
+  isRead    Boolean   @default(false) @map("is_read")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
+  @@index([deletedAt])
+  @@map("notifications")
+}
+
+model ModuleRecord {
+  id          String    @id @default(uuid()) @db.Char(36)
+  moduleKey   String    @map("module_key") @db.VarChar(100)
+  name        String    @db.VarChar(191)
+  description String?   @db.Text
+  isActive    Boolean   @default(true) @map("is_active")
+  metadata    Json?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  @@index([moduleKey, deletedAt])
+  @@index([moduleKey, isActive])
+  @@index([moduleKey, createdAt])
+  @@map("module_records")
+}
+
+model ActivityLog {
+  id         String   @id @default(uuid()) @db.Char(36)
+  userId     String?  @map("user_id") @db.Char(36)
+  action     String   @db.VarChar(191)
+  entityType String   @map("entity_type") @db.VarChar(191)
+  entityId   String?  @map("entity_id") @db.Char(36)
+  metadata   Json?
+  ipAddress  String?  @map("ip_address") @db.VarChar(45)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("activity_logs")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Char(36)
+  entityType  String   @map("entity_type") @db.VarChar(191)
+  entityId    String?  @map("entity_id") @db.Char(36)
+  oldValues   Json?    @map("old_values")
+  newValues   Json?    @map("new_values")
+  changedById String?  @map("changed_by") @db.Char(36)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  changedBy   User?    @relation("AuditLogChangedBy", fields: [changedById], references: [id], onDelete: SetNull)
+
+  @@index([changedById])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model RiskLevel {
+  id                  String        @id @default(uuid()) @db.Char(36)
+  name                String        @unique @db.VarChar(100)
+  key                 String        @unique @db.VarChar(100)
+  description         String?       @db.VarChar(500)
+  colorToken          String?       @map("color_token") @db.VarChar(64)
+  severityOrder       Int           @map("severity_order")
+  defaultDeadlineDays Int?          @map("default_deadline_days")
+  active              Boolean       @default(true)
+  createdAt           DateTime      @default(now()) @map("created_at")
+  updatedAt           DateTime      @updatedAt @map("updated_at")
+  deletedAt           DateTime?     @map("deleted_at")
+  observations        Observation[]
+
+  @@index([active, deletedAt])
+  @@index([deletedAt])
+  @@index([severityOrder])
+  @@map("risk_levels")
+}
+
+model ObservationStatus {
+  id           String        @id @default(uuid()) @db.Char(36)
+  name         String        @db.VarChar(100)
+  key          String        @unique @db.VarChar(100)
+  description  String?       @db.VarChar(500)
+  sortOrder    Int           @map("sort_order")
+  isInitial    Boolean       @default(false) @map("is_initial")
+  isFinal      Boolean       @default(false) @map("is_final")
+  countsAsOverdue Boolean    @default(false) @map("counts_as_overdue")
+  active       Boolean       @default(true)
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+  deletedAt    DateTime?     @map("deleted_at")
+  observations Observation[]
+
+  @@unique([name])
+  @@index([active, deletedAt])
+  @@index([deletedAt])
+  @@index([sortOrder])
+  @@map("observation_statuses")
+}
+
+model Area {
+  id                     String                      @id @default(uuid()) @db.Char(36)
+  name                   String                      @unique @db.VarChar(191)
+  code                   String?                     @unique @db.VarChar(100)
+  description            String?                     @db.VarChar(500)
+  managerUserId          String?                     @map("manager_user_id") @db.Char(36)
+  active                 Boolean                     @default(true)
+  createdAt              DateTime                    @default(now()) @map("created_at")
+  updatedAt              DateTime                    @updatedAt @map("updated_at")
+  deletedAt              DateTime?                   @map("deleted_at")
+  managerUser            User?                       @relation("AreaManager", fields: [managerUserId], references: [id], onDelete: SetNull)
+  observations           Observation[]               @relation("ObservationArea")
+  observationAssignments ObservationAreaAssignment[] @relation("ObservationAssignmentArea")
+  remediationPlans       RemediationPlan[]
+
+  @@index([active, deletedAt])
+  @@index([deletedAt])
+  @@index([managerUserId])
+  @@map("areas")
+}
+
+model SystemParameter {
+  id          String    @id @default(uuid()) @db.Char(36)
+  key         String    @unique @db.VarChar(191)
+  name        String    @db.VarChar(191)
+  value       String    @db.Text
+  valueType   String    @map("value_type") @db.VarChar(32)
+  group       String    @map("group_name") @db.VarChar(100)
+  description String?   @db.VarChar(500)
+  editable    Boolean   @default(true)
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  @@index([active, deletedAt])
+  @@index([deletedAt])
+  @@index([group, active, deletedAt])
+  @@map("system_parameters")
+}
+
+model Catalog {
+  id          String    @id @default(uuid()) @db.Char(36)
+  type        String    @db.VarChar(100)
+  name        String    @db.VarChar(191)
+  key         String?   @db.VarChar(100)
+  description String?   @db.VarChar(500)
+  active      Boolean   @default(true)
+  sortOrder   Int       @default(0) @map("sort_order")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  @@unique([type, key])
+  @@index([active, deletedAt])
+  @@index([deletedAt])
+  @@index([type, sortOrder])
+  @@index([type, active, deletedAt])
+  @@map("catalogs")
+}
+
+model Observation {
+  id                 String                      @id @default(uuid()) @db.Char(36)
+  code               String                      @unique @db.VarChar(64)
+  title              String                      @db.VarChar(191)
+  description        String                      @db.Text
+  auditRecommendation String                     @map("audit_recommendation") @db.Text
+  riskLevelId        String                      @map("risk_level_id") @db.Char(36)
+  statusId           String                      @map("status_id") @db.Char(36)
+  areaId             String                      @map("area_id") @db.Char(36)
+  responsibleUserId  String?                     @map("responsible_user_id") @db.Char(36)
+  auditorUserId      String                      @map("auditor_user_id") @db.Char(36)
+  dueDate            DateTime                    @map("due_date")
+  detectedAt         DateTime                    @map("detected_at")
+  observationType    String?                     @map("observation_type") @db.VarChar(191)
+  source             String?                     @db.VarChar(191)
+  process            String?                     @map("process_name") @db.VarChar(191)
+  category           String?                     @db.VarChar(191)
+  progressPercent    Int                         @default(0) @map("progress_percent")
+  currentStage       String?                     @map("current_stage") @db.VarChar(191)
+  createdAt          DateTime                    @default(now()) @map("created_at")
+  updatedAt          DateTime                    @updatedAt @map("updated_at")
+  deletedAt          DateTime?                   @map("deleted_at")
+  riskLevel          RiskLevel                   @relation(fields: [riskLevelId], references: [id], onDelete: Restrict)
+  status             ObservationStatus           @relation(fields: [statusId], references: [id], onDelete: Restrict)
+  area               Area                        @relation("ObservationArea", fields: [areaId], references: [id], onDelete: Restrict)
+  responsibleUser    User?                       @relation("ObservationResponsible", fields: [responsibleUserId], references: [id], onDelete: SetNull)
+  auditorUser        User                        @relation("ObservationAuditor", fields: [auditorUserId], references: [id], onDelete: Restrict)
+  areaAssignments    ObservationAreaAssignment[]
+  remediationPlans   RemediationPlan[]
+  commitments        Commitment[]
+  progressUpdates    ProgressUpdate[]
+  evidenceFiles      EvidenceFile[]
+  comments           ObservationComment[]
+
+  @@index([areaId])
+  @@index([auditorUserId])
+  @@index([deletedAt])
+  @@index([detectedAt])
+  @@index([dueDate])
+  @@index([responsibleUserId])
+  @@index([riskLevelId])
+  @@index([statusId])
+  @@map("observations")
+}
+
+model ObservationAreaAssignment {
+  id                String       @id @default(uuid()) @db.Char(36)
+  observationId     String       @map("observation_id") @db.Char(36)
+  areaId            String       @map("area_id") @db.Char(36)
+  responsibleUserId String?      @map("responsible_user_id") @db.Char(36)
+  roleInFinding     String?      @map("role_in_finding") @db.VarChar(191)
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
+  observation       Observation  @relation(fields: [observationId], references: [id], onDelete: Cascade)
+  area              Area         @relation("ObservationAssignmentArea", fields: [areaId], references: [id], onDelete: Restrict)
+  responsibleUser   User?        @relation("ObservationAreaResponsible", fields: [responsibleUserId], references: [id], onDelete: SetNull)
+
+  @@unique([observationId, areaId])
+  @@index([areaId])
+  @@index([observationId])
+  @@index([responsibleUserId])
+  @@map("observation_area_assignments")
+}
+
+model RemediationPlan {
+  id                 String                @id @default(uuid()) @db.Char(36)
+  observationId      String                @map("observation_id") @db.Char(36)
+  areaId             String                @map("area_id") @db.Char(36)
+  ownerUserId        String?               @map("owner_user_id") @db.Char(36)
+  strategyText       String                @map("strategy_text") @db.LongText
+  mitigationText     String?               @map("mitigation_text") @db.LongText
+  additionalComments String?               @map("additional_comments") @db.LongText
+  status             RemediationPlanStatus @default(DRAFT)
+  sentToAuditAt      DateTime?             @map("sent_to_audit_at")
+  approvedAt         DateTime?             @map("approved_at")
+  approvedByUserId   String?               @map("approved_by_user_id") @db.Char(36)
+  returnedAt         DateTime?             @map("returned_at")
+  returnedByUserId   String?               @map("returned_by_user_id") @db.Char(36)
+  returnReason       String?               @map("return_reason") @db.LongText
+  createdByUserId    String                @map("created_by_user_id") @db.Char(36)
+  createdAt          DateTime              @default(now()) @map("created_at")
+  updatedAt          DateTime              @updatedAt @map("updated_at")
+  deletedAt          DateTime?             @map("deleted_at")
+  observation        Observation           @relation(fields: [observationId], references: [id], onDelete: Cascade)
+  area               Area                  @relation(fields: [areaId], references: [id], onDelete: Restrict)
+  ownerUser          User?                 @relation("RemediationPlanOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  approvedByUser     User?                 @relation("RemediationPlanApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  returnedByUser     User?                 @relation("RemediationPlanReturnedBy", fields: [returnedByUserId], references: [id], onDelete: SetNull)
+  createdByUser      User                  @relation("RemediationPlanCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  commitments        Commitment[]
+  progressUpdates    ProgressUpdate[]
+  evidenceFiles      EvidenceFile[]
+  comments           ObservationComment[]
+
+  @@unique([observationId, areaId])
+  @@index([areaId])
+  @@index([createdByUserId])
+  @@index([deletedAt])
+  @@index([observationId])
+  @@index([ownerUserId])
+  @@index([status])
+  @@index([approvedByUserId])
+  @@index([returnedByUserId])
+  @@map("remediation_plans")
+}
+
+model Commitment {
+  id                String           @id @default(uuid()) @db.Char(36)
+  remediationPlanId String           @map("remediation_plan_id") @db.Char(36)
+  observationId     String           @map("observation_id") @db.Char(36)
+  title             String           @db.VarChar(191)
+  description       String?          @db.Text
+  responsibleUserId String?          @map("responsible_user_id") @db.Char(36)
+  dueDate           DateTime         @map("due_date")
+  completedAt       DateTime?        @map("completed_at")
+  progressPercent   Int              @default(0) @map("progress_percent")
+  status            CommitmentStatus @default(PENDING)
+  sortOrder         Int              @default(0) @map("sort_order")
+  createdAt         DateTime         @default(now()) @map("created_at")
+  updatedAt         DateTime         @updatedAt @map("updated_at")
+  deletedAt         DateTime?        @map("deleted_at")
+  remediationPlan   RemediationPlan  @relation(fields: [remediationPlanId], references: [id], onDelete: Cascade)
+  observation       Observation      @relation(fields: [observationId], references: [id], onDelete: Cascade)
+  responsibleUser   User?            @relation("CommitmentResponsible", fields: [responsibleUserId], references: [id], onDelete: SetNull)
+  progressUpdates   ProgressUpdate[]
+  evidenceFiles     EvidenceFile[]
+  comments          ObservationComment[]
+
+  @@index([completedAt])
+  @@index([deletedAt])
+  @@index([dueDate])
+  @@index([observationId])
+  @@index([progressPercent])
+  @@index([remediationPlanId])
+  @@index([responsibleUserId])
+  @@index([sortOrder])
+  @@index([status])
+  @@map("commitments")
+}
+
+model Session {
+  id        String   @id @default(uuid()) @db.Char(36)
+  expiresAt DateTime @map("expires_at")
+  token     String   @unique @db.VarChar(255)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  ipAddress String?  @map("ip_address") @db.VarChar(45)
+  userAgent String?  @map("user_agent") @db.VarChar(255)
+  userId    String   @map("user_id") @db.Char(36)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model Account {
+  id                    String    @id @default(uuid()) @db.Char(36)
+  accountId             String    @map("account_id") @db.VarChar(191)
+  providerId            String    @map("provider_id") @db.VarChar(191)
+  userId                String    @map("user_id") @db.Char(36)
+  accessToken           String?   @map("access_token") @db.Text
+  refreshToken          String?   @map("refresh_token") @db.Text
+  idToken               String?   @map("id_token") @db.Text
+  accessTokenExpiresAt  DateTime? @map("access_token_expires_at")
+  refreshTokenExpiresAt DateTime? @map("refresh_token_expires_at")
+  scope                 String?   @db.VarChar(255)
+  password              String?   @db.VarChar(255)
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+  @@map("accounts")
+}
+
+model Verification {
+  id         String   @id @default(uuid()) @db.Char(36)
+  identifier String   @db.VarChar(255)
+  value      String   @db.Text
+  expiresAt  DateTime @map("expires_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@index([identifier])
+  @@map("verifications")
+}
+
+model ProgressUpdate {
+  id                String               @id @default(uuid()) @db.Char(36)
+  observationId     String               @map("observation_id") @db.Char(36)
+  remediationPlanId String?              @map("remediation_plan_id") @db.Char(36)
+  commitmentId      String?              @map("commitment_id") @db.Char(36)
+  submittedByUserId String               @map("submitted_by_user_id") @db.Char(36)
+  type              ProgressUpdateType
+  progressPercent   Int?                 @map("progress_percent")
+  comment           String               @db.LongText
+  status            ProgressUpdateStatus @default(DRAFT)
+  reviewedByUserId  String?              @map("reviewed_by_user_id") @db.Char(36)
+  reviewedAt        DateTime?            @map("reviewed_at")
+  reviewComment     String?              @map("review_comment") @db.LongText
+  createdAt         DateTime             @default(now()) @map("created_at")
+  updatedAt         DateTime             @updatedAt @map("updated_at")
+  deletedAt         DateTime?            @map("deleted_at")
+  observation       Observation          @relation(fields: [observationId], references: [id], onDelete: Cascade)
+  remediationPlan   RemediationPlan?     @relation(fields: [remediationPlanId], references: [id], onDelete: SetNull)
+  commitment        Commitment?          @relation(fields: [commitmentId], references: [id], onDelete: SetNull)
+  submittedByUser   User                 @relation("ProgressUpdateSubmittedBy", fields: [submittedByUserId], references: [id], onDelete: Restrict)
+  reviewedByUser    User?                @relation("ProgressUpdateReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  evidenceFiles     EvidenceFile[]
+  comments          ObservationComment[]
+  reviewHistory     ProgressReviewHistory[]
+
+  @@index([commitmentId])
+  @@index([deletedAt])
+  @@index([observationId, createdAt])
+  @@index([observationId, status, deletedAt])
+  @@index([remediationPlanId])
+  @@index([reviewedByUserId])
+  @@index([status])
+  @@index([submittedByUserId])
+  @@map("progress_updates")
+}
+
+model EvidenceFile {
+  id                String          @id @default(uuid()) @db.Char(36)
+  observationId     String          @map("observation_id") @db.Char(36)
+  remediationPlanId String?         @map("remediation_plan_id") @db.Char(36)
+  commitmentId      String?         @map("commitment_id") @db.Char(36)
+  progressUpdateId  String?         @map("progress_update_id") @db.Char(36)
+  uploadedByUserId  String          @map("uploaded_by_user_id") @db.Char(36)
+  originalName      String          @map("original_name") @db.VarChar(255)
+  storedName        String          @map("stored_name") @db.VarChar(255)
+  relativePath      String          @map("relative_path") @db.VarChar(500)
+  mimeType          String          @map("mime_type") @db.VarChar(191)
+  sizeBytes         BigInt          @map("size_bytes")
+  checksum          String?         @db.VarChar(128)
+  description       String?         @db.LongText
+  createdAt         DateTime        @default(now()) @map("created_at")
+  deletedAt         DateTime?       @map("deleted_at")
+  observation       Observation     @relation(fields: [observationId], references: [id], onDelete: Cascade)
+  remediationPlan   RemediationPlan? @relation(fields: [remediationPlanId], references: [id], onDelete: SetNull)
+  commitment        Commitment?     @relation(fields: [commitmentId], references: [id], onDelete: SetNull)
+  progressUpdate    ProgressUpdate? @relation(fields: [progressUpdateId], references: [id], onDelete: SetNull)
+  uploadedByUser    User            @relation("EvidenceUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([commitmentId])
+  @@index([deletedAt])
+  @@index([observationId, createdAt])
+  @@index([progressUpdateId])
+  @@index([remediationPlanId])
+  @@index([uploadedByUserId])
+  @@map("evidence_files")
+}
+
+model ObservationComment {
+  id                String            @id @default(uuid()) @db.Char(36)
+  observationId     String            @map("observation_id") @db.Char(36)
+  remediationPlanId String?           @map("remediation_plan_id") @db.Char(36)
+  commitmentId      String?           @map("commitment_id") @db.Char(36)
+  progressUpdateId  String?           @map("progress_update_id") @db.Char(36)
+  authorUserId      String            @map("author_user_id") @db.Char(36)
+  visibility        CommentVisibility @default(AREA_VISIBLE)
+  body              String            @db.LongText
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+  deletedAt         DateTime?         @map("deleted_at")
+  observation       Observation       @relation(fields: [observationId], references: [id], onDelete: Cascade)
+  remediationPlan   RemediationPlan?  @relation(fields: [remediationPlanId], references: [id], onDelete: SetNull)
+  commitment        Commitment?       @relation(fields: [commitmentId], references: [id], onDelete: SetNull)
+  progressUpdate    ProgressUpdate?   @relation(fields: [progressUpdateId], references: [id], onDelete: SetNull)
+  authorUser        User              @relation("ObservationCommentAuthor", fields: [authorUserId], references: [id], onDelete: Restrict)
+
+  @@index([authorUserId])
+  @@index([commitmentId])
+  @@index([deletedAt])
+  @@index([observationId, createdAt])
+  @@index([progressUpdateId])
+  @@index([remediationPlanId])
+  @@index([visibility])
+  @@map("observation_comments")
+}
+
+model ProgressReviewHistory {
+  id               String               @id @default(uuid()) @db.Char(36)
+  progressUpdateId String               @map("progress_update_id") @db.Char(36)
+  action           ProgressReviewAction
+  fromStatus       ProgressUpdateStatus? @map("from_status")
+  toStatus         ProgressUpdateStatus  @map("to_status")
+  userId           String               @map("user_id") @db.Char(36)
+  comment          String?              @db.LongText
+  createdAt        DateTime             @default(now()) @map("created_at")
+  progressUpdate   ProgressUpdate       @relation(fields: [progressUpdateId], references: [id], onDelete: Cascade)
+  user             User                 @relation("ProgressReviewHistoryActor", fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([createdAt])
+  @@index([progressUpdateId, createdAt])
+  @@index([userId])
+  @@map("progress_review_history")
+}
