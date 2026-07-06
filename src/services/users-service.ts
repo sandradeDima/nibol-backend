@@ -3,7 +3,7 @@ import { unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import bcrypt from "bcryptjs";
-import type { Prisma } from "../../generated/prisma/client.js";
+import { Prisma } from "../../generated/prisma/client.js";
 
 import { ADMIN_ROLE_NAME } from "../permissions/definitions.js";
 import { resendVerificationEmailToUser } from "../modules/auth/verification-email.js";
@@ -201,6 +201,23 @@ const assertRolesExist = async (roleIds: string[]): Promise<void> => {
     throw new AppError("One or more selected roles are invalid.", 400);
   }
 };
+
+const getDeletedUserByEmail = async (email: string) => {
+  return prisma.user.findFirst({
+    select: {
+      id: true,
+    },
+    where: {
+      deletedAt: {
+        not: null,
+      },
+      email,
+    },
+  });
+};
+
+const isUniqueConstraintError = (error: unknown): error is Prisma.PrismaClientKnownRequestError =>
+  error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
 
 const getUserDetailsRecord = async (userId: string) => {
   return prisma.user.findFirst({
@@ -526,90 +543,241 @@ export const usersService = {
     await assertRolesExist(input.roleIds);
 
     const passwordHash = await bcrypt.hash(input.password, 12);
-    const createdUser = await prisma.$transaction(async (transaction) => {
-      const user = await transaction.user.create({
-        data: {
-          email: input.email,
-          emailVerified: false,
-          isActive: input.isActive,
-          name: input.name,
-          password: passwordHash,
-        },
-        select: {
-          id: true,
-        },
-      });
+    const deletedUser = await getDeletedUserByEmail(input.email);
 
-      await transaction.account.create({
-        data: {
-          accountId: input.email,
-          password: passwordHash,
-          providerId: credentialProviderId,
-          userId: user.id,
-        },
-      });
+    if (deletedUser) {
+      try {
+        await prisma.$transaction(async (transaction) => {
+          const previousSnapshot = await getUserAuditSnapshot(transaction, deletedUser.id);
 
-      await transaction.userRole.createMany({
-        data: input.roleIds.map((roleId) => ({
-          roleId,
-          userId: user.id,
-        })),
-      });
-
-      const createdSnapshot = await getUserAuditSnapshot(transaction, user.id);
-
-      if (createdSnapshot) {
-        await auditLogService.create(
-          {
-            ...context,
-            entityId: createdSnapshot.id,
-            entityType: "user",
-            newValues: createdSnapshot,
-            oldValues: null,
-          },
-          {
-            db: transaction,
-          },
-        );
-
-        await activityLogService.logUserAction(
-          {
-            ...context,
-            action: "User created",
-            entityId: createdSnapshot.id,
-            entityType: "user",
-            metadata: {
-              email: createdSnapshot.email,
-              roles: createdSnapshot.roleNames,
-              summary: `${createdSnapshot.name} was created.`,
+          await transaction.user.update({
+            data: {
+              avatar: null,
+              deletedAt: null,
+              emailVerified: false,
+              isActive: input.isActive,
+              lastLoginAt: null,
+              name: input.name,
+              password: passwordHash,
             },
-          },
-          {
-            db: transaction,
-          },
-        );
+            where: {
+              id: deletedUser.id,
+            },
+          });
 
-        if (createdSnapshot.roleNames.length > 0) {
+          await transaction.session.deleteMany({
+            where: {
+              userId: deletedUser.id,
+            },
+          });
+
+          const credentialAccount = await transaction.account.findFirst({
+            select: {
+              id: true,
+            },
+            where: {
+              providerId: credentialProviderId,
+              userId: deletedUser.id,
+            },
+          });
+
+          if (credentialAccount) {
+            await transaction.account.update({
+              data: {
+                accountId: input.email,
+                password: passwordHash,
+              },
+              where: {
+                id: credentialAccount.id,
+              },
+            });
+          } else {
+            await transaction.account.create({
+              data: {
+                accountId: input.email,
+                password: passwordHash,
+                providerId: credentialProviderId,
+                userId: deletedUser.id,
+              },
+            });
+          }
+
+          await transaction.userRole.deleteMany({
+            where: {
+              userId: deletedUser.id,
+            },
+          });
+
+          await transaction.userRole.createMany({
+            data: input.roleIds.map((roleId) => ({
+              roleId,
+              userId: deletedUser.id,
+            })),
+          });
+
+          const nextSnapshot = await getUserAuditSnapshot(transaction, deletedUser.id);
+
+          if (previousSnapshot && nextSnapshot) {
+            await auditLogService.create(
+              {
+                ...context,
+                entityId: nextSnapshot.id,
+                entityType: "user",
+                newValues: nextSnapshot,
+                oldValues: previousSnapshot,
+              },
+              {
+                db: transaction,
+              },
+            );
+
+            await activityLogService.logUserAction(
+              {
+                ...context,
+                action: "User restored",
+                entityId: nextSnapshot.id,
+                entityType: "user",
+                metadata: {
+                  email: nextSnapshot.email,
+                  roles: nextSnapshot.roleNames,
+                  summary: `${nextSnapshot.name} was restored.`,
+                },
+              },
+              {
+                db: transaction,
+              },
+            );
+
+            if (!areStringArraysEqual(previousSnapshot.roleNames, nextSnapshot.roleNames)) {
+              await activityLogService.logUserAction(
+                {
+                  ...context,
+                  action: "Role assigned",
+                  entityId: nextSnapshot.id,
+                  entityType: "user",
+                  metadata: {
+                    roles: nextSnapshot.roleNames,
+                    summary: `Assigned ${nextSnapshot.roleNames.join(", ")} to ${nextSnapshot.name}.`,
+                  },
+                },
+                {
+                  db: transaction,
+                },
+              );
+            }
+          }
+        });
+      } catch (error) {
+        if (isUniqueConstraintError(error)) {
+          throw new AppError("A user with this email already exists.", 400, {
+            email: input.email,
+            fields: error.meta?.target,
+          });
+        }
+
+        throw error;
+      }
+
+      return this.getUserById(deletedUser.id);
+    }
+
+    let createdUser: { id: string };
+
+    try {
+      createdUser = await prisma.$transaction(async (transaction) => {
+        const user = await transaction.user.create({
+          data: {
+            email: input.email,
+            emailVerified: false,
+            isActive: input.isActive,
+            name: input.name,
+            password: passwordHash,
+          },
+          select: {
+            id: true,
+          },
+        });
+
+        await transaction.account.create({
+          data: {
+            accountId: input.email,
+            password: passwordHash,
+            providerId: credentialProviderId,
+            userId: user.id,
+          },
+        });
+
+        await transaction.userRole.createMany({
+          data: input.roleIds.map((roleId) => ({
+            roleId,
+            userId: user.id,
+          })),
+        });
+
+        const createdSnapshot = await getUserAuditSnapshot(transaction, user.id);
+
+        if (createdSnapshot) {
+          await auditLogService.create(
+            {
+              ...context,
+              entityId: createdSnapshot.id,
+              entityType: "user",
+              newValues: createdSnapshot,
+              oldValues: null,
+            },
+            {
+              db: transaction,
+            },
+          );
+
           await activityLogService.logUserAction(
             {
               ...context,
-              action: "Role assigned",
+              action: "User created",
               entityId: createdSnapshot.id,
               entityType: "user",
               metadata: {
+                email: createdSnapshot.email,
                 roles: createdSnapshot.roleNames,
-                summary: `Assigned ${createdSnapshot.roleNames.join(", ")} to ${createdSnapshot.name}.`,
+                summary: `${createdSnapshot.name} was created.`,
               },
             },
             {
               db: transaction,
             },
           );
+
+          if (createdSnapshot.roleNames.length > 0) {
+            await activityLogService.logUserAction(
+              {
+                ...context,
+                action: "Role assigned",
+                entityId: createdSnapshot.id,
+                entityType: "user",
+                metadata: {
+                  roles: createdSnapshot.roleNames,
+                  summary: `Assigned ${createdSnapshot.roleNames.join(", ")} to ${createdSnapshot.name}.`,
+                },
+              },
+              {
+                db: transaction,
+              },
+            );
+          }
         }
+
+        return user;
+      });
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        throw new AppError("A user with this email already exists.", 400, {
+          email: input.email,
+          fields: error.meta?.target,
+        });
       }
 
-      return user;
-    });
+      throw error;
+    }
 
     return this.getUserById(createdUser.id);
   },
@@ -642,6 +810,12 @@ export const usersService = {
         },
         where: {
           id: userId,
+        },
+      });
+
+      await transaction.session.deleteMany({
+        where: {
+          userId,
         },
       });
 
