@@ -6,7 +6,10 @@ import { env } from "../../utils/env.js";
 import { logger } from "../../utils/logger.js";
 
 export const EMAIL_VERIFICATION_EXPIRES_IN_SECONDS = 60 * 60 * 24;
-export const DEFAULT_EMAIL_VERIFICATION_CALLBACK_URL = "/login?verified=1";
+export const DEFAULT_EMAIL_VERIFICATION_CALLBACK_URL = new URL(
+  "/login?verified=1",
+  `${env.FRONTEND_URL.replace(/\/$/, "")}/`,
+).toString();
 
 type VerificationEmailUser = {
   email: string;
