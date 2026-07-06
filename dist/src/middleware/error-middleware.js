@@ -15,7 +15,10 @@ export const errorMiddleware = (error, _request, response, _next) => {
         return;
     }
     if (error instanceof AppError) {
-        logger.warn(error.message);
+        logger.warn(error.message, {
+            metadata: error.metadata,
+            statusCode: error.statusCode,
+        });
         sendError(response, error.message, error.statusCode);
         return;
     }

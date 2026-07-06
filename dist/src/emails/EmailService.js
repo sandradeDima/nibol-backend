@@ -36,7 +36,10 @@ export class EmailService {
             logger.info(result.providerMode === "json"
                 ? "Email captured by JSON transport."
                 : "Email sent successfully.", {
+                accepted: result.accepted,
                 messageId: result.messageId,
+                providerMode: result.providerMode,
+                rejected: result.rejected,
                 subject: request.subject,
                 to: normalizeEmailAddresses(request.to),
             });
@@ -51,6 +54,7 @@ export class EmailService {
             const message = error instanceof Error ? error.message : "Unknown email delivery error";
             logger.error("Email send failed.", {
                 message,
+                providerMode: emailProvider.mode,
                 subject: request.subject,
                 to: normalizeEmailAddresses(request.to),
             });
@@ -89,12 +93,25 @@ export class EmailService {
             if (request.replyTo) {
                 emailRequest.replyTo = request.replyTo;
             }
-            return await this.sendEmail(emailRequest);
+            const result = await this.sendEmail(emailRequest);
+            if (!result.success) {
+                logger.error("Email template delivery failed.", {
+                    accepted: result.accepted,
+                    error: result.error,
+                    providerMode: result.providerMode,
+                    rejected: result.rejected,
+                    subject: result.subject,
+                    template: request.template,
+                    to: result.to,
+                });
+            }
+            return result;
         }
         catch (error) {
             const message = error instanceof Error ? error.message : "Unknown email template error";
             logger.error("Email template send failed.", {
                 message,
+                providerMode: emailProvider.mode,
                 template: request.template,
                 to: normalizeEmailAddresses(request.to),
             });
