@@ -33,7 +33,7 @@ CREATE TABLE `deadline_extension_requests` (
   INDEX `deadline_extension_requests_commitment_id_idx`(`commitment_id`),
   INDEX `deadline_extension_requests_deleted_at_idx`(`deleted_at`),
   INDEX `deadline_extension_requests_manager_reviewer_id_idx`(`manager_reviewer_id`),
-  INDEX `deadline_extension_requests_observation_id_commitment_id_status_deleted_at_idx`(`observation_id`, `commitment_id`, `status`, `deleted_at`),
+  INDEX `der_observation_commitment_status_deleted_idx`(`observation_id`, `commitment_id`, `status`, `deleted_at`),
   INDEX `deadline_extension_requests_requested_by_user_id_idx`(`requested_by_user_id`),
   INDEX `deadline_extension_requests_status_updated_at_idx`(`status`, `updated_at`),
   PRIMARY KEY (`id`)
@@ -45,7 +45,7 @@ CREATE TABLE `deadline_extension_attachments` (
   `evidence_file_id` CHAR(36) NOT NULL,
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
 
-  UNIQUE INDEX `deadline_extension_attachments_extension_request_id_evidence_file_id_key`(`extension_request_id`, `evidence_file_id`),
+  UNIQUE INDEX `dea_extension_request_id_evidence_file_id_key`(`extension_request_id`, `evidence_file_id`),
   INDEX `deadline_extension_attachments_evidence_file_id_idx`(`evidence_file_id`),
   PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

@@ -555,7 +555,7 @@ model DeadlineExtensionRequest {
   @@index([commitmentId])
   @@index([deletedAt])
   @@index([managerReviewerId])
-  @@index([observationId, commitmentId, status, deletedAt])
+  @@index([observationId, commitmentId, status, deletedAt], map: "der_observation_commitment_status_deleted_idx")
   @@index([requestedByUserId])
   @@index([status, updatedAt])
   @@map("deadline_extension_requests")
@@ -569,7 +569,7 @@ model DeadlineExtensionAttachment {
   extensionRequest   DeadlineExtensionRequest @relation(fields: [extensionRequestId], references: [id], onDelete: Cascade)
   evidenceFile       EvidenceFile             @relation(fields: [evidenceFileId], references: [id], onDelete: Restrict)
 
-  @@unique([extensionRequestId, evidenceFileId])
+  @@unique([extensionRequestId, evidenceFileId], map: "dea_extension_request_id_evidence_file_id_key")
   @@index([evidenceFileId])
   @@map("deadline_extension_attachments")
 }
