@@ -1,3 +1,4 @@
+import { extensionRequestsRouter } from "./extension-requests/extension-requests.routes.js";
 import { configurationRouter } from "./configuration/configuration.routes.js";
 import { observationsRouter } from "./observations/observations.routes.js";
 import { progressRouter } from "./progress/progress.routes.js";
@@ -11,9 +12,11 @@ export const generatedPermissionResources = [
     "catalogs",
     "products",
     "observations",
+    "extension_requests",
 ];
 export const generatedModuleRouters = [
     configurationRouter,
+    extensionRequestsRouter,
     observationsRouter,
     progressRouter,
     remediationRouter,

@@ -52,4 +52,14 @@ export const ProgressReviewAction = {
     RETURNED: 'RETURNED',
     REJECTED: 'REJECTED'
 };
+export const DeadlineExtensionStatus = {
+    DRAFT: 'DRAFT',
+    SENT_TO_MANAGER: 'SENT_TO_MANAGER',
+    MANAGER_APPROVED: 'MANAGER_APPROVED',
+    MANAGER_REJECTED: 'MANAGER_REJECTED',
+    SENT_TO_AUDIT: 'SENT_TO_AUDIT',
+    AUDIT_APPROVED: 'AUDIT_APPROVED',
+    AUDIT_REJECTED: 'AUDIT_REJECTED',
+    CANCELLED: 'CANCELLED'
+};
 //# sourceMappingURL=enums.js.map

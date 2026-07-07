@@ -59,6 +59,17 @@ enum ProgressReviewAction {
   REJECTED
 }
 
+enum DeadlineExtensionStatus {
+  DRAFT
+  SENT_TO_MANAGER
+  MANAGER_APPROVED
+  MANAGER_REJECTED
+  SENT_TO_AUDIT
+  AUDIT_APPROVED
+  AUDIT_REJECTED
+  CANCELLED
+}
+
 model User {
   id               String         @id @default(uuid()) @db.Char(36)
   name             String         @db.VarChar(191)
@@ -92,6 +103,9 @@ model User {
   uploadedEvidenceFiles      EvidenceFile[]              @relation("EvidenceUploadedBy")
   observationComments        ObservationComment[]        @relation("ObservationCommentAuthor")
   progressReviewHistoryItems ProgressReviewHistory[]     @relation("ProgressReviewHistoryActor")
+  requestedDeadlineExtensions DeadlineExtensionRequest[] @relation("DeadlineExtensionRequestedBy")
+  managerReviewedDeadlineExtensions DeadlineExtensionRequest[] @relation("DeadlineExtensionManagerReviewer")
+  auditReviewedDeadlineExtensions DeadlineExtensionRequest[] @relation("DeadlineExtensionAuditReviewer")
 
   @@index([deletedAt])
   @@map("users")
@@ -318,6 +332,7 @@ model Area {
   observations           Observation[]               @relation("ObservationArea")
   observationAssignments ObservationAreaAssignment[] @relation("ObservationAssignmentArea")
   remediationPlans       RemediationPlan[]
+  deadlineExtensionRequests DeadlineExtensionRequest[]
 
   @@index([active, deletedAt])
   @@index([deletedAt])
@@ -398,6 +413,7 @@ model Observation {
   progressUpdates    ProgressUpdate[]
   evidenceFiles      EvidenceFile[]
   comments           ObservationComment[]
+  deadlineExtensionRequests DeadlineExtensionRequest[]
 
   @@index([areaId])
   @@index([auditorUserId])
@@ -492,6 +508,7 @@ model Commitment {
   progressUpdates   ProgressUpdate[]
   evidenceFiles     EvidenceFile[]
   comments          ObservationComment[]
+  deadlineExtensionRequests DeadlineExtensionRequest[]
 
   @@index([completedAt])
   @@index([deletedAt])
@@ -503,6 +520,58 @@ model Commitment {
   @@index([sortOrder])
   @@index([status])
   @@map("commitments")
+}
+
+model DeadlineExtensionRequest {
+  id                String                  @id @default(uuid()) @db.Char(36)
+  observationId     String                  @map("observation_id") @db.Char(36)
+  commitmentId      String?                 @map("commitment_id") @db.Char(36)
+  requestedByUserId String                  @map("requested_by_user_id") @db.Char(36)
+  areaId            String                  @map("area_id") @db.Char(36)
+  currentDueDate    DateTime                @map("current_due_date")
+  requestedDueDate  DateTime                @map("requested_due_date")
+  reason            String                  @db.LongText
+  status            DeadlineExtensionStatus @default(DRAFT)
+  managerReviewerId String?                 @map("manager_reviewer_id") @db.Char(36)
+  managerReviewedAt DateTime?               @map("manager_reviewed_at")
+  managerComment    String?                 @map("manager_comment") @db.LongText
+  auditReviewerId   String?                 @map("audit_reviewer_id") @db.Char(36)
+  auditReviewedAt   DateTime?               @map("audit_reviewed_at")
+  auditComment      String?                 @map("audit_comment") @db.LongText
+  finalApprovedAt   DateTime?               @map("final_approved_at")
+  createdAt         DateTime                @default(now()) @map("created_at")
+  updatedAt         DateTime                @updatedAt @map("updated_at")
+  deletedAt         DateTime?               @map("deleted_at")
+  observation       Observation             @relation(fields: [observationId], references: [id], onDelete: Cascade)
+  commitment        Commitment?             @relation(fields: [commitmentId], references: [id], onDelete: SetNull)
+  requestedByUser   User                    @relation("DeadlineExtensionRequestedBy", fields: [requestedByUserId], references: [id], onDelete: Restrict)
+  area              Area                    @relation(fields: [areaId], references: [id], onDelete: Restrict)
+  managerReviewer   User?                   @relation("DeadlineExtensionManagerReviewer", fields: [managerReviewerId], references: [id], onDelete: SetNull)
+  auditReviewer     User?                   @relation("DeadlineExtensionAuditReviewer", fields: [auditReviewerId], references: [id], onDelete: SetNull)
+  attachments       DeadlineExtensionAttachment[]
+
+  @@index([areaId])
+  @@index([auditReviewerId])
+  @@index([commitmentId])
+  @@index([deletedAt])
+  @@index([managerReviewerId])
+  @@index([observationId, commitmentId, status, deletedAt])
+  @@index([requestedByUserId])
+  @@index([status, updatedAt])
+  @@map("deadline_extension_requests")
+}
+
+model DeadlineExtensionAttachment {
+  id                 String                   @id @default(uuid()) @db.Char(36)
+  extensionRequestId String                   @map("extension_request_id") @db.Char(36)
+  evidenceFileId     String                   @map("evidence_file_id") @db.Char(36)
+  createdAt          DateTime                 @default(now()) @map("created_at")
+  extensionRequest   DeadlineExtensionRequest @relation(fields: [extensionRequestId], references: [id], onDelete: Cascade)
+  evidenceFile       EvidenceFile             @relation(fields: [evidenceFileId], references: [id], onDelete: Restrict)
+
+  @@unique([extensionRequestId, evidenceFileId])
+  @@index([evidenceFileId])
+  @@map("deadline_extension_attachments")
 }
 
 model Session {
@@ -611,6 +680,7 @@ model EvidenceFile {
   commitment        Commitment?     @relation(fields: [commitmentId], references: [id], onDelete: SetNull)
   progressUpdate    ProgressUpdate? @relation(fields: [progressUpdateId], references: [id], onDelete: SetNull)
   uploadedByUser    User            @relation("EvidenceUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+  deadlineExtensionAttachments DeadlineExtensionAttachment[]
 
   @@index([commitmentId])
   @@index([deletedAt])

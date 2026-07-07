@@ -59,6 +59,8 @@ export const ModelName = {
     ObservationAreaAssignment: 'ObservationAreaAssignment',
     RemediationPlan: 'RemediationPlan',
     Commitment: 'Commitment',
+    DeadlineExtensionRequest: 'DeadlineExtensionRequest',
+    DeadlineExtensionAttachment: 'DeadlineExtensionAttachment',
     Session: 'Session',
     Account: 'Account',
     Verification: 'Verification',
@@ -319,6 +321,33 @@ export const CommitmentScalarFieldEnum = {
     createdAt: 'createdAt',
     updatedAt: 'updatedAt',
     deletedAt: 'deletedAt'
+};
+export const DeadlineExtensionRequestScalarFieldEnum = {
+    id: 'id',
+    observationId: 'observationId',
+    commitmentId: 'commitmentId',
+    requestedByUserId: 'requestedByUserId',
+    areaId: 'areaId',
+    currentDueDate: 'currentDueDate',
+    requestedDueDate: 'requestedDueDate',
+    reason: 'reason',
+    status: 'status',
+    managerReviewerId: 'managerReviewerId',
+    managerReviewedAt: 'managerReviewedAt',
+    managerComment: 'managerComment',
+    auditReviewerId: 'auditReviewerId',
+    auditReviewedAt: 'auditReviewedAt',
+    auditComment: 'auditComment',
+    finalApprovedAt: 'finalApprovedAt',
+    createdAt: 'createdAt',
+    updatedAt: 'updatedAt',
+    deletedAt: 'deletedAt'
+};
+export const DeadlineExtensionAttachmentScalarFieldEnum = {
+    id: 'id',
+    extensionRequestId: 'extensionRequestId',
+    evidenceFileId: 'evidenceFileId',
+    createdAt: 'createdAt'
 };
 export const SessionScalarFieldEnum = {
     id: 'id',
@@ -582,6 +611,23 @@ export const CommitmentOrderByRelevanceFieldEnum = {
     title: 'title',
     description: 'description',
     responsibleUserId: 'responsibleUserId'
+};
+export const DeadlineExtensionRequestOrderByRelevanceFieldEnum = {
+    id: 'id',
+    observationId: 'observationId',
+    commitmentId: 'commitmentId',
+    requestedByUserId: 'requestedByUserId',
+    areaId: 'areaId',
+    reason: 'reason',
+    managerReviewerId: 'managerReviewerId',
+    managerComment: 'managerComment',
+    auditReviewerId: 'auditReviewerId',
+    auditComment: 'auditComment'
+};
+export const DeadlineExtensionAttachmentOrderByRelevanceFieldEnum = {
+    id: 'id',
+    extensionRequestId: 'extensionRequestId',
+    evidenceFileId: 'evidenceFileId'
 };
 export const SessionOrderByRelevanceFieldEnum = {
     id: 'id',
