@@ -1,6 +1,9 @@
 import nodemailer from "nodemailer";
 import { env } from "../utils/env.js";
-const isSmtpConfigured = Boolean(env.SMTP_HOST && env.SMTP_PORT && env.SMTP_USER && env.SMTP_PASS);
+const isSmtpConfigured = Boolean(env.SMTP_HOST &&
+    env.SMTP_PORT &&
+    env.SMTP_USER &&
+    (env.SMTP_PASSWORD || env.SMTP_PASS));
 const toStringArray = (value) => {
     if (!Array.isArray(value)) {
         return [];
@@ -35,7 +38,7 @@ export class EmailProvider {
     transport = isSmtpConfigured
         ? nodemailer.createTransport({
             auth: {
-                pass: env.SMTP_PASS,
+                pass: env.SMTP_PASSWORD ?? env.SMTP_PASS,
                 user: env.SMTP_USER,
             },
             host: env.SMTP_HOST,

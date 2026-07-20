@@ -1,6 +1,8 @@
 import { createReadStream } from "node:fs";
 import { activityLogService } from "../../services/activity-log-service.js";
 import { auditLogService } from "../../services/audit-log-service.js";
+import { entityActivityService } from "../../services/entity-activity-service.js";
+import { getProgressActivityType } from "../../services/entity-activity-mapping.js";
 import { AppError } from "../../utils/app-error.js";
 import { getRequestLogActorContext } from "../../utils/request-context.js";
 import { sendPaginated, sendSuccess } from "../../utils/response.js";
@@ -61,6 +63,12 @@ const getRequiredAuthorizationSummary = (request) => {
     }
     return request.authorizationSummary;
 };
+const getActivityVisibility = (entityType, values) => {
+    if (entityType !== PROGRESS_ENTITY_TYPES.comment || !values || typeof values !== "object")
+        return "ALL_AUTHORIZED";
+    const visibility = values.visibility;
+    return visibility === "INTERNAL_AUDIT" ? "AUDIT_ONLY" : "ALL_AUTHORIZED";
+};
 const logAction = async ({ action, entityId, entityType, newValues, oldValues, request, summary, }) => {
     const actorContext = getRequestLogActorContext(request);
     await Promise.all([
@@ -79,6 +87,23 @@ const logAction = async ({ action, entityId, entityType, newValues, oldValues, r
             entityType,
             newValues,
             oldValues,
+        }),
+        entityActivityService.recordEntityChange({
+            action,
+            activityType: getProgressActivityType(entityType, action),
+            actorUserId: actorContext.userId,
+            description: summary,
+            entityId,
+            entityType: entityType === "evidence_file"
+                ? "EVIDENCE"
+                : entityType === "observation_comment"
+                    ? "COMMENT"
+                    : "PROGRESS_UPDATE",
+            metadata: { summary },
+            newData: newValues,
+            previousData: oldValues,
+            visibility: getActivityVisibility(entityType, newValues ?? oldValues),
+            title: summary,
         }),
     ]);
 };

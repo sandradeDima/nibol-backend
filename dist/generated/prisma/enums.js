@@ -13,6 +13,33 @@ export const NotificationType = {
     WARNING: 'WARNING',
     ERROR: 'ERROR'
 };
+export const NotificationPriority = {
+    LOW: 'LOW',
+    NORMAL: 'NORMAL',
+    HIGH: 'HIGH',
+    CRITICAL: 'CRITICAL'
+};
+export const NotificationDeliveryChannel = {
+    IN_APP: 'IN_APP',
+    EMAIL: 'EMAIL'
+};
+export const NotificationDeliveryStatus = {
+    PENDING: 'PENDING',
+    SENT: 'SENT',
+    FAILED: 'FAILED',
+    SKIPPED: 'SKIPPED'
+};
+export const ScheduledJobExecutionStatus = {
+    RUNNING: 'RUNNING',
+    SUCCESS: 'SUCCESS',
+    PARTIAL: 'PARTIAL',
+    FAILED: 'FAILED'
+};
+export const ScheduledJobTrigger = {
+    CRON: 'CRON',
+    USER: 'USER',
+    SYSTEM: 'SYSTEM'
+};
 export const RemediationPlanStatus = {
     DRAFT: 'DRAFT',
     SENT_TO_AUDIT: 'SENT_TO_AUDIT',

@@ -1,0 +1,45 @@
+export const DEADLINE_MONITOR_JOB_NAME = "deadline-monitor";
+
+export const DEADLINE_MONITOR_PARAMETER_DEFAULTS = {
+  notify_area_manager: true,
+  notify_audit_team: true,
+  notify_by_email: true,
+  notify_in_app: true,
+  notify_observation_assignee: true,
+  overdue_check_enabled: true,
+  overdue_status_auto_update_enabled: true,
+  pending_extension_reminder_hours: 48,
+  pending_review_reminder_hours: 48,
+  reminder_days_before_due: 7,
+  reminder_repeat_days: 3,
+  returned_progress_reminder_days: 3,
+} as const;
+
+export const AUTOMATIC_NOTIFICATION_TYPES = {
+  commitmentAssigned: "COMMITMENT_ASSIGNED",
+  commitmentCompleted: "COMMITMENT_COMPLETED",
+  commitmentDueSoon: "COMMITMENT_DUE_SOON",
+  commitmentOverdue: "COMMITMENT_OVERDUE",
+  commitmentReturned: "COMMITMENT_RETURNED",
+  extensionApproved: "EXTENSION_APPROVED",
+  extensionRejected: "EXTENSION_REJECTED",
+  extensionSentToAudit: "EXTENSION_SENT_TO_AUDIT",
+  extensionSentToManager: "EXTENSION_SENT_TO_MANAGER",
+  observationAssigned: "OBSERVATION_ASSIGNED",
+  observationClosed: "OBSERVATION_CLOSED",
+  observationDueSoon: "OBSERVATION_DUE_SOON",
+  observationOverdue: "OBSERVATION_OVERDUE",
+  observationStatusChanged: "OBSERVATION_STATUS_CHANGED",
+  pendingExtensionManagerReview: "EXTENSION_PENDING_MANAGER_REVIEW",
+  pendingExtensionAuditReview: "EXTENSION_PENDING_AUDIT_REVIEW",
+  pendingProgressReview: "PROGRESS_PENDING_REVIEW",
+  progressApproved: "PROGRESS_APPROVED",
+  progressCorrectionPending: "PROGRESS_CORRECTION_PENDING",
+  progressRejected: "PROGRESS_REJECTED",
+  progressReturned: "PROGRESS_RETURNED",
+  progressSentToAudit: "PROGRESS_SENT_TO_AUDIT",
+} as const;
+
+export const AUTOMATIC_NOTIFICATION_EVENT_TYPES = Object.values(
+  AUTOMATIC_NOTIFICATION_TYPES,
+);

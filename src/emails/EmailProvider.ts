@@ -22,7 +22,10 @@ type ProviderSendResult = {
 };
 
 const isSmtpConfigured = Boolean(
-  env.SMTP_HOST && env.SMTP_PORT && env.SMTP_USER && env.SMTP_PASS,
+  env.SMTP_HOST &&
+    env.SMTP_PORT &&
+    env.SMTP_USER &&
+    (env.SMTP_PASSWORD || env.SMTP_PASS),
 );
 
 const toStringArray = (value: unknown): string[] => {
@@ -71,7 +74,7 @@ export class EmailProvider {
   private readonly transport = isSmtpConfigured
     ? nodemailer.createTransport({
         auth: {
-          pass: env.SMTP_PASS,
+          pass: env.SMTP_PASSWORD ?? env.SMTP_PASS,
           user: env.SMTP_USER,
         },
         host: env.SMTP_HOST,

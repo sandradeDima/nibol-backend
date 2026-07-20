@@ -7,6 +7,7 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/src/server.js",
+    "test": "tsx --test src/jobs/deadline-monitor/*.test.ts src/services/entity-activity.test.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "format": "prettier --check .",
@@ -15,6 +16,7 @@
     "db:generate": "prisma generate",
     "db:seed": "prisma db seed",
     "db:seed:admin": "node --import tsx prisma/seed-admin.ts",
+    "backfill:entity-activity": "node --import tsx scripts/backfill-entity-activity.ts",
     "db:reset": "prisma migrate reset",
     "create:module": "node --import tsx scripts/create-module.ts"
   },

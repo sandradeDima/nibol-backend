@@ -5,6 +5,8 @@ import type { Request, Response } from "express";
 import { activityLogService } from "../../services/activity-log-service.js";
 import type { AuthorizationSummary } from "../../services/authorization-service.js";
 import { auditLogService } from "../../services/audit-log-service.js";
+import { entityActivityService } from "../../services/entity-activity-service.js";
+import { getProgressActivityType } from "../../services/entity-activity-mapping.js";
 import { AppError } from "../../utils/app-error.js";
 import { getRequestLogActorContext } from "../../utils/request-context.js";
 import { sendPaginated, sendSuccess } from "../../utils/response.js";
@@ -107,6 +109,12 @@ const getRequiredAuthorizationSummary = (request: Request): AuthorizationSummary
   return request.authorizationSummary;
 };
 
+const getActivityVisibility = (entityType: string, values: unknown): "ALL_AUTHORIZED" | "AUDIT_ONLY" => {
+  if (entityType !== PROGRESS_ENTITY_TYPES.comment || !values || typeof values !== "object") return "ALL_AUTHORIZED";
+  const visibility = (values as Record<string, unknown>).visibility;
+  return visibility === "INTERNAL_AUDIT" ? "AUDIT_ONLY" : "ALL_AUTHORIZED";
+};
+
 const logAction = async ({
   action,
   entityId,
@@ -142,6 +150,24 @@ const logAction = async ({
       entityType,
       newValues,
       oldValues,
+    }),
+    entityActivityService.recordEntityChange({
+      action,
+      activityType: getProgressActivityType(entityType, action),
+      actorUserId: actorContext.userId,
+      description: summary,
+      entityId,
+      entityType:
+        entityType === "evidence_file"
+          ? "EVIDENCE"
+          : entityType === "observation_comment"
+            ? "COMMENT"
+            : "PROGRESS_UPDATE",
+      metadata: { summary },
+      newData: newValues,
+      previousData: oldValues,
+      visibility: getActivityVisibility(entityType, newValues ?? oldValues),
+      title: summary,
     }),
   ]);
 };

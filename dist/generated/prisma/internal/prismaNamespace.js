@@ -76,6 +76,9 @@ export const ModelName = {
     Invitation: 'Invitation',
     Setting: 'Setting',
     Notification: 'Notification',
+    NotificationDelivery: 'NotificationDelivery',
+    EntityActivity: 'EntityActivity',
+    ScheduledJobExecution: 'ScheduledJobExecution',
     ModuleRecord: 'ModuleRecord',
     ActivityLog: 'ActivityLog',
     AuditLog: 'AuditLog',
@@ -182,10 +185,68 @@ export const NotificationScalarFieldEnum = {
     title: 'title',
     message: 'message',
     type: 'type',
+    priority: 'priority',
+    eventType: 'eventType',
+    entityType: 'entityType',
+    entityId: 'entityId',
+    targetUrl: 'targetUrl',
+    dedupeKey: 'dedupeKey',
     isRead: 'isRead',
+    readAt: 'readAt',
     createdAt: 'createdAt',
     updatedAt: 'updatedAt',
     deletedAt: 'deletedAt'
+};
+export const NotificationDeliveryScalarFieldEnum = {
+    id: 'id',
+    notificationId: 'notificationId',
+    dedupeKey: 'dedupeKey',
+    channel: 'channel',
+    recipientUserId: 'recipientUserId',
+    recipientEmail: 'recipientEmail',
+    status: 'status',
+    attempts: 'attempts',
+    lastAttemptAt: 'lastAttemptAt',
+    sentAt: 'sentAt',
+    errorMessage: 'errorMessage',
+    createdAt: 'createdAt',
+    updatedAt: 'updatedAt'
+};
+export const EntityActivityScalarFieldEnum = {
+    id: 'id',
+    observationId: 'observationId',
+    entityType: 'entityType',
+    entityId: 'entityId',
+    activityType: 'activityType',
+    action: 'action',
+    actorUserId: 'actorUserId',
+    actorType: 'actorType',
+    title: 'title',
+    description: 'description',
+    previousDataJson: 'previousDataJson',
+    newDataJson: 'newDataJson',
+    metadataJson: 'metadataJson',
+    visibility: 'visibility',
+    targetUrl: 'targetUrl',
+    dedupeKey: 'dedupeKey',
+    relatedAuditLogId: 'relatedAuditLogId',
+    createdAt: 'createdAt'
+};
+export const ScheduledJobExecutionScalarFieldEnum = {
+    id: 'id',
+    jobName: 'jobName',
+    startedAt: 'startedAt',
+    finishedAt: 'finishedAt',
+    status: 'status',
+    processedCount: 'processedCount',
+    notificationsCreated: 'notificationsCreated',
+    emailsSent: 'emailsSent',
+    failuresCount: 'failuresCount',
+    detailsJson: 'detailsJson',
+    errorMessage: 'errorMessage',
+    triggeredBy: 'triggeredBy',
+    triggeredByUserId: 'triggeredByUserId',
+    createdAt: 'createdAt'
 };
 export const ModuleRecordScalarFieldEnum = {
     id: 'id',
@@ -529,7 +590,20 @@ export const NotificationOrderByRelevanceFieldEnum = {
     id: 'id',
     userId: 'userId',
     title: 'title',
-    message: 'message'
+    message: 'message',
+    eventType: 'eventType',
+    entityType: 'entityType',
+    entityId: 'entityId',
+    targetUrl: 'targetUrl',
+    dedupeKey: 'dedupeKey'
+};
+export const NotificationDeliveryOrderByRelevanceFieldEnum = {
+    id: 'id',
+    notificationId: 'notificationId',
+    dedupeKey: 'dedupeKey',
+    recipientUserId: 'recipientUserId',
+    recipientEmail: 'recipientEmail',
+    errorMessage: 'errorMessage'
 };
 export const JsonNullValueFilter = {
     DbNull: DbNull,
@@ -539,6 +613,28 @@ export const JsonNullValueFilter = {
 export const QueryMode = {
     default: 'default',
     insensitive: 'insensitive'
+};
+export const EntityActivityOrderByRelevanceFieldEnum = {
+    id: 'id',
+    observationId: 'observationId',
+    entityType: 'entityType',
+    entityId: 'entityId',
+    activityType: 'activityType',
+    action: 'action',
+    actorUserId: 'actorUserId',
+    actorType: 'actorType',
+    title: 'title',
+    description: 'description',
+    visibility: 'visibility',
+    targetUrl: 'targetUrl',
+    dedupeKey: 'dedupeKey',
+    relatedAuditLogId: 'relatedAuditLogId'
+};
+export const ScheduledJobExecutionOrderByRelevanceFieldEnum = {
+    id: 'id',
+    jobName: 'jobName',
+    errorMessage: 'errorMessage',
+    triggeredByUserId: 'triggeredByUserId'
 };
 export const ModuleRecordOrderByRelevanceFieldEnum = {
     id: 'id',

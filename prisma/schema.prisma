@@ -14,6 +14,38 @@ enum NotificationType {
   ERROR   @map("error")
 }
 
+enum NotificationPriority {
+  LOW
+  NORMAL
+  HIGH
+  CRITICAL
+}
+
+enum NotificationDeliveryChannel {
+  IN_APP
+  EMAIL
+}
+
+enum NotificationDeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+}
+
+enum ScheduledJobExecutionStatus {
+  RUNNING
+  SUCCESS
+  PARTIAL
+  FAILED
+}
+
+enum ScheduledJobTrigger {
+  CRON
+  USER
+  SYSTEM
+}
+
 enum RemediationPlanStatus {
   DRAFT
   SENT_TO_AUDIT
@@ -106,6 +138,9 @@ model User {
   requestedDeadlineExtensions DeadlineExtensionRequest[] @relation("DeadlineExtensionRequestedBy")
   managerReviewedDeadlineExtensions DeadlineExtensionRequest[] @relation("DeadlineExtensionManagerReviewer")
   auditReviewedDeadlineExtensions DeadlineExtensionRequest[] @relation("DeadlineExtensionAuditReviewer")
+  notificationDeliveries NotificationDelivery[] @relation("NotificationDeliveryRecipient")
+  scheduledJobExecutions ScheduledJobExecution[] @relation("ScheduledJobExecutionTriggeredBy")
+  entityActivities EntityActivity[] @relation("EntityActivityActor")
 
   @@index([deletedAt])
   @@map("users")
@@ -207,21 +242,108 @@ model Setting {
 }
 
 model Notification {
-  id        String    @id @default(uuid()) @db.Char(36)
-  userId    String    @map("user_id") @db.Char(36)
-  title     String    @db.VarChar(191)
-  message   String    @db.Text
-  type      NotificationType @default(INFO)
-  isRead    Boolean   @default(false) @map("is_read")
-  createdAt DateTime  @default(now()) @map("created_at")
-  updatedAt DateTime  @updatedAt @map("updated_at")
-  deletedAt DateTime? @map("deleted_at")
-  user      User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  id          String              @id @default(uuid()) @db.Char(36)
+  userId      String              @map("user_id") @db.Char(36)
+  title       String              @db.VarChar(191)
+  message     String              @db.Text
+  type        NotificationType    @default(INFO)
+  priority    NotificationPriority @default(NORMAL)
+  eventType   String?             @map("event_type") @db.VarChar(100)
+  entityType  String?             @map("entity_type") @db.VarChar(100)
+  entityId    String?             @map("entity_id") @db.Char(36)
+  targetUrl   String?             @map("target_url") @db.VarChar(500)
+  dedupeKey   String?             @unique @map("dedupe_key") @db.VarChar(255)
+  isRead      Boolean             @default(false) @map("is_read")
+  readAt      DateTime?           @map("read_at")
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+  deletedAt   DateTime?           @map("deleted_at")
+  user        User                @relation(fields: [userId], references: [id], onDelete: Restrict)
+  deliveries  NotificationDelivery[]
 
   @@index([userId, isRead])
   @@index([userId, createdAt])
+  @@index([eventType, entityType, entityId])
+  @@index([priority, createdAt])
   @@index([deletedAt])
   @@map("notifications")
+}
+
+model NotificationDelivery {
+  id                String                       @id @default(uuid()) @db.Char(36)
+  notificationId    String?                      @map("notification_id") @db.Char(36)
+  dedupeKey         String?                      @unique @map("dedupe_key") @db.VarChar(255)
+  channel           NotificationDeliveryChannel
+  recipientUserId   String?                      @map("recipient_user_id") @db.Char(36)
+  recipientEmail    String?                      @map("recipient_email") @db.VarChar(191)
+  status            NotificationDeliveryStatus   @default(PENDING)
+  attempts          Int                          @default(0)
+  lastAttemptAt     DateTime?                    @map("last_attempt_at")
+  sentAt            DateTime?                    @map("sent_at")
+  errorMessage      String?                      @map("error_message") @db.Text
+  createdAt         DateTime                     @default(now()) @map("created_at")
+  updatedAt         DateTime                     @updatedAt @map("updated_at")
+  notification      Notification?                @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  recipientUser     User?                        @relation("NotificationDeliveryRecipient", fields: [recipientUserId], references: [id], onDelete: SetNull)
+
+  @@index([notificationId, channel])
+  @@index([recipientUserId, channel, status])
+  @@index([status, lastAttemptAt])
+  @@map("notification_deliveries")
+}
+
+model EntityActivity {
+  id                String   @id @default(uuid()) @db.Char(36)
+  observationId     String?  @map("observation_id") @db.Char(36)
+  entityType        String   @map("entity_type") @db.VarChar(64)
+  entityId          String   @map("entity_id") @db.VarChar(191)
+  activityType      String   @map("activity_type") @db.VarChar(100)
+  action            String   @db.VarChar(100)
+  actorUserId       String?  @map("actor_user_id") @db.Char(36)
+  actorType         String   @default("USER") @map("actor_type") @db.VarChar(32)
+  title             String   @db.VarChar(191)
+  description       String?  @db.Text
+  previousDataJson  Json?    @map("previous_data_json")
+  newDataJson       Json?    @map("new_data_json")
+  metadataJson      Json?    @map("metadata_json")
+  visibility        String   @default("ALL_AUTHORIZED") @db.VarChar(32)
+  targetUrl         String?  @map("target_url") @db.VarChar(500)
+  dedupeKey         String?  @unique @map("dedupe_key") @db.VarChar(255)
+  relatedAuditLogId String?  @map("related_audit_log_id") @db.Char(36)
+  createdAt         DateTime @default(now()) @map("created_at")
+  observation       Observation? @relation(fields: [observationId], references: [id], onDelete: Cascade)
+  actorUser         User?       @relation("EntityActivityActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([observationId])
+  @@index([entityType, entityId])
+  @@index([actorUserId])
+  @@index([activityType])
+  @@index([createdAt])
+  @@index([visibility])
+  @@map("entity_activities")
+}
+
+model ScheduledJobExecution {
+  id                    String                        @id @default(uuid()) @db.Char(36)
+  jobName               String                        @map("job_name") @db.VarChar(100)
+  startedAt             DateTime                      @map("started_at")
+  finishedAt            DateTime?                     @map("finished_at")
+  status                ScheduledJobExecutionStatus
+  processedCount        Int                           @default(0) @map("processed_count")
+  notificationsCreated Int                           @default(0) @map("notifications_created")
+  emailsSent            Int                           @default(0) @map("emails_sent")
+  failuresCount         Int                           @default(0) @map("failures_count")
+  detailsJson           Json?                         @map("details_json")
+  errorMessage          String?                       @map("error_message") @db.Text
+  triggeredBy           ScheduledJobTrigger           @map("triggered_by")
+  triggeredByUserId     String?                       @map("triggered_by_user_id") @db.Char(36)
+  createdAt             DateTime                      @default(now()) @map("created_at")
+  triggeredByUser       User?                         @relation("ScheduledJobExecutionTriggeredBy", fields: [triggeredByUserId], references: [id], onDelete: SetNull)
+
+  @@index([jobName, startedAt])
+  @@index([jobName, status])
+  @@index([triggeredByUserId])
+  @@map("scheduled_job_executions")
 }
 
 model ModuleRecord {
@@ -414,6 +536,7 @@ model Observation {
   evidenceFiles      EvidenceFile[]
   comments           ObservationComment[]
   deadlineExtensionRequests DeadlineExtensionRequest[]
+  entityActivities EntityActivity[]
 
   @@index([areaId])
   @@index([auditorUserId])

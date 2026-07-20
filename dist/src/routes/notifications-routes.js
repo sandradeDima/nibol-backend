@@ -39,6 +39,10 @@ notificationsRouter.get("/notifications", requirePermission("notifications.view"
         page: getQueryValue(request.query.page),
         perPage: getQueryValue(request.query.perPage),
         search: getQueryValue(request.query.search),
+        priority: getQueryValue(request.query["filter.priority"]),
+        eventType: getQueryValue(request.query["filter.eventType"]),
+        dateFrom: getQueryValue(request.query["filter.dateFrom"]),
+        dateTo: getQueryValue(request.query["filter.dateTo"]),
         type: getQueryValue(request.query["filter.type"]),
         unreadOnly: getQueryValue(request.query["filter.unreadOnly"]),
     });

@@ -35,6 +35,19 @@ export type GenericNotificationEmailVariables = {
   userName: string;
 };
 
+export type AutomationNotificationEmailVariables = {
+  actionRequired: string;
+  appName?: string;
+  areaName: string;
+  code: string;
+  currentStatus: string;
+  description: string;
+  dueDate: string;
+  targetUrl: string;
+  title: string;
+  userName: string;
+};
+
 export type WelcomeEmailVariables = {
   appName?: string;
   loginLink?: string;
@@ -42,6 +55,7 @@ export type WelcomeEmailVariables = {
 };
 
 export interface EmailTemplateVariablesMap {
+  automationNotification: AutomationNotificationEmailVariables;
   emailVerification: EmailVerificationEmailVariables;
   genericNotification: GenericNotificationEmailVariables;
   invitation: InvitationEmailVariables;

@@ -3,6 +3,8 @@ import type { Request, Response } from "express";
 import { activityLogService } from "../../services/activity-log-service.js";
 import type { AuthorizationSummary } from "../../services/authorization-service.js";
 import { auditLogService } from "../../services/audit-log-service.js";
+import { entityActivityService } from "../../services/entity-activity-service.js";
+import { getRemediationActivityType } from "../../services/entity-activity-mapping.js";
 import { AppError } from "../../utils/app-error.js";
 import { getRequestLogActorContext } from "../../utils/request-context.js";
 import { sendPaginated, sendSuccess } from "../../utils/response.js";
@@ -127,6 +129,18 @@ const logAction = async ({
       entityType,
       newValues,
       oldValues,
+    }),
+    entityActivityService.recordEntityChange({
+      action,
+      activityType: getRemediationActivityType(entityType, action),
+      actorUserId: actorContext.userId,
+      description: summary,
+      entityId,
+      entityType: entityType === "remediation_plan" ? "REMEDIATION_PLAN" : "COMMITMENT",
+      metadata: { summary },
+      newData: newValues,
+      previousData: oldValues,
+      title: summary,
     }),
   ]);
 };
@@ -412,4 +426,3 @@ export const remediationController = {
     sendSuccess(response, plan);
   },
 };
-

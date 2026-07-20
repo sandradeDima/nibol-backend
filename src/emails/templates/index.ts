@@ -1,4 +1,5 @@
 import type { EmailTemplateDefinition, EmailTemplateName } from "../types/email-types.js";
+import { automationNotificationEmailTemplate } from "./automation-notification-email.js";
 import { emailVerificationEmailTemplate } from "./email-verification-email.js";
 import { genericNotificationEmailTemplate } from "./generic-notification-email.js";
 import { invitationEmailTemplate } from "./invitation-email.js";
@@ -6,6 +7,7 @@ import { passwordResetEmailTemplate } from "./password-reset-email.js";
 import { welcomeEmailTemplate } from "./welcome-email.js";
 
 export const emailTemplateDefinitions = {
+  automationNotification: automationNotificationEmailTemplate,
   emailVerification: emailVerificationEmailTemplate,
   genericNotification: genericNotificationEmailTemplate,
   invitation: invitationEmailTemplate,

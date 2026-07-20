@@ -1,5 +1,7 @@
 import { activityLogService } from "../../services/activity-log-service.js";
 import { auditLogService } from "../../services/audit-log-service.js";
+import { entityActivityService } from "../../services/entity-activity-service.js";
+import { getExtensionActivityType } from "../../services/entity-activity-mapping.js";
 import { AppError } from "../../utils/app-error.js";
 import { getRequestLogActorContext } from "../../utils/request-context.js";
 import { sendPaginated, sendSuccess } from "../../utils/response.js";
@@ -72,6 +74,18 @@ const logMutation = async ({ action, request, summary, values, }) => {
             entityType: EXTENSION_REQUEST_ENTITY_TYPES.request,
             newValues: values.current,
             oldValues: values.previous,
+        }),
+        entityActivityService.recordEntityChange({
+            action,
+            activityType: getExtensionActivityType(action, values.current.status),
+            actorUserId: actorContext.userId,
+            description: summary,
+            entityId: values.current.id,
+            entityType: "EXTENSION_REQUEST",
+            metadata: { summary },
+            newData: values.current,
+            previousData: values.previous,
+            title: summary,
         }),
     ]);
 };

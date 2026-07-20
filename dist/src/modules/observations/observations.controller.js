@@ -1,5 +1,6 @@
 import { activityLogService } from "../../services/activity-log-service.js";
 import { auditLogService } from "../../services/audit-log-service.js";
+import { entityActivityService } from "../../services/entity-activity-service.js";
 import { AppError } from "../../utils/app-error.js";
 import { getRequestLogActorContext } from "../../utils/request-context.js";
 import { sendPaginated, sendSuccess } from "../../utils/response.js";
@@ -34,6 +35,37 @@ const getRequiredAuthorizationSummary = (request) => {
     }
     return request.authorizationSummary;
 };
+const getNestedId = (value, key) => {
+    if (!value || typeof value !== "object")
+        return null;
+    const record = value;
+    const direct = record[key];
+    if (typeof direct === "string")
+        return direct;
+    if (direct instanceof Date)
+        return direct.toISOString();
+    if (typeof direct === "number")
+        return String(direct);
+    if (direct && typeof direct === "object" && typeof direct.id === "string") {
+        return direct.id;
+    }
+    return null;
+};
+const getObservationActivityType = (previous, current) => {
+    if (getNestedId(previous, "status") !== getNestedId(current, "status"))
+        return "OBSERVATION_STATUS_CHANGED";
+    if (getNestedId(previous, "riskLevel") !== getNestedId(current, "riskLevel"))
+        return "OBSERVATION_RISK_CHANGED";
+    if (getNestedId(previous, "responsibleUser") !== getNestedId(current, "responsibleUser"))
+        return "OBSERVATION_ASSIGNED";
+    if (getNestedId(previous, "area") !== getNestedId(current, "area"))
+        return "OBSERVATION_ASSIGNED";
+    const previousDueDate = getNestedId(previous, "dueDate");
+    const currentDueDate = getNestedId(current, "dueDate");
+    if (previousDueDate !== currentDueDate)
+        return "OBSERVATION_DUE_DATE_CHANGED";
+    return "OBSERVATION_UPDATED";
+};
 export const observationsController = {
     async create(request, response) {
         const payload = createObservationSchema.parse(request.body);
@@ -58,6 +90,17 @@ export const observationsController = {
                 entityType: OBSERVATIONS_ENTITY_TYPE,
                 newValues: observation,
                 oldValues: null,
+            }),
+            entityActivityService.recordEntityChange({
+                action: "create",
+                activityType: "OBSERVATION_CREATED",
+                actorUserId: actorContext.userId,
+                entityId: observation.id,
+                entityType: "OBSERVATION",
+                newData: observation,
+                observationId: observation.id,
+                targetUrl: `/observaciones/${observation.id}`,
+                title: "Observación creada",
             }),
         ]);
         sendSuccess(response, observation, 201);
@@ -110,6 +153,18 @@ export const observationsController = {
                 newValues: null,
                 oldValues: observation,
             }),
+            entityActivityService.recordEntityChange({
+                action: "delete",
+                activityType: "OBSERVATION_CLOSED",
+                actorUserId: actorContext.userId,
+                description: `La observación ${observation.code} fue retirada del flujo activo.`,
+                entityId: observation.id,
+                entityType: "OBSERVATION",
+                previousData: observation,
+                observationId: observation.id,
+                targetUrl: `/observaciones/${observation.id}`,
+                title: "Observación cerrada",
+            }),
         ]);
         sendSuccess(response, {
             deleted: true,
@@ -142,6 +197,23 @@ export const observationsController = {
                 entityType: OBSERVATIONS_ENTITY_TYPE,
                 newValues: result.current,
                 oldValues: result.previous,
+            }),
+            entityActivityService.recordEntityChange({
+                action: "update",
+                activityType: getObservationActivityType(result.previous, result.current),
+                actorUserId: actorContext.userId,
+                description: result.previous.status.id !== result.current.status.id
+                    ? `El estado cambió de ${result.previous.status.name} a ${result.current.status.name}.`
+                    : `Se actualizó la observación ${result.current.code}.`,
+                entityId: result.current.id,
+                entityType: "OBSERVATION",
+                newData: result.current,
+                observationId: result.current.id,
+                previousData: result.previous,
+                targetUrl: `/observaciones/${result.current.id}`,
+                title: result.previous.status.id !== result.current.status.id
+                    ? "Estado de observación cambiado"
+                    : "Observación actualizada",
             }),
         ]);
         sendSuccess(response, result.current);
