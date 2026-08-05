@@ -10,9 +10,7 @@ import {
 } from "./admin-seed-config.js";
 import {
   ADMIN_ROLE_NAME,
-  buildPermissionName,
-  PERMISSION_ACTIONS,
-  PERMISSION_RESOURCES,
+  ALL_PERMISSION_NAMES,
 } from "../src/permissions/definitions.js";
 import { logger } from "../src/utils/logger.js";
 import { prisma } from "../src/utils/prisma.js";
@@ -23,13 +21,11 @@ const ids = {
   adminRole: uuidv5("role:admin", SEED_NAMESPACE),
 };
 
-const adminPermissions = PERMISSION_RESOURCES.flatMap((resource) =>
-  PERMISSION_ACTIONS.map((action) => ({
-    description: `${resource} ${action} permission.`,
-    id: uuidv5(`permission:${buildPermissionName(resource, action)}`, SEED_NAMESPACE),
-    name: buildPermissionName(resource, action),
-  })),
-);
+const adminPermissions = ALL_PERMISSION_NAMES.map((name) => ({
+  description: `${name} permission.`,
+  id: uuidv5(`permission:${name}`, SEED_NAMESPACE),
+  name,
+}));
 
 const getErrorMessage = (error: unknown): string => {
   if (error instanceof Error) {
@@ -74,7 +70,10 @@ const recreateAdmin = async (): Promise<void> => {
 
       await tx.rolePermission.upsert({
         create: {
-          id: uuidv5(`role-permission:${role.id}:${permission.id}`, SEED_NAMESPACE),
+          id: uuidv5(
+            `role-permission:${role.id}:${permission.id}`,
+            SEED_NAMESPACE,
+          ),
           permissionId: permission.id,
           roleId: role.id,
         },

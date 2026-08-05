@@ -103,7 +103,9 @@ const buildWhere = (query, access) => {
         ...(query.entityType ? { entityType: query.entityType } : {}),
         ...(query.entityId ? { entityId: query.entityId } : {}),
         ...(query.observationId ? { observationId: query.observationId } : {}),
-        ...(query.origin ? { actorType: query.origin } : {}),
+        ...(query.origin
+            ? { actorType: query.origin === "SYSTEM" ? { in: ["SYSTEM", "CRON"] } : "USER" }
+            : {}),
         ...(observationFilters.length ? { AND: observationFilters } : {}),
         ...(query.role
             ? { actorUser: { userRoles: { some: { role: { name: { contains: query.role } } } } } }

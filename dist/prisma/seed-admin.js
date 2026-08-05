@@ -2,18 +2,18 @@ import "dotenv/config";
 import bcrypt from "bcryptjs";
 import { v5 as uuidv5 } from "uuid";
 import { getAdminSeedIds, resolveAdminSeedConfigs, SEED_NAMESPACE, } from "./admin-seed-config.js";
-import { ADMIN_ROLE_NAME, buildPermissionName, PERMISSION_ACTIONS, PERMISSION_RESOURCES, } from "../src/permissions/definitions.js";
+import { ADMIN_ROLE_NAME, ALL_PERMISSION_NAMES, } from "../src/permissions/definitions.js";
 import { logger } from "../src/utils/logger.js";
 import { prisma } from "../src/utils/prisma.js";
 const adminSeeds = resolveAdminSeedConfigs(process.env);
 const ids = {
     adminRole: uuidv5("role:admin", SEED_NAMESPACE),
 };
-const adminPermissions = PERMISSION_RESOURCES.flatMap((resource) => PERMISSION_ACTIONS.map((action) => ({
-    description: `${resource} ${action} permission.`,
-    id: uuidv5(`permission:${buildPermissionName(resource, action)}`, SEED_NAMESPACE),
-    name: buildPermissionName(resource, action),
-})));
+const adminPermissions = ALL_PERMISSION_NAMES.map((name) => ({
+    description: `${name} permission.`,
+    id: uuidv5(`permission:${name}`, SEED_NAMESPACE),
+    name,
+}));
 const getErrorMessage = (error) => {
     if (error instanceof Error) {
         return error.message;

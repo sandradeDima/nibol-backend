@@ -89,4 +89,84 @@ export const DeadlineExtensionStatus = {
     AUDIT_REJECTED: 'AUDIT_REJECTED',
     CANCELLED: 'CANCELLED'
 };
+export const WorkflowDefinitionStatus = {
+    DRAFT: 'DRAFT',
+    PUBLISHED: 'PUBLISHED',
+    INACTIVE: 'INACTIVE',
+    ARCHIVED: 'ARCHIVED'
+};
+export const WorkflowVersionStatus = {
+    DRAFT: 'DRAFT',
+    PUBLISHED: 'PUBLISHED',
+    INACTIVE: 'INACTIVE',
+    ARCHIVED: 'ARCHIVED'
+};
+export const WorkflowNodeType = {
+    START: 'START',
+    STAGE: 'STAGE',
+    APPROVAL: 'APPROVAL',
+    REJECTION: 'REJECTION',
+    CONDITION: 'CONDITION',
+    SLA: 'SLA',
+    ESCALATION: 'ESCALATION',
+    NOTIFICATION: 'NOTIFICATION',
+    END: 'END'
+};
+export const WorkflowInstanceStatus = {
+    PENDING: 'PENDING',
+    ACTIVE: 'ACTIVE',
+    WAITING: 'WAITING',
+    COMPLETED: 'COMPLETED',
+    REJECTED: 'REJECTED',
+    CANCELLED: 'CANCELLED',
+    FAILED: 'FAILED'
+};
+export const WorkflowTaskStatus = {
+    PENDING: 'PENDING',
+    IN_PROGRESS: 'IN_PROGRESS',
+    APPROVED: 'APPROVED',
+    REJECTED: 'REJECTED',
+    OBSERVED: 'OBSERVED',
+    CORRECTION_REQUESTED: 'CORRECTION_REQUESTED',
+    CANCELLED: 'CANCELLED',
+    EXPIRED: 'EXPIRED'
+};
+export const WorkflowTimerStatus = {
+    PENDING: 'PENDING',
+    PROCESSING: 'PROCESSING',
+    COMPLETED: 'COMPLETED',
+    FAILED: 'FAILED',
+    CANCELLED: 'CANCELLED'
+};
+export const WorkflowAssignmentStrategy = {
+    FIXED_USER: 'FIXED_USER',
+    ROLE: 'ROLE',
+    AREA: 'AREA',
+    MANAGEMENT: 'MANAGEMENT',
+    RECORD_OWNER: 'RECORD_OWNER',
+    OBSERVATION_RESPONSIBLE: 'OBSERVATION_RESPONSIBLE',
+    REQUESTER: 'REQUESTER',
+    SUPERVISOR: 'SUPERVISOR',
+    FIELD_REFERENCE: 'FIELD_REFERENCE'
+};
+export const WorkflowConditionLogicOperator = {
+    AND: 'AND',
+    OR: 'OR'
+};
+export const WorkflowConditionOperator = {
+    EQUALS: 'EQUALS',
+    NOT_EQUALS: 'NOT_EQUALS',
+    GREATER_THAN: 'GREATER_THAN',
+    LESS_THAN: 'LESS_THAN',
+    GREATER_THAN_OR_EQUAL: 'GREATER_THAN_OR_EQUAL',
+    LESS_THAN_OR_EQUAL: 'LESS_THAN_OR_EQUAL',
+    CONTAINS: 'CONTAINS',
+    NOT_CONTAINS: 'NOT_CONTAINS',
+    IS_EMPTY: 'IS_EMPTY',
+    IS_NOT_EMPTY: 'IS_NOT_EMPTY',
+    IN: 'IN',
+    NOT_IN: 'NOT_IN',
+    IS_OVERDUE: 'IS_OVERDUE',
+    DUE_WITHIN: 'DUE_WITHIN'
+};
 //# sourceMappingURL=enums.js.map

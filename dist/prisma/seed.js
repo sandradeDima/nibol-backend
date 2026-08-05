@@ -4,9 +4,7 @@ import { createConnection } from "mysql2/promise";
 import { v5 as uuidv5 } from "uuid";
 import { z } from "zod";
 import { getAdminSeedIds, getPrimaryAdminSeed, resolveAdminSeedConfigs, SEED_NAMESPACE, } from "./admin-seed-config.js";
-import { buildPermissionName, PERMISSION_ACTIONS, PERMISSION_RESOURCES, } from "../src/permissions/definitions.js";
-const permissionResources = [...PERMISSION_RESOURCES];
-const permissionActions = [...PERMISSION_ACTIONS];
+import { AUDIT_WORKFLOW_PERMISSION_NAMES, ALL_PERMISSION_NAMES, } from "../src/permissions/definitions.js";
 const seedEnvSchema = z.object({
     DATABASE_URL: z.string().min(1),
     SEED_APP_NAME: z.string().min(1).default("SaaS Base Project"),
@@ -26,6 +24,11 @@ const roles = [
         key: "admin",
         name: "Admin",
         description: "Full access to the application.",
+    },
+    {
+        key: "auditoria",
+        name: "Auditoría",
+        description: "Revisión y seguimiento de workflows y procesos de auditoría.",
     },
     {
         key: "non_admin",
@@ -330,6 +333,46 @@ const systemParameters = [
 const catalogs = [
     {
         active: true,
+        description: "Proceso que puede iniciar una instancia de workflow.",
+        key: "DEADLINE_EXTENSION",
+        name: "Ampliación de plazo",
+        sortOrder: 10,
+        type: "workflow_process_type",
+    },
+    {
+        active: true,
+        description: "Proceso que puede iniciar una instancia de workflow.",
+        key: "OBSERVATION_CLOSURE",
+        name: "Cierre de observación",
+        sortOrder: 20,
+        type: "workflow_process_type",
+    },
+    {
+        active: true,
+        description: "Proceso que puede iniciar una instancia de workflow.",
+        key: "REMEDIATION_PLAN_APPROVAL",
+        name: "Aprobación de plan de remediación",
+        sortOrder: 30,
+        type: "workflow_process_type",
+    },
+    {
+        active: true,
+        description: "Proceso que puede iniciar una instancia de workflow.",
+        key: "EVIDENCE_REVIEW",
+        name: "Revisión de evidencia",
+        sortOrder: 40,
+        type: "workflow_process_type",
+    },
+    {
+        active: true,
+        description: "Proceso configurable para solicitudes especiales.",
+        key: "SPECIAL_REQUEST",
+        name: "Solicitud especial",
+        sortOrder: 50,
+        type: "workflow_process_type",
+    },
+    {
+        active: true,
         description: "Proceso auditado asociado a la observación.",
         key: "GESTION_ACCESOS",
         name: "Gestión de accesos",
@@ -473,11 +516,11 @@ const catalogs = [
         type: "categoria_hallazgo",
     },
 ];
-const permissions = permissionResources.flatMap((resource) => permissionActions.map((action) => ({
-    key: `${resource}:${action}`,
-    name: buildPermissionName(resource, action),
-    description: `${resource} ${action} permission.`,
-})));
+const permissions = ALL_PERMISSION_NAMES.map((name) => ({
+    key: name.replaceAll(".", ":"),
+    name,
+    description: `${name} permission.`,
+}));
 const ids = {
     settings: uuidv5("settings:default", SEED_NAMESPACE),
 };
@@ -743,8 +786,7 @@ const getRoleMap = async (connection) => {
     const [rows] = await connection.execute(`
       SELECT id, name
       FROM roles
-      WHERE name IN (${placeholders(roles.length)})
-    `, roles.map((role) => role.name));
+    `);
     return new Map(rows.map((row) => [row.name, row.id]));
 };
 const getAreaMap = async (connection) => {
@@ -815,7 +857,42 @@ const seedAdminRolePermissions = async (connection, roleMap, permissionMap) => {
         VALUES (?, ?, ?, NOW(3), NOW(3))
         ON DUPLICATE KEY UPDATE
           updated_at = NOW(3)
-      `, [uuidv5(`role-permission:${adminRoleId}:${permissionId}`, SEED_NAMESPACE), adminRoleId, permissionId]);
+      `, [
+            uuidv5(`role-permission:${adminRoleId}:${permissionId}`, SEED_NAMESPACE),
+            adminRoleId,
+            permissionId,
+        ]);
+    }
+};
+const normalizeRoleName = (value) => {
+    return value
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .trim()
+        .toLowerCase();
+};
+const seedAuditWorkflowPermissions = async (connection, roleMap, permissionMap) => {
+    const auditRoles = [...roleMap.entries()].filter(([roleName]) => {
+        const normalizedName = normalizeRoleName(roleName);
+        return (normalizedName.includes("auditoria") || normalizedName.includes("audit"));
+    });
+    for (const [, roleId] of auditRoles) {
+        for (const permissionName of AUDIT_WORKFLOW_PERMISSION_NAMES) {
+            const permissionId = permissionMap.get(permissionName);
+            if (!permissionId) {
+                throw new Error(`Permission ${permissionName} not found after seeding.`);
+            }
+            await connection.execute(`
+          INSERT INTO role_permissions (id, role_id, permission_id, created_at, updated_at)
+          VALUES (?, ?, ?, NOW(3), NOW(3))
+          ON DUPLICATE KEY UPDATE
+            updated_at = NOW(3)
+        `, [
+                uuidv5(`role-permission:${roleId}:${permissionId}`, SEED_NAMESPACE),
+                roleId,
+                permissionId,
+            ]);
+        }
     }
 };
 const seedAdminUser = async (connection, adminSeed) => {
@@ -868,7 +945,11 @@ const seedAdminUserRole = async (connection, adminUserId, roleMap) => {
       VALUES (?, ?, ?, NOW(3), NOW(3))
       ON DUPLICATE KEY UPDATE
         updated_at = NOW(3)
-    `, [uuidv5(`user-role:${adminUserId}:${adminRoleId}`, SEED_NAMESPACE), adminUserId, adminRoleId]);
+    `, [
+        uuidv5(`user-role:${adminUserId}:${adminRoleId}`, SEED_NAMESPACE),
+        adminUserId,
+        adminRoleId,
+    ]);
 };
 const seedAdminAccount = async (connection, adminUserId, adminSeed) => {
     const passwordHash = await bcrypt.hash(adminSeed.password, 12);
@@ -1143,6 +1224,7 @@ const main = async () => {
         const riskLevelMap = await getRiskLevelMap(connection);
         const statusMap = await getObservationStatusMap(connection);
         await seedAdminRolePermissions(connection, roleMap, permissionMap);
+        await seedAuditWorkflowPermissions(connection, roleMap, permissionMap);
         const seededAdmins = [];
         for (const adminSeed of adminSeeds) {
             const adminUserId = await seedAdminUser(connection, adminSeed);
@@ -1153,8 +1235,8 @@ const main = async () => {
                 userId: adminUserId,
             });
         }
-        const primaryAdminUserId = seededAdmins.find((admin) => admin.email === primaryAdminSeed.email)?.userId ??
-            seededAdmins[0]?.userId;
+        const primaryAdminUserId = seededAdmins.find((admin) => admin.email === primaryAdminSeed.email)
+            ?.userId ?? seededAdmins[0]?.userId;
         if (!primaryAdminUserId) {
             throw new Error("No admin users were seeded.");
         }

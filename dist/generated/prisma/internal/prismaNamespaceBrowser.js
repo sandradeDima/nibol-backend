@@ -70,7 +70,17 @@ export const ModelName = {
     ProgressUpdate: 'ProgressUpdate',
     EvidenceFile: 'EvidenceFile',
     ObservationComment: 'ObservationComment',
-    ProgressReviewHistory: 'ProgressReviewHistory'
+    ProgressReviewHistory: 'ProgressReviewHistory',
+    WorkflowDefinition: 'WorkflowDefinition',
+    WorkflowVersion: 'WorkflowVersion',
+    WorkflowNode: 'WorkflowNode',
+    WorkflowTransition: 'WorkflowTransition',
+    WorkflowConditionGroup: 'WorkflowConditionGroup',
+    WorkflowCondition: 'WorkflowCondition',
+    WorkflowInstance: 'WorkflowInstance',
+    WorkflowTask: 'WorkflowTask',
+    WorkflowTransitionLog: 'WorkflowTransitionLog',
+    WorkflowTimer: 'WorkflowTimer'
 };
 /*
  * Enums
@@ -500,12 +510,129 @@ export const ProgressReviewHistoryScalarFieldEnum = {
     comment: 'comment',
     createdAt: 'createdAt'
 };
+export const WorkflowDefinitionScalarFieldEnum = {
+    id: 'id',
+    name: 'name',
+    description: 'description',
+    processType: 'processType',
+    status: 'status',
+    activeVersionId: 'activeVersionId',
+    createdById: 'createdById',
+    createdAt: 'createdAt',
+    updatedAt: 'updatedAt',
+    archivedAt: 'archivedAt'
+};
+export const WorkflowVersionScalarFieldEnum = {
+    id: 'id',
+    workflowDefinitionId: 'workflowDefinitionId',
+    versionNumber: 'versionNumber',
+    status: 'status',
+    changeDescription: 'changeDescription',
+    createdById: 'createdById',
+    publishedById: 'publishedById',
+    createdAt: 'createdAt',
+    publishedAt: 'publishedAt'
+};
+export const WorkflowNodeScalarFieldEnum = {
+    id: 'id',
+    workflowVersionId: 'workflowVersionId',
+    nodeKey: 'nodeKey',
+    name: 'name',
+    description: 'description',
+    type: 'type',
+    assignmentStrategy: 'assignmentStrategy',
+    positionX: 'positionX',
+    positionY: 'positionY',
+    configurationJson: 'configurationJson',
+    createdAt: 'createdAt',
+    updatedAt: 'updatedAt'
+};
+export const WorkflowTransitionScalarFieldEnum = {
+    id: 'id',
+    workflowVersionId: 'workflowVersionId',
+    sourceNodeId: 'sourceNodeId',
+    targetNodeId: 'targetNodeId',
+    label: 'label',
+    priority: 'priority',
+    transitionType: 'transitionType',
+    conditionGroupId: 'conditionGroupId'
+};
+export const WorkflowConditionGroupScalarFieldEnum = {
+    id: 'id',
+    workflowVersionId: 'workflowVersionId',
+    logicOperator: 'logicOperator',
+    description: 'description'
+};
+export const WorkflowConditionScalarFieldEnum = {
+    id: 'id',
+    conditionGroupId: 'conditionGroupId',
+    field: 'field',
+    operator: 'operator',
+    valueJson: 'valueJson',
+    sequence: 'sequence',
+    description: 'description'
+};
+export const WorkflowInstanceScalarFieldEnum = {
+    id: 'id',
+    workflowDefinitionId: 'workflowDefinitionId',
+    workflowVersionId: 'workflowVersionId',
+    processType: 'processType',
+    entityType: 'entityType',
+    entityId: 'entityId',
+    currentNodeId: 'currentNodeId',
+    status: 'status',
+    startedById: 'startedById',
+    startedAt: 'startedAt',
+    completedAt: 'completedAt',
+    contextJson: 'contextJson'
+};
+export const WorkflowTaskScalarFieldEnum = {
+    id: 'id',
+    workflowInstanceId: 'workflowInstanceId',
+    nodeId: 'nodeId',
+    assignedUserId: 'assignedUserId',
+    assignedRoleId: 'assignedRoleId',
+    assignedAreaId: 'assignedAreaId',
+    status: 'status',
+    dueAt: 'dueAt',
+    completedAt: 'completedAt',
+    decision: 'decision',
+    comments: 'comments',
+    createdAt: 'createdAt'
+};
+export const WorkflowTransitionLogScalarFieldEnum = {
+    id: 'id',
+    workflowInstanceId: 'workflowInstanceId',
+    sourceNodeId: 'sourceNodeId',
+    targetNodeId: 'targetNodeId',
+    triggerType: 'triggerType',
+    performedById: 'performedById',
+    decision: 'decision',
+    contextSnapshotJson: 'contextSnapshotJson',
+    createdAt: 'createdAt'
+};
+export const WorkflowTimerScalarFieldEnum = {
+    id: 'id',
+    workflowInstanceId: 'workflowInstanceId',
+    workflowTaskId: 'workflowTaskId',
+    timerType: 'timerType',
+    executeAt: 'executeAt',
+    status: 'status',
+    executedAt: 'executedAt',
+    configurationJson: 'configurationJson',
+    attempts: 'attempts',
+    lastError: 'lastError',
+    createdAt: 'createdAt'
+};
 export const SortOrder = {
     asc: 'asc',
     desc: 'desc'
 };
 export const NullableJsonNullValueInput = {
     DbNull: DbNull,
+    JsonNull: JsonNull
+};
+export const JsonNullValueInput = {
     JsonNull: JsonNull
 };
 export const NullsOrder = {
@@ -786,5 +913,83 @@ export const ProgressReviewHistoryOrderByRelevanceFieldEnum = {
     progressUpdateId: 'progressUpdateId',
     userId: 'userId',
     comment: 'comment'
+};
+export const WorkflowDefinitionOrderByRelevanceFieldEnum = {
+    id: 'id',
+    name: 'name',
+    description: 'description',
+    processType: 'processType',
+    activeVersionId: 'activeVersionId',
+    createdById: 'createdById'
+};
+export const WorkflowVersionOrderByRelevanceFieldEnum = {
+    id: 'id',
+    workflowDefinitionId: 'workflowDefinitionId',
+    changeDescription: 'changeDescription',
+    createdById: 'createdById',
+    publishedById: 'publishedById'
+};
+export const WorkflowNodeOrderByRelevanceFieldEnum = {
+    id: 'id',
+    workflowVersionId: 'workflowVersionId',
+    nodeKey: 'nodeKey',
+    name: 'name',
+    description: 'description'
+};
+export const WorkflowTransitionOrderByRelevanceFieldEnum = {
+    id: 'id',
+    workflowVersionId: 'workflowVersionId',
+    sourceNodeId: 'sourceNodeId',
+    targetNodeId: 'targetNodeId',
+    label: 'label',
+    transitionType: 'transitionType',
+    conditionGroupId: 'conditionGroupId'
+};
+export const WorkflowConditionGroupOrderByRelevanceFieldEnum = {
+    id: 'id',
+    workflowVersionId: 'workflowVersionId',
+    description: 'description'
+};
+export const WorkflowConditionOrderByRelevanceFieldEnum = {
+    id: 'id',
+    conditionGroupId: 'conditionGroupId',
+    field: 'field',
+    description: 'description'
+};
+export const WorkflowInstanceOrderByRelevanceFieldEnum = {
+    id: 'id',
+    workflowDefinitionId: 'workflowDefinitionId',
+    workflowVersionId: 'workflowVersionId',
+    processType: 'processType',
+    entityType: 'entityType',
+    entityId: 'entityId',
+    currentNodeId: 'currentNodeId',
+    startedById: 'startedById'
+};
+export const WorkflowTaskOrderByRelevanceFieldEnum = {
+    id: 'id',
+    workflowInstanceId: 'workflowInstanceId',
+    nodeId: 'nodeId',
+    assignedUserId: 'assignedUserId',
+    assignedRoleId: 'assignedRoleId',
+    assignedAreaId: 'assignedAreaId',
+    decision: 'decision',
+    comments: 'comments'
+};
+export const WorkflowTransitionLogOrderByRelevanceFieldEnum = {
+    id: 'id',
+    workflowInstanceId: 'workflowInstanceId',
+    sourceNodeId: 'sourceNodeId',
+    targetNodeId: 'targetNodeId',
+    triggerType: 'triggerType',
+    performedById: 'performedById',
+    decision: 'decision'
+};
+export const WorkflowTimerOrderByRelevanceFieldEnum = {
+    id: 'id',
+    workflowInstanceId: 'workflowInstanceId',
+    workflowTaskId: 'workflowTaskId',
+    timerType: 'timerType',
+    lastError: 'lastError'
 };
 //# sourceMappingURL=prismaNamespaceBrowser.js.map

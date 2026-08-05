@@ -13,13 +13,9 @@ import {
   type AdminSeedConfig,
 } from "./admin-seed-config.js";
 import {
-  buildPermissionName,
-  PERMISSION_ACTIONS,
-  PERMISSION_RESOURCES,
+  AUDIT_WORKFLOW_PERMISSION_NAMES,
+  ALL_PERMISSION_NAMES,
 } from "../src/permissions/definitions.js";
-
-const permissionResources = [...PERMISSION_RESOURCES];
-const permissionActions = [...PERMISSION_ACTIONS];
 
 const seedEnvSchema = z.object({
   DATABASE_URL: z.string().min(1),
@@ -38,8 +34,8 @@ const adminSeeds = resolveAdminSeedConfigs(process.env);
 const primaryAdminSeed = getPrimaryAdminSeed(adminSeeds);
 
 type SeedRole = {
-  key: "admin" | "non_admin";
-  name: "Admin" | "Non Admin";
+  key: "admin" | "auditoria" | "non_admin";
+  name: "Admin" | "Auditoría" | "Non Admin";
   description: string;
 };
 
@@ -73,7 +69,8 @@ type SeedCatalogType =
   | "proceso_auditado"
   | "tipo_observacion"
   | "fuente_hallazgo"
-  | "categoria_hallazgo";
+  | "categoria_hallazgo"
+  | "workflow_process_type";
 
 type SeedRiskLevel = {
   colorToken: string | null;
@@ -126,6 +123,11 @@ const roles: SeedRole[] = [
     key: "admin",
     name: "Admin",
     description: "Full access to the application.",
+  },
+  {
+    key: "auditoria",
+    name: "Auditoría",
+    description: "Revisión y seguimiento de workflows y procesos de auditoría.",
   },
   {
     key: "non_admin",
@@ -229,13 +231,15 @@ const observationStatuses: SeedObservationStatus[] = [
 const areas: SeedArea[] = [
   {
     code: "TI",
-    description: "Gobierno y operación de plataformas, accesos e infraestructura.",
+    description:
+      "Gobierno y operación de plataformas, accesos e infraestructura.",
     key: "technology",
     name: "Tecnología de la Información",
   },
   {
     code: "OPER",
-    description: "Ejecución operativa, control diario y continuidad del servicio.",
+    description:
+      "Ejecución operativa, control diario y continuidad del servicio.",
     key: "operations",
     name: "Operaciones",
   },
@@ -262,7 +266,8 @@ const areas: SeedArea[] = [
 const systemParameters: SeedSystemParameter[] = [
   {
     active: true,
-    description: "Días de anticipación para enviar recordatorios antes del vencimiento.",
+    description:
+      "Días de anticipación para enviar recordatorios antes del vencimiento.",
     editable: true,
     group: "seguimiento",
     key: "reminder_days_before_due",
@@ -282,7 +287,8 @@ const systemParameters: SeedSystemParameter[] = [
   },
   {
     active: true,
-    description: "Repite los recordatorios de vencimiento cada cierta cantidad de días.",
+    description:
+      "Repite los recordatorios de vencimiento cada cierta cantidad de días.",
     editable: true,
     group: "notificaciones_automaticas",
     key: "reminder_repeat_days",
@@ -342,7 +348,8 @@ const systemParameters: SeedSystemParameter[] = [
   },
   {
     active: true,
-    description: "Horas de antigüedad para recordar avances enviados a Auditoría.",
+    description:
+      "Horas de antigüedad para recordar avances enviados a Auditoría.",
     editable: true,
     group: "notificaciones_automaticas",
     key: "pending_review_reminder_hours",
@@ -352,7 +359,8 @@ const systemParameters: SeedSystemParameter[] = [
   },
   {
     active: true,
-    description: "Horas de antigüedad para recordar aprobaciones de ampliación.",
+    description:
+      "Horas de antigüedad para recordar aprobaciones de ampliación.",
     editable: true,
     group: "notificaciones_automaticas",
     key: "pending_extension_reminder_hours",
@@ -372,7 +380,8 @@ const systemParameters: SeedSystemParameter[] = [
   },
   {
     active: true,
-    description: "Permite actualizar automáticamente el estado a vencido cuando el catálogo lo soporta.",
+    description:
+      "Permite actualizar automáticamente el estado a vencido cuando el catálogo lo soporta.",
     editable: true,
     group: "notificaciones_automaticas",
     key: "overdue_status_auto_update_enabled",
@@ -392,7 +401,8 @@ const systemParameters: SeedSystemParameter[] = [
   },
   {
     active: true,
-    description: "Tamaño máximo permitido para archivos de evidencia en megabytes.",
+    description:
+      "Tamaño máximo permitido para archivos de evidencia en megabytes.",
     editable: true,
     group: "evidencias",
     key: "evidence_max_file_size_mb",
@@ -402,7 +412,8 @@ const systemParameters: SeedSystemParameter[] = [
   },
   {
     active: true,
-    description: "Permite solicitar prórrogas sobre la fecha límite de la observación.",
+    description:
+      "Permite solicitar prórrogas sobre la fecha límite de la observación.",
     editable: true,
     group: "seguimiento",
     key: "allow_deadline_extension",
@@ -412,7 +423,8 @@ const systemParameters: SeedSystemParameter[] = [
   },
   {
     active: true,
-    description: "Requiere aprobación de gerencia para ampliar una fecha límite.",
+    description:
+      "Requiere aprobación de gerencia para ampliar una fecha límite.",
     editable: true,
     group: "seguimiento",
     key: "extension_requires_manager_approval",
@@ -422,7 +434,8 @@ const systemParameters: SeedSystemParameter[] = [
   },
   {
     active: true,
-    description: "Requiere aprobación de auditoría para ampliar una fecha límite.",
+    description:
+      "Requiere aprobación de auditoría para ampliar una fecha límite.",
     editable: true,
     group: "seguimiento",
     key: "extension_requires_audit_approval",
@@ -433,6 +446,46 @@ const systemParameters: SeedSystemParameter[] = [
 ];
 
 const catalogs: SeedCatalog[] = [
+  {
+    active: true,
+    description: "Proceso que puede iniciar una instancia de workflow.",
+    key: "DEADLINE_EXTENSION",
+    name: "Ampliación de plazo",
+    sortOrder: 10,
+    type: "workflow_process_type",
+  },
+  {
+    active: true,
+    description: "Proceso que puede iniciar una instancia de workflow.",
+    key: "OBSERVATION_CLOSURE",
+    name: "Cierre de observación",
+    sortOrder: 20,
+    type: "workflow_process_type",
+  },
+  {
+    active: true,
+    description: "Proceso que puede iniciar una instancia de workflow.",
+    key: "REMEDIATION_PLAN_APPROVAL",
+    name: "Aprobación de plan de remediación",
+    sortOrder: 30,
+    type: "workflow_process_type",
+  },
+  {
+    active: true,
+    description: "Proceso que puede iniciar una instancia de workflow.",
+    key: "EVIDENCE_REVIEW",
+    name: "Revisión de evidencia",
+    sortOrder: 40,
+    type: "workflow_process_type",
+  },
+  {
+    active: true,
+    description: "Proceso configurable para solicitudes especiales.",
+    key: "SPECIAL_REQUEST",
+    name: "Solicitud especial",
+    sortOrder: 50,
+    type: "workflow_process_type",
+  },
   {
     active: true,
     description: "Proceso auditado asociado a la observación.",
@@ -579,13 +632,11 @@ const catalogs: SeedCatalog[] = [
   },
 ];
 
-const permissions: SeedPermission[] = permissionResources.flatMap((resource) =>
-  permissionActions.map((action) => ({
-    key: `${resource}:${action}`,
-    name: buildPermissionName(resource, action),
-    description: `${resource} ${action} permission.`,
-  })),
-);
+const permissions: SeedPermission[] = ALL_PERMISSION_NAMES.map((name) => ({
+  key: name.replaceAll(".", ":"),
+  name,
+  description: `${name} permission.`,
+}));
 
 const ids = {
   settings: uuidv5("settings:default", SEED_NAMESPACE),
@@ -677,7 +728,9 @@ const assertTablesExist = async (
     rows.flatMap((row) => Object.values(row).map((value) => String(value))),
   );
 
-  const missingTables = requiredTables.filter((table) => !availableTables.has(table));
+  const missingTables = requiredTables.filter(
+    (table) => !availableTables.has(table),
+  );
 
   if (missingTables.length > 0) {
     throw new Error(
@@ -951,9 +1004,7 @@ const getRoleMap = async (
     `
       SELECT id, name
       FROM roles
-      WHERE name IN (${placeholders(roles.length)})
     `,
-    roles.map((role) => role.name),
   );
 
   return new Map(rows.map((row) => [row.name, row.id]));
@@ -1005,7 +1056,9 @@ const getRiskLevelMap = async (
       const riskLevelId = idByName.get(riskLevel.name);
 
       if (!riskLevelId) {
-        throw new Error(`Risk level ${riskLevel.name} not found after seeding.`);
+        throw new Error(
+          `Risk level ${riskLevel.name} not found after seeding.`,
+        );
       }
 
       return [riskLevel.key, riskLevelId];
@@ -1032,7 +1085,9 @@ const getObservationStatusMap = async (
       const statusId = idByKey.get(status.key);
 
       if (!statusId) {
-        throw new Error(`Observation status ${status.key} not found after seeding.`);
+        throw new Error(
+          `Observation status ${status.key} not found after seeding.`,
+        );
       }
 
       return [status.key, statusId];
@@ -1080,8 +1135,62 @@ const seedAdminRolePermissions = async (
         ON DUPLICATE KEY UPDATE
           updated_at = NOW(3)
       `,
-      [uuidv5(`role-permission:${adminRoleId}:${permissionId}`, SEED_NAMESPACE), adminRoleId, permissionId],
+      [
+        uuidv5(
+          `role-permission:${adminRoleId}:${permissionId}`,
+          SEED_NAMESPACE,
+        ),
+        adminRoleId,
+        permissionId,
+      ],
     );
+  }
+};
+
+const normalizeRoleName = (value: string): string => {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+};
+
+const seedAuditWorkflowPermissions = async (
+  connection: Awaited<ReturnType<typeof createConnection>>,
+  roleMap: Map<string, string>,
+  permissionMap: Map<string, string>,
+): Promise<void> => {
+  const auditRoles = [...roleMap.entries()].filter(([roleName]) => {
+    const normalizedName = normalizeRoleName(roleName);
+    return (
+      normalizedName.includes("auditoria") || normalizedName.includes("audit")
+    );
+  });
+
+  for (const [, roleId] of auditRoles) {
+    for (const permissionName of AUDIT_WORKFLOW_PERMISSION_NAMES) {
+      const permissionId = permissionMap.get(permissionName);
+
+      if (!permissionId) {
+        throw new Error(
+          `Permission ${permissionName} not found after seeding.`,
+        );
+      }
+
+      await connection.execute(
+        `
+          INSERT INTO role_permissions (id, role_id, permission_id, created_at, updated_at)
+          VALUES (?, ?, ?, NOW(3), NOW(3))
+          ON DUPLICATE KEY UPDATE
+            updated_at = NOW(3)
+        `,
+        [
+          uuidv5(`role-permission:${roleId}:${permissionId}`, SEED_NAMESPACE),
+          roleId,
+          permissionId,
+        ],
+      );
+    }
   }
 };
 
@@ -1158,7 +1267,11 @@ const seedAdminUserRole = async (
       ON DUPLICATE KEY UPDATE
         updated_at = NOW(3)
     `,
-    [uuidv5(`user-role:${adminUserId}:${adminRoleId}`, SEED_NAMESPACE), adminUserId, adminRoleId],
+    [
+      uuidv5(`user-role:${adminUserId}:${adminRoleId}`, SEED_NAMESPACE),
+      adminUserId,
+      adminRoleId,
+    ],
   );
 };
 
@@ -1384,7 +1497,9 @@ const seedSampleObservationsIfEmpty = async (
     const primaryAreaId = options.areaMap.get(sample.primaryAreaKey);
 
     if (!riskLevelId || !statusId || !primaryAreaId) {
-      throw new Error(`Missing catalog references while seeding ${sample.code}.`);
+      throw new Error(
+        `Missing catalog references while seeding ${sample.code}.`,
+      );
     }
 
     await connection.execute(
@@ -1490,6 +1605,7 @@ const main = async (): Promise<void> => {
     const statusMap = await getObservationStatusMap(connection);
 
     await seedAdminRolePermissions(connection, roleMap, permissionMap);
+    await seedAuditWorkflowPermissions(connection, roleMap, permissionMap);
 
     const seededAdmins: Array<{ email: string; userId: string }> = [];
 
@@ -1504,8 +1620,8 @@ const main = async (): Promise<void> => {
     }
 
     const primaryAdminUserId =
-      seededAdmins.find((admin) => admin.email === primaryAdminSeed.email)?.userId ??
-      seededAdmins[0]?.userId;
+      seededAdmins.find((admin) => admin.email === primaryAdminSeed.email)
+        ?.userId ?? seededAdmins[0]?.userId;
 
     if (!primaryAdminUserId) {
       throw new Error("No admin users were seeded.");
