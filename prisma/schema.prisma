@@ -581,21 +581,39 @@ model Area {
 }
 
 model AuditReport {
-  id              String        @id @default(uuid()) @db.Char(36)
-  reportNumber    String        @unique @map("report_number") @db.VarChar(64)
-  title           String        @db.VarChar(191)
-  reportDate      DateTime      @map("report_date") @db.Date
-  createdByUserId String        @map("created_by_user_id") @db.Char(36)
-  createdAt       DateTime      @default(now()) @map("created_at")
-  updatedAt       DateTime      @updatedAt @map("updated_at")
-  deletedAt       DateTime?     @map("deleted_at")
-  createdByUser   User          @relation("AuditReportCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  id              String            @id @default(uuid()) @db.Char(36)
+  reportNumber    String            @unique @map("report_number") @db.VarChar(64)
+  title           String            @db.VarChar(191)
+  reportDate      DateTime          @map("report_date") @db.Date
+  reportClassId   String?           @map("report_class_id") @db.Char(36)
+  createdByUserId String            @map("created_by_user_id") @db.Char(36)
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+  deletedAt       DateTime?         @map("deleted_at")
+  createdByUser   User              @relation("AuditReportCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  reportClass     AuditReportClass? @relation(fields: [reportClassId], references: [id], onDelete: SetNull)
   observations    Observation[]
 
   @@index([createdByUserId])
   @@index([reportDate])
+  @@index([reportClassId])
   @@index([deletedAt])
   @@map("audit_reports")
+}
+
+model AuditReportClass {
+  id          String        @id @default(uuid()) @db.Char(36)
+  name        String        @unique @db.VarChar(191)
+  description String?       @db.VarChar(500)
+  active      Boolean       @default(true)
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  deletedAt   DateTime?     @map("deleted_at")
+  reports     AuditReport[]
+
+  @@index([active, deletedAt])
+  @@index([deletedAt])
+  @@map("audit_report_classes")
 }
 
 model ObservationDictionary {

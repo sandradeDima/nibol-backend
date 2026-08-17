@@ -167,6 +167,7 @@ const toListItem = (record: ObservationRecord): ObservationListItem =>
   formatObservation(record);
 
 const requireEntities = async (input: {
+  actionPlans?: CreateObservationInput["actionPlans"];
   areaAssignments: CreateObservationInput["areaAssignments"];
   auditReportId: string;
   auditorUserId: string;
@@ -181,6 +182,7 @@ const requireEntities = async (input: {
         row.processOwnerUserId,
         row.areaResponsibleUserId,
       ]),
+      ...(input.actionPlans ?? []).map((plan) => plan.responsibleUserId),
     ]),
   );
   const [auditReport, mainObservation, riskLevel, risks, areas, users] =
@@ -212,24 +214,42 @@ const requireEntities = async (input: {
       }),
     ]);
 
-  if (!auditReport) throw new AppError("Audit report not found.", 400);
+  if (!auditReport)
+    throw new AppError(
+      "No se encontró el informe de Auditoría seleccionado.",
+      400,
+    );
   if (!mainObservation)
-    throw new AppError("Main observation is not active.", 400);
-  if (!riskLevel) throw new AppError("Risk level is not active.", 400);
+    throw new AppError(
+      "La observación principal seleccionada no está activa.",
+      400,
+    );
+  if (!riskLevel)
+    throw new AppError("El nivel de riesgo seleccionado no está activo.", 400);
   observationDeadlineService.getDays(riskLevel.key);
   if (risks !== input.riskIds.length)
     throw new AppError(
-      "One or more associated risks are invalid or inactive.",
+      "Uno o más riesgos asociados no existen o están inactivos.",
       400,
     );
   if (areas !== input.areaAssignments.length)
     throw new AppError(
-      "One or more involved areas are invalid or inactive.",
+      "Una o más áreas involucradas no existen o están inactivas.",
       400,
     );
   if (users !== uniqueUserIds.length)
     throw new AppError(
-      "One or more assigned users are invalid or inactive.",
+      "Uno o más usuarios asignados no existen o están inactivos.",
+      400,
+    );
+  const assignedAreaIds = new Set(
+    input.areaAssignments.map((row) => row.areaId),
+  );
+  if (
+    (input.actionPlans ?? []).some((plan) => !assignedAreaIds.has(plan.areaId))
+  )
+    throw new AppError(
+      "Cada plan de acción debe pertenecer a un área involucrada en la observación.",
       400,
     );
 
@@ -300,21 +320,35 @@ export const observationsService = {
     input: CreateObservationInput,
     access: AuthorizationSummary,
   ): Promise<ObservationDetail> {
+    if (
+      input.actionPlans.length > 0 &&
+      !access.isAdmin &&
+      !["action_plans.create", "action_plans.assign"].every((permission) =>
+        access.permissions.includes(permission),
+      )
+    )
+      throw new AppError(
+        "No tiene permisos para crear y asignar planes de acción.",
+        403,
+      );
     const { auditReport, riskLevel } = await requireEntities(input);
     const initialStatus = await prisma.observationStatus.findFirst({
       select: { id: true },
       where: { active: true, deletedAt: null, isInitial: true },
     });
     if (!initialStatus)
-      throw new AppError("Initial observation status is not configured.", 500);
+      throw new AppError(
+        "No está configurado el estado inicial de las observaciones.",
+        500,
+      );
     const deadline = observationDeadlineService.calculate(
       auditReport.reportDate,
       riskLevel.key,
     );
 
     try {
-      const created = await prisma.$transaction(async (tx) =>
-        tx.observation.create({
+      const created = await prisma.$transaction(async (tx) => {
+        const observation = await tx.observation.create({
           data: {
             auditRecommendation: input.auditRecommendation,
             auditReportId: input.auditReportId,
@@ -343,13 +377,35 @@ export const observationsService = {
             },
           },
           select: { id: true },
-        }),
-      );
+        });
+        if (input.actionPlans.length > 0) {
+          const assignments = await tx.observationArea.findMany({
+            select: { areaId: true, id: true },
+            where: { observationId: observation.id },
+          });
+          const assignmentByArea = new Map(
+            assignments.map((assignment) => [assignment.areaId, assignment.id]),
+          );
+          await tx.actionPlan.createMany({
+            data: input.actionPlans.map((plan, index) => ({
+              currentDueDate: plan.dueDate,
+              description: plan.description,
+              observationAreaId: assignmentByArea.get(plan.areaId)!,
+              observationId: observation.id,
+              originalDueDate: plan.dueDate,
+              responsibleUserId: plan.responsibleUserId,
+              sortOrder: index,
+              title: plan.title,
+            })),
+          });
+        }
+        return observation;
+      });
       return formatObservation(await findRecord(created.id, access));
     } catch (error) {
       if ((error as { code?: string }).code === "P2002") {
         throw new AppError(
-          "That observation number already exists in the selected audit report.",
+          "Ese número de observación ya existe en el informe de Auditoría seleccionado.",
           409,
         );
       }

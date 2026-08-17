@@ -35,12 +35,12 @@ const consistentEvaluation = (
   )
     context.addIssue({
       code: "custom",
-      message: "A plan with progress cannot be No iniciado.",
+      message: "Un plan con avance no puede permanecer como No iniciado.",
     });
   if (value.actionPlanStatus === "CONCLUDED" && value.progressPercent !== 100)
     context.addIssue({
       code: "custom",
-      message: "A concluded plan must report 100% progress.",
+      message: "Un plan concluido debe registrar 100% de avance.",
     });
 };
 
@@ -51,11 +51,11 @@ export const updateProgressEvaluationSchema = z
   .object(evaluationFields)
   .partial()
   .refine((value) => Object.keys(value).length > 0, {
-    message: "At least one field is required.",
+    message: "Debe modificar al menos un campo.",
   })
   .superRefine(consistentEvaluation);
 export const reviewProgressEvaluationSchema = z.object({
-  comment: nullableText,
+  comment: nullableText.optional().transform((value) => value ?? null),
 });
 export const uploadEvidenceSchema = z.object({
   context: z.enum(["FINDING", "ACTION_PLAN", "PROGRESS_EVALUATION", "CLOSURE"]),
@@ -75,7 +75,7 @@ export const updateCommentSchema = z
     visibility: z.enum(["INTERNAL_AUDIT", "AREA_VISIBLE", "SYSTEM"]).optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {
-    message: "At least one field is required.",
+    message: "Debe modificar al menos un campo.",
   });
 export const listProgressEvaluationsQuerySchema = z.object({
   actionPlanId: z.uuid().optional(),

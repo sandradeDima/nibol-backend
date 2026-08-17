@@ -5,15 +5,19 @@ import { AppError } from "../../utils/app-error.js";
 import { getRequestLogActorContext } from "../../utils/request-context.js";
 import { sendPaginated, sendSuccess } from "../../utils/response.js";
 import { auditReportsService } from "./audit-reports.service.js";
-import { auditReportIdParamSchema, createAuditReportSchema, listAuditReportsQuerySchema, updateAuditReportSchema, } from "./audit-reports.validators.js";
+import { auditReportClassIdParamSchema, auditReportIdParamSchema, createAuditReportClassSchema, createAuditReportSchema, listAuditReportClassesQuerySchema, listAuditReportsQuerySchema, updateAuditReportClassSchema, updateAuditReportSchema, } from "./audit-reports.validators.js";
 const value = (input) => typeof input === "string" ? input : undefined;
 const id = (request) => auditReportIdParamSchema.parse({ id: value(request.params.id) }).id;
+const classId = (request) => auditReportClassIdParamSchema.parse({ id: value(request.params.id) }).id;
 const userId = (request) => {
     if (!request.authorizationSummary)
         throw new AppError("Authorization required.", 401);
     return request.authorizationSummary.userId;
 };
 export const auditReportsController = {
+    async createClass(request, response) {
+        sendSuccess(response, await auditReportsService.createClass(createAuditReportClassSchema.parse(request.body)), 201);
+    },
     async create(request, response) {
         const record = await auditReportsService.create(createAuditReportSchema.parse(request.body), userId(request));
         const actor = getRequestLogActorContext(request);
@@ -58,6 +62,15 @@ export const auditReportsController = {
         }));
         sendPaginated(response, result.data, result.pagination);
     },
+    async listClasses(request, response) {
+        const result = await auditReportsService.listClasses(listAuditReportClassesQuerySchema.parse({
+            active: value(request.query["filter.active"]),
+            page: value(request.query.page),
+            perPage: value(request.query.perPage),
+            search: value(request.query.search),
+        }));
+        sendPaginated(response, result.data, result.pagination);
+    },
     async remove(request, response) {
         const record = await auditReportsService.remove(id(request));
         const actor = getRequestLogActorContext(request);
@@ -86,6 +99,10 @@ export const auditReportsController = {
                 title: "Informe de Auditoría archivado",
             }),
         ]);
+        sendSuccess(response, { archived: true, id: record.id });
+    },
+    async removeClass(request, response) {
+        const record = await auditReportsService.removeClass(classId(request));
         sendSuccess(response, { archived: true, id: record.id });
     },
     async update(request, response) {
@@ -121,6 +138,9 @@ export const auditReportsController = {
             }),
         ]);
         sendSuccess(response, result.current);
+    },
+    async updateClass(request, response) {
+        sendSuccess(response, await auditReportsService.updateClass(classId(request), updateAuditReportClassSchema.parse(request.body)));
     },
 };
 //# sourceMappingURL=audit-reports.controller.js.map

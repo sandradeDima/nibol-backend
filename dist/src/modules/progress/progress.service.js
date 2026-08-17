@@ -113,7 +113,7 @@ const findEvaluation = async (id, access) => {
         where: { deletedAt: null, id, ...evaluationAccessWhere(access) },
     });
     if (!record)
-        throw new AppError("Progress evaluation not found.", 404);
+        throw new AppError("No se encontró la evaluación de avance.", 404);
     return record;
 };
 const canEdit = (record, access) => access.isAdmin ||
@@ -136,9 +136,9 @@ const prepareFiles = async (files) => {
             .trim();
         const extension = path.extname(originalName).toLowerCase();
         if (!allowedTypes[extension]?.has(file.mimetype))
-            throw new AppError("The evidence file type is not allowed.", 400);
+            throw new AppError("El tipo de archivo de evidencia no está permitido.", 400);
         if (file.size > limit)
-            throw new AppError("The evidence file is too large.", 400);
+            throw new AppError("El archivo de evidencia supera el tamaño permitido.", 400);
         const now = new Date();
         const storedName = `evidence-${Date.now()}-${randomUUID()}${extension}`;
         const relativePath = path.posix.join("evidences", String(now.getUTCFullYear()), String(now.getUTCMonth() + 1).padStart(2, "0"), storedName);
@@ -189,7 +189,7 @@ const requireActionPlan = async (id, access) => {
         },
     });
     if (!actionPlan)
-        throw new AppError("Action plan not found.", 404);
+        throw new AppError("No se encontró el plan de acción.", 404);
     return actionPlan;
 };
 export const progressService = {
@@ -199,7 +199,7 @@ export const progressService = {
             actionPlan.responsibleUserId === access.userId ||
             access.permissions.includes("progress_evaluations.submit");
         if (!allowed)
-            throw new AppError("You cannot submit progress for this action plan.", 403);
+            throw new AppError("No tiene permisos para registrar avances en este plan de acción.", 403);
         const record = await prisma.progressEvaluation.create({
             data: { ...input, actionPlanId, submittedByUserId: access.userId },
             include: evaluationInclude,
@@ -273,7 +273,7 @@ export const progressService = {
     async reviewProgressEvaluation(id, action, input, access) {
         const previous = await findEvaluation(id, access);
         if (previous.reviewStatus !== "SENT_TO_AUDIT")
-            throw new AppError("Only submitted evaluations can be reviewed.", 409);
+            throw new AppError("Solo se pueden revisar evaluaciones enviadas a Auditoría.", 409);
         const requiredPermissions = [
             "progress_evaluations.review",
             ...(action === "approve"
@@ -284,9 +284,9 @@ export const progressService = {
         ];
         if (!access.isAdmin &&
             requiredPermissions.some((permission) => !access.permissions.includes(permission)))
-            throw new AppError("You cannot review progress evaluations.", 403);
+            throw new AppError("No tiene permisos para revisar evaluaciones de avance.", 403);
         if (action !== "approve" && !input.comment)
-            throw new AppError("A review comment is required.", 400);
+            throw new AppError("Debe ingresar un comentario para devolver o rechazar la evaluación.", 400);
         const next = action === "approve"
             ? "APPROVED"
             : action === "return"
@@ -335,10 +335,10 @@ export const progressService = {
     async sendProgressEvaluationToAudit(id, access) {
         const previous = await findEvaluation(id, access);
         if (!canEdit(previous, access))
-            throw new AppError("You cannot submit this evaluation.", 403);
+            throw new AppError("No tiene permisos para enviar esta evaluación.", 403);
         if (previous.actionPlanStatus === "CONCLUDED" &&
             previous.evidenceFiles.length === 0)
-            throw new AppError("A concluding evaluation requires evidence.", 400);
+            throw new AppError("Una evaluación de finalización requiere al menos un archivo de evidencia.", 400);
         if (previous.type === "FINALIZATION") {
             await workflowIntegrationService.startForEntity({
                 access: { ...access, ipAddress: null },

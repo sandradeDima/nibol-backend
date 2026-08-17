@@ -145,7 +145,8 @@ const findEvaluation = async (
     include: evaluationInclude,
     where: { deletedAt: null, id, ...evaluationAccessWhere(access) },
   });
-  if (!record) throw new AppError("Progress evaluation not found.", 404);
+  if (!record)
+    throw new AppError("No se encontró la evaluación de avance.", 404);
   return record;
 };
 
@@ -178,9 +179,15 @@ const prepareFiles = async (files: UploadFile[]) => {
         .trim();
       const extension = path.extname(originalName).toLowerCase();
       if (!allowedTypes[extension]?.has(file.mimetype))
-        throw new AppError("The evidence file type is not allowed.", 400);
+        throw new AppError(
+          "El tipo de archivo de evidencia no está permitido.",
+          400,
+        );
       if (file.size > limit)
-        throw new AppError("The evidence file is too large.", 400);
+        throw new AppError(
+          "El archivo de evidencia supera el tamaño permitido.",
+          400,
+        );
       const now = new Date();
       const storedName = `evidence-${Date.now()}-${randomUUID()}${extension}`;
       const relativePath = path.posix.join(
@@ -240,7 +247,7 @@ const requireActionPlan = async (id: string, access: AuthorizationSummary) => {
       observation: buildObservationAccessWhere(access),
     },
   });
-  if (!actionPlan) throw new AppError("Action plan not found.", 404);
+  if (!actionPlan) throw new AppError("No se encontró el plan de acción.", 404);
   return actionPlan;
 };
 
@@ -257,7 +264,7 @@ export const progressService = {
       access.permissions.includes("progress_evaluations.submit");
     if (!allowed)
       throw new AppError(
-        "You cannot submit progress for this action plan.",
+        "No tiene permisos para registrar avances en este plan de acción.",
         403,
       );
     const record = await prisma.progressEvaluation.create({
@@ -344,7 +351,10 @@ export const progressService = {
   ) {
     const previous = await findEvaluation(id, access);
     if (previous.reviewStatus !== "SENT_TO_AUDIT")
-      throw new AppError("Only submitted evaluations can be reviewed.", 409);
+      throw new AppError(
+        "Solo se pueden revisar evaluaciones enviadas a Auditoría.",
+        409,
+      );
     const requiredPermissions = [
       "progress_evaluations.review",
       ...(action === "approve"
@@ -359,9 +369,15 @@ export const progressService = {
         (permission) => !access.permissions.includes(permission),
       )
     )
-      throw new AppError("You cannot review progress evaluations.", 403);
+      throw new AppError(
+        "No tiene permisos para revisar evaluaciones de avance.",
+        403,
+      );
     if (action !== "approve" && !input.comment)
-      throw new AppError("A review comment is required.", 400);
+      throw new AppError(
+        "Debe ingresar un comentario para devolver o rechazar la evaluación.",
+        400,
+      );
     const next =
       action === "approve"
         ? "APPROVED"
@@ -416,12 +432,15 @@ export const progressService = {
   ) {
     const previous = await findEvaluation(id, access);
     if (!canEdit(previous, access))
-      throw new AppError("You cannot submit this evaluation.", 403);
+      throw new AppError("No tiene permisos para enviar esta evaluación.", 403);
     if (
       previous.actionPlanStatus === "CONCLUDED" &&
       previous.evidenceFiles.length === 0
     )
-      throw new AppError("A concluding evaluation requires evidence.", 400);
+      throw new AppError(
+        "Una evaluación de finalización requiere al menos un archivo de evidencia.",
+        400,
+      );
     if (previous.type === "FINALIZATION") {
       await workflowIntegrationService.startForEntity({
         access: { ...access, ipAddress: null },

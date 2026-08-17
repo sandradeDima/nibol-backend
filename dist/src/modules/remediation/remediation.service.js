@@ -72,7 +72,7 @@ const find = async (id, access) => {
         where: { deletedAt: null, id, ...accessWhere(access) },
     });
     if (!record)
-        throw new AppError("Action plan not found.", 404);
+        throw new AppError("No se encontró el plan de acción.", 404);
     return record;
 };
 const validateAssignment = async (observationId, observationAreaId, responsibleUserId) => {
@@ -87,9 +87,9 @@ const validateAssignment = async (observationId, observationAreaId, responsibleU
         }),
     ]);
     if (!observationArea)
-        throw new AppError("The selected area does not belong to this observation.", 400);
+        throw new AppError("El área seleccionada no pertenece a esta observación.", 400);
     if (!user)
-        throw new AppError("The action plan responsible user is invalid.", 400);
+        throw new AppError("El ejecutor seleccionado no existe o está inactivo.", 400);
 };
 export const recalculateObservationFromActionPlans = async (tx, observationId) => {
     const [observation, actionPlans] = await Promise.all([
@@ -129,7 +129,7 @@ export const remediationService = {
             },
         });
         if (!observation)
-            throw new AppError("Observation not found.", 404);
+            throw new AppError("No se encontró la observación.", 404);
         await validateAssignment(observationId, input.observationAreaId, input.responsibleUserId);
         const created = await prisma.$transaction(async (tx) => {
             const actionPlan = await tx.actionPlan.create({
@@ -153,7 +153,7 @@ export const remediationService = {
     async deleteActionPlan(id, access) {
         const previous = await find(id, access);
         if (previous._count.progressEvaluations > 0)
-            throw new AppError("An action plan with progress history cannot be deleted.", 409);
+            throw new AppError("No se puede eliminar un plan de acción que ya tiene historial de avance.", 409);
         await prisma.$transaction(async (tx) => {
             await tx.actionPlan.update({
                 data: { deletedAt: new Date() },
@@ -280,7 +280,7 @@ export const remediationService = {
     async markActionPlanComplete(id, access) {
         const previous = await find(id, access);
         if (previous.progressPercent < 100)
-            throw new AppError("The action plan must reach 100% approved progress before conclusion.", 409);
+            throw new AppError("El plan de acción debe alcanzar 100% de avance aprobado antes de concluirse.", 409);
         const approvedEvaluation = await prisma.progressEvaluation.findFirst({
             select: { id: true },
             where: {
@@ -291,7 +291,7 @@ export const remediationService = {
             },
         });
         if (!approvedEvaluation)
-            throw new AppError("A 100% progress evaluation must be approved before conclusion.", 409);
+            throw new AppError("Debe existir una evaluación de avance de 100% aprobada antes de concluir el plan.", 409);
         await prisma.$transaction(async (tx) => {
             await tx.actionPlan.update({
                 data: { completedAt: new Date(), status: "CONCLUDED" },
@@ -310,11 +310,11 @@ export const remediationService = {
             input.responsibleUserId !== undefined) &&
             !access.isAdmin &&
             !access.permissions.includes("action_plans.assign")) {
-            throw new AppError("You cannot reassign this action plan.", 403);
+            throw new AppError("No tiene permisos para reasignar este plan de acción.", 403);
         }
         await validateAssignment(previous.observation.id, input.observationAreaId ?? previous.observationAreaId, input.responsibleUserId ?? previous.responsibleUser.id);
         if (input.dueDate && previous._count.progressEvaluations > 0)
-            throw new AppError("Use a deadline extension after progress execution has started.", 409);
+            throw new AppError("Después de iniciar la ejecución debe usar una ampliación de plazo para cambiar la fecha límite.", 409);
         await prisma.actionPlan.update({
             data: {
                 ...(input.description !== undefined

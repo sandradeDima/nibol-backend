@@ -133,6 +133,7 @@ const requireEntities = async (input) => {
             row.processOwnerUserId,
             row.areaResponsibleUserId,
         ]),
+        ...(input.actionPlans ?? []).map((plan) => plan.responsibleUserId),
     ]));
     const [auditReport, mainObservation, riskLevel, risks, areas, users] = await Promise.all([
         prisma.auditReport.findFirst({
@@ -162,18 +163,21 @@ const requireEntities = async (input) => {
         }),
     ]);
     if (!auditReport)
-        throw new AppError("Audit report not found.", 400);
+        throw new AppError("No se encontró el informe de Auditoría seleccionado.", 400);
     if (!mainObservation)
-        throw new AppError("Main observation is not active.", 400);
+        throw new AppError("La observación principal seleccionada no está activa.", 400);
     if (!riskLevel)
-        throw new AppError("Risk level is not active.", 400);
+        throw new AppError("El nivel de riesgo seleccionado no está activo.", 400);
     observationDeadlineService.getDays(riskLevel.key);
     if (risks !== input.riskIds.length)
-        throw new AppError("One or more associated risks are invalid or inactive.", 400);
+        throw new AppError("Uno o más riesgos asociados no existen o están inactivos.", 400);
     if (areas !== input.areaAssignments.length)
-        throw new AppError("One or more involved areas are invalid or inactive.", 400);
+        throw new AppError("Una o más áreas involucradas no existen o están inactivas.", 400);
     if (users !== uniqueUserIds.length)
-        throw new AppError("One or more assigned users are invalid or inactive.", 400);
+        throw new AppError("Uno o más usuarios asignados no existen o están inactivos.", 400);
+    const assignedAreaIds = new Set(input.areaAssignments.map((row) => row.areaId));
+    if ((input.actionPlans ?? []).some((plan) => !assignedAreaIds.has(plan.areaId)))
+        throw new AppError("Cada plan de acción debe pertenecer a un área involucrada en la observación.", 400);
     return { auditReport, riskLevel };
 };
 const findRecord = async (id, access) => {
@@ -231,50 +235,76 @@ const buildBusinessStatusWhere = (status) => {
 };
 export const observationsService = {
     async createObservation(input, access) {
+        if (input.actionPlans.length > 0 &&
+            !access.isAdmin &&
+            !["action_plans.create", "action_plans.assign"].every((permission) => access.permissions.includes(permission)))
+            throw new AppError("No tiene permisos para crear y asignar planes de acción.", 403);
         const { auditReport, riskLevel } = await requireEntities(input);
         const initialStatus = await prisma.observationStatus.findFirst({
             select: { id: true },
             where: { active: true, deletedAt: null, isInitial: true },
         });
         if (!initialStatus)
-            throw new AppError("Initial observation status is not configured.", 500);
+            throw new AppError("No está configurado el estado inicial de las observaciones.", 500);
         const deadline = observationDeadlineService.calculate(auditReport.reportDate, riskLevel.key);
         try {
-            const created = await prisma.$transaction(async (tx) => tx.observation.create({
-                data: {
-                    auditRecommendation: input.auditRecommendation,
-                    auditReportId: input.auditReportId,
-                    auditorUserId: input.auditorUserId,
-                    category: input.category,
-                    currentDueDate: deadline,
-                    currentStage: input.currentStage,
-                    description: input.description,
-                    mainObservationId: input.mainObservationId,
-                    observationNumber: input.observationNumber,
-                    originalDueDate: deadline,
-                    process: input.process,
-                    riskLevelId: input.riskLevelId,
-                    source: input.source,
-                    statusId: initialStatus.id,
-                    title: input.title,
-                    areaAssignments: {
-                        create: input.areaAssignments.map((row) => ({
-                            areaId: row.areaId,
-                            areaResponsibleUserId: row.areaResponsibleUserId,
-                            processOwnerUserId: row.processOwnerUserId,
+            const created = await prisma.$transaction(async (tx) => {
+                const observation = await tx.observation.create({
+                    data: {
+                        auditRecommendation: input.auditRecommendation,
+                        auditReportId: input.auditReportId,
+                        auditorUserId: input.auditorUserId,
+                        category: input.category,
+                        currentDueDate: deadline,
+                        currentStage: input.currentStage,
+                        description: input.description,
+                        mainObservationId: input.mainObservationId,
+                        observationNumber: input.observationNumber,
+                        originalDueDate: deadline,
+                        process: input.process,
+                        riskLevelId: input.riskLevelId,
+                        source: input.source,
+                        statusId: initialStatus.id,
+                        title: input.title,
+                        areaAssignments: {
+                            create: input.areaAssignments.map((row) => ({
+                                areaId: row.areaId,
+                                areaResponsibleUserId: row.areaResponsibleUserId,
+                                processOwnerUserId: row.processOwnerUserId,
+                            })),
+                        },
+                        risks: {
+                            create: input.riskIds.map((riskId) => ({ riskId })),
+                        },
+                    },
+                    select: { id: true },
+                });
+                if (input.actionPlans.length > 0) {
+                    const assignments = await tx.observationArea.findMany({
+                        select: { areaId: true, id: true },
+                        where: { observationId: observation.id },
+                    });
+                    const assignmentByArea = new Map(assignments.map((assignment) => [assignment.areaId, assignment.id]));
+                    await tx.actionPlan.createMany({
+                        data: input.actionPlans.map((plan, index) => ({
+                            currentDueDate: plan.dueDate,
+                            description: plan.description,
+                            observationAreaId: assignmentByArea.get(plan.areaId),
+                            observationId: observation.id,
+                            originalDueDate: plan.dueDate,
+                            responsibleUserId: plan.responsibleUserId,
+                            sortOrder: index,
+                            title: plan.title,
                         })),
-                    },
-                    risks: {
-                        create: input.riskIds.map((riskId) => ({ riskId })),
-                    },
-                },
-                select: { id: true },
-            }));
+                    });
+                }
+                return observation;
+            });
             return formatObservation(await findRecord(created.id, access));
         }
         catch (error) {
             if (error.code === "P2002") {
-                throw new AppError("That observation number already exists in the selected audit report.", 409);
+                throw new AppError("Ese número de observación ya existe en el informe de Auditoría seleccionado.", 409);
             }
             throw error;
         }

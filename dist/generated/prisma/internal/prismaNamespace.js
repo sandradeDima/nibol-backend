@@ -87,6 +87,7 @@ export const ModelName = {
     ObservationStatus: 'ObservationStatus',
     Area: 'Area',
     AuditReport: 'AuditReport',
+    AuditReportClass: 'AuditReportClass',
     ObservationDictionary: 'ObservationDictionary',
     Risk: 'Risk',
     SystemParameter: 'SystemParameter',
@@ -347,7 +348,17 @@ export const AuditReportScalarFieldEnum = {
     reportNumber: 'reportNumber',
     title: 'title',
     reportDate: 'reportDate',
+    reportClassId: 'reportClassId',
     createdByUserId: 'createdByUserId',
+    createdAt: 'createdAt',
+    updatedAt: 'updatedAt',
+    deletedAt: 'deletedAt'
+};
+export const AuditReportClassScalarFieldEnum = {
+    id: 'id',
+    name: 'name',
+    description: 'description',
+    active: 'active',
     createdAt: 'createdAt',
     updatedAt: 'updatedAt',
     deletedAt: 'deletedAt'
@@ -875,7 +886,13 @@ export const AuditReportOrderByRelevanceFieldEnum = {
     id: 'id',
     reportNumber: 'reportNumber',
     title: 'title',
+    reportClassId: 'reportClassId',
     createdByUserId: 'createdByUserId'
+};
+export const AuditReportClassOrderByRelevanceFieldEnum = {
+    id: 'id',
+    name: 'name',
+    description: 'description'
 };
 export const ObservationDictionaryOrderByRelevanceFieldEnum = {
     id: 'id',

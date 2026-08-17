@@ -19,6 +19,9 @@ const include = {
   createdByUser: {
     select: { email: true, id: true, jobTitle: true, name: true },
   },
+  reportClass: {
+    select: { active: true, description: true, id: true, name: true },
+  },
   observations: {
     select: {
       actionPlans: {
@@ -61,6 +64,7 @@ const format = (record: AuditReportRecord) => {
     observationCount: record._count.observations,
     observationsByRiskLevel: byRiskLevel,
     reportDate: record.reportDate.toISOString(),
+    reportClass: record.reportClass,
     reportNumber: record.reportNumber,
     title: record.title,
     updatedAt: record.updatedAt.toISOString(),
@@ -72,22 +76,45 @@ const find = async (id: string): Promise<AuditReportRecord> => {
     include,
     where: { deletedAt: null, id },
   });
-  if (!record) throw new AppError("Audit report not found.", 404);
+  if (!record)
+    throw new AppError("No se encontró el informe de Auditoría.", 404);
   return record;
+};
+
+const validateReportClass = async (reportClassId?: string | null) => {
+  if (!reportClassId) return;
+  const reportClass = await prisma.auditReportClass.findFirst({
+    select: { id: true },
+    where: { active: true, deletedAt: null, id: reportClassId },
+  });
+  if (!reportClass)
+    throw new AppError(
+      "La clase de informe seleccionada no existe o está inactiva.",
+      400,
+    );
 };
 
 export const auditReportsService = {
   async create(input: CreateInput, createdByUserId: string) {
+    await validateReportClass(input.reportClassId);
     try {
       const record = await prisma.auditReport.create({
-        data: { ...input, createdByUserId },
+        data: {
+          createdByUserId,
+          reportDate: input.reportDate,
+          reportNumber: input.reportNumber,
+          title: input.title,
+          ...(input.reportClassId !== undefined
+            ? { reportClassId: input.reportClassId }
+            : {}),
+        },
         include,
       });
       return format(record);
     } catch (error) {
       if ((error as { code?: string }).code === "P2002")
         throw new AppError(
-          "An audit report with that number already exists.",
+          "Ya existe un informe de Auditoría con ese número.",
           409,
         );
       throw error;
@@ -163,7 +190,7 @@ export const auditReportsService = {
     const record = await find(id);
     if (record._count.observations > 0) {
       throw new AppError(
-        "An audit report with observations cannot be archived.",
+        "No se puede archivar un informe de Auditoría que tiene observaciones.",
         409,
       );
     }
@@ -177,6 +204,7 @@ export const auditReportsService = {
 
   async update(id: string, input: UpdateInput) {
     const previous = format(await find(id));
+    await validateReportClass(input.reportClassId);
     try {
       await prisma.$transaction(async (tx) => {
         await tx.auditReport.update({
@@ -186,6 +214,9 @@ export const auditReportsService = {
               : {}),
             ...(input.reportNumber !== undefined
               ? { reportNumber: input.reportNumber }
+              : {}),
+            ...(input.reportClassId !== undefined
+              ? { reportClassId: input.reportClassId }
               : {}),
             ...(input.title !== undefined ? { title: input.title } : {}),
           },
@@ -227,10 +258,121 @@ export const auditReportsService = {
     } catch (error) {
       if ((error as { code?: string }).code === "P2002")
         throw new AppError(
-          "An audit report with that number already exists.",
+          "Ya existe un informe de Auditoría con ese número.",
           409,
         );
       throw error;
     }
+  },
+
+  async createClass(input: {
+    active: boolean;
+    description: string | null;
+    name: string;
+  }) {
+    try {
+      return await prisma.auditReportClass.create({ data: input });
+    } catch (error) {
+      if ((error as { code?: string }).code === "P2002")
+        throw new AppError(
+          "Ya existe una clase de informe con ese nombre.",
+          409,
+        );
+      throw error;
+    }
+  },
+
+  async listClasses(query: {
+    active?: boolean | undefined;
+    page: number;
+    perPage: number;
+    search: string;
+  }) {
+    const where: Prisma.AuditReportClassWhereInput = {
+      deletedAt: null,
+      ...(query.active !== undefined ? { active: query.active } : {}),
+      ...(query.search
+        ? {
+            OR: [
+              { name: { contains: query.search } },
+              { description: { contains: query.search } },
+            ],
+          }
+        : {}),
+    };
+    const [data, total] = await Promise.all([
+      prisma.auditReportClass.findMany({
+        orderBy: { name: "asc" },
+        skip: (query.page - 1) * query.perPage,
+        take: query.perPage,
+        where,
+      }),
+      prisma.auditReportClass.count({ where }),
+    ]);
+    return {
+      data,
+      pagination: {
+        page: query.page,
+        perPage: query.perPage,
+        total,
+        totalPages: Math.ceil(total / query.perPage),
+      },
+    };
+  },
+
+  async updateClass(
+    id: string,
+    input: {
+      active?: boolean | undefined;
+      description?: string | null | undefined;
+      name?: string | undefined;
+    },
+  ) {
+    const existing = await prisma.auditReportClass.findFirst({
+      select: { id: true },
+      where: { deletedAt: null, id },
+    });
+    if (!existing)
+      throw new AppError("No se encontró la clase de informe.", 404);
+    try {
+      return await prisma.auditReportClass.update({
+        data: {
+          ...(input.active !== undefined ? { active: input.active } : {}),
+          ...(input.description !== undefined
+            ? { description: input.description }
+            : {}),
+          ...(input.name !== undefined ? { name: input.name } : {}),
+        },
+        where: { id },
+      });
+    } catch (error) {
+      if ((error as { code?: string }).code === "P2002")
+        throw new AppError(
+          "Ya existe una clase de informe con ese nombre.",
+          409,
+        );
+      throw error;
+    }
+  },
+
+  async removeClass(id: string) {
+    const reportCount = await prisma.auditReport.count({
+      where: { deletedAt: null, reportClassId: id },
+    });
+    if (reportCount > 0)
+      throw new AppError(
+        "No se puede eliminar una clase asignada a informes activos. Desactívela o reasigne los informes.",
+        409,
+      );
+    const existing = await prisma.auditReportClass.findFirst({
+      where: { deletedAt: null, id },
+    });
+    if (!existing)
+      throw new AppError("No se encontró la clase de informe.", 404);
+    await prisma.auditReportClass.update({
+      data: { active: false, deletedAt: new Date() },
+      where: { id },
+    });
+    return existing;
   },
 };

@@ -47,6 +47,36 @@ test("observation input accepts numeric numbering, multiple risks and independen
     assert.equal(result.riskIds.length, 2);
     assert.notEqual(result.areaAssignments[0]?.processOwnerUserId, result.areaAssignments[0]?.areaResponsibleUserId);
 });
+test("observation input accepts optional action plans associated with an area", () => {
+    const withoutPlans = createObservationSchema.parse(observationInput());
+    assert.deepEqual(withoutPlans.actionPlans, []);
+    const withPlans = createObservationSchema.parse({
+        ...observationInput(),
+        actionPlans: [
+            {
+                areaId: ids.area,
+                description: "Documentar el control y capacitar al equipo.",
+                dueDate: "2026-09-30",
+                responsibleUserId: ids.responsible,
+                title: "Implementar control",
+            },
+        ],
+    });
+    assert.equal(withPlans.actionPlans.length, 1);
+    assert.ok(withPlans.actionPlans[0]?.dueDate instanceof Date);
+    assert.equal(createObservationSchema.safeParse({
+        ...observationInput(),
+        actionPlans: [
+            {
+                areaId: ids.report,
+                description: "No corresponde al área.",
+                dueDate: "2026-09-30",
+                responsibleUserId: ids.responsible,
+                title: "Plan inválido",
+            },
+        ],
+    }).success, false);
+});
 test("observation input rejects duplicate risks and duplicate areas", () => {
     const duplicateRisk = observationInput();
     duplicateRisk.riskIds = [ids.risk, ids.risk];

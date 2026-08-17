@@ -100,8 +100,8 @@ export const listRiskLevelsQuerySchema = z.object({
 });
 export const riskLevelMutationSchema = z.object({
     active: z.boolean().default(true),
-    colorToken: nullableTextSchema.refine((value) => value === null || value.length <= 64, {
-        message: "El token de color es demasiado largo.",
+    colorToken: nullableTextSchema.refine((value) => value === null || /^#[0-9A-Fa-f]{6}$/.test(value), {
+        message: "Seleccione un color válido en formato hexadecimal.",
     }),
     defaultDeadlineDays: z.coerce.number().int().min(1).max(3650).nullable(),
     description: nullableTextSchema.refine((value) => value === null || value.length <= 500, {
