@@ -87,9 +87,19 @@ const optionalReferenceSchema = z
 
 const slaInlineSchema = z
   .object({
+    alternateTargetNodeKey: optionalReferenceSchema,
     duration: z.number().int().positive().max(100_000),
+    escalationAreaId: optionalReferenceSchema,
     escalationEnabled: z.boolean(),
+    escalationMode: z
+      .enum(["NOTIFY_ONLY", "ADD_VISIBILITY", "REASSIGN", "ALTERNATE_ROUTE"])
+      .optional(),
+    escalationRoleId: optionalReferenceSchema,
+    escalationStrategy: z
+      .enum(["SUPERVISOR", "AREA_MANAGER", "FIXED_USER", "ROLE"])
+      .optional(),
     escalationThreshold: z.number().int().positive().max(100_000).nullable(),
+    escalationUserId: optionalReferenceSchema,
     reminderEnabled: z.boolean(),
     reminderThreshold: z.number().int().positive().max(100_000).nullable(),
     unit: z.enum(["MINUTES", "HOURS", "BUSINESS_DAYS", "CALENDAR_DAYS"]),
@@ -334,6 +344,7 @@ const escalationNodeConfigurationSchema = configurationBaseSchema
     targetUserId: optionalReferenceSchema,
     areaId: optionalReferenceSchema,
     fallbackUserId: optionalReferenceSchema,
+    alternateTargetNodeKey: optionalReferenceSchema,
     reassignCurrentTask: z.boolean(),
     notifyPreviousAssignee: z.boolean(),
     notifyNewAssignee: z.boolean(),

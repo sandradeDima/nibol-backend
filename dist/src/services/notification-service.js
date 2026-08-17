@@ -88,13 +88,21 @@ export const notificationService = {
         const db = options?.db ?? prisma;
         const notification = await db.notification.create({
             data: {
-                ...(input.dedupeKey !== undefined ? { dedupeKey: input.dedupeKey } : {}),
+                ...(input.dedupeKey !== undefined
+                    ? { dedupeKey: input.dedupeKey }
+                    : {}),
                 ...(input.entityId !== undefined ? { entityId: input.entityId } : {}),
-                ...(input.entityType !== undefined ? { entityType: input.entityType } : {}),
-                ...(input.eventType !== undefined ? { eventType: input.eventType } : {}),
+                ...(input.entityType !== undefined
+                    ? { entityType: input.entityType }
+                    : {}),
+                ...(input.eventType !== undefined
+                    ? { eventType: input.eventType }
+                    : {}),
                 message: input.message.trim(),
                 priority: toPrismaNotificationPriority(input.priority),
-                ...(input.targetUrl !== undefined ? { targetUrl: input.targetUrl } : {}),
+                ...(input.targetUrl !== undefined
+                    ? { targetUrl: input.targetUrl }
+                    : {}),
                 title: input.title.trim(),
                 type: toPrismaNotificationType(input.type),
                 user: { connect: { id: input.userId } },

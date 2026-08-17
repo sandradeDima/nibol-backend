@@ -25,10 +25,16 @@ const configuredLevel: LogLevel =
     : "info";
 
 const shouldLog = (level: LogLevel): boolean => {
-  return logPriority[level] >= (logPriority[configuredLevel] ?? logPriority.info);
+  return (
+    logPriority[level] >= (logPriority[configuredLevel] ?? logPriority.info)
+  );
 };
 
-const formatMessage = (level: LogLevel, message: string, meta?: unknown): string => {
+const formatMessage = (
+  level: LogLevel,
+  message: string,
+  meta?: unknown,
+): string => {
   const metadata = meta === undefined ? "" : ` ${JSON.stringify(meta)}`;
 
   return `[${new Date().toISOString()}] ${level.toUpperCase()} ${message}${metadata}`;

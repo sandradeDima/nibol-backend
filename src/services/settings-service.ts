@@ -5,10 +5,7 @@ import path from "node:path";
 import type { EmailBrandingSettings } from "../emails/types/email-types.js";
 import { ADMIN_ROLE_NAME } from "../permissions/definitions.js";
 import { env } from "../utils/env.js";
-import {
-  buildLogoUrl,
-  logoUploadsDir,
-} from "../utils/uploads.js";
+import { buildLogoUrl, logoUploadsDir } from "../utils/uploads.js";
 import type { UpdateSettingsInput } from "../validators/settings-validator.js";
 import { prisma } from "../utils/prisma.js";
 import { activityLogService } from "./activity-log-service.js";
@@ -106,20 +103,18 @@ const removePreviousLogoIfLocal = async (
 };
 
 const mapSnapshot = (
-  record:
-    | {
-        appName: string;
-        dateFormat: string;
-        id: string;
-        logo: string | null;
-        primaryColor: string | null;
-        senderEmail: string;
-        senderName: string;
-        supportEmail: string;
-        timezone: string;
-        updatedAt: Date;
-      }
-    | null,
+  record: {
+    appName: string;
+    dateFormat: string;
+    id: string;
+    logo: string | null;
+    primaryColor: string | null;
+    senderEmail: string;
+    senderName: string;
+    supportEmail: string;
+    timezone: string;
+    updatedAt: Date;
+  } | null,
 ): SettingsSnapshot => {
   if (!record) {
     return buildDefaultSnapshot();
@@ -139,7 +134,9 @@ const mapSnapshot = (
   };
 };
 
-const listActiveAdminUserIds = async (db: SettingsWriter): Promise<string[]> => {
+const listActiveAdminUserIds = async (
+  db: SettingsWriter,
+): Promise<string[]> => {
   const userRoles = await db.userRole.findMany({
     select: {
       userId: true,
@@ -164,7 +161,9 @@ export class SettingsService {
 
   private pendingLoad: Promise<SettingsSnapshot> | null = null;
 
-  private async loadSettingsSnapshot(db: SettingsWriter = prisma): Promise<SettingsSnapshot> {
+  private async loadSettingsSnapshot(
+    db: SettingsWriter = prisma,
+  ): Promise<SettingsSnapshot> {
     const record = await db.setting.findFirst({
       orderBy: {
         updatedAt: "desc",
@@ -287,7 +286,10 @@ export class SettingsService {
     };
   }
 
-  public async updateSettings(input: UpdateSettingsInput, context?: LogActorContext) {
+  public async updateSettings(
+    input: UpdateSettingsInput,
+    context?: LogActorContext,
+  ) {
     const currentSnapshot = await this.getSnapshot(true);
 
     await prisma.$transaction(async (transaction) => {
@@ -351,10 +353,13 @@ export class SettingsService {
     return this.getSettings();
   }
 
-  public async uploadLogo(file: {
-    buffer: Buffer;
-    originalName: string;
-  }, context?: LogActorContext) {
+  public async uploadLogo(
+    file: {
+      buffer: Buffer;
+      originalName: string;
+    },
+    context?: LogActorContext,
+  ) {
     const currentSnapshot = await this.getSnapshot(true);
     const fileName = buildLogoFileName(file.originalName);
     const destination = path.join(logoUploadsDir, fileName);

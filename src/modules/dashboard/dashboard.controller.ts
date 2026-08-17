@@ -5,7 +5,9 @@ import { AppError } from "../../utils/app-error.js";
 import { sendSuccess } from "../../utils/response.js";
 import { dashboardService } from "./dashboard.service.js";
 
-const getRequiredAuthorizationSummary = (request: Request): AuthorizationSummary => {
+const getRequiredAuthorizationSummary = (
+  request: Request,
+): AuthorizationSummary => {
   if (!request.authorizationSummary) {
     throw new AppError("Authorization required.", 401);
   }

@@ -7,6 +7,7 @@ import { entityActivityService } from "../../services/entity-activity-service.js
 import { AppError } from "../../utils/app-error.js";
 import { getRequestLogActorContext } from "../../utils/request-context.js";
 import { sendPaginated, sendSuccess } from "../../utils/response.js";
+import { observationCompletenessService } from "./observation-completeness.service.js";
 import { OBSERVATIONS_ENTITY_TYPE } from "./observations.constants.js";
 import { OBSERVATIONS_PERMISSIONS } from "./observations.permissions.js";
 import { observationsService } from "./observations.service.js";
@@ -17,89 +18,88 @@ import {
   updateObservationSchema,
 } from "./observations.validators.js";
 
-const getQueryValue = (value: unknown): string | undefined => {
-  if (typeof value === "string") {
-    return value;
-  }
+const queryValue = (value: unknown): string | undefined =>
+  typeof value === "string"
+    ? value
+    : Array.isArray(value) && typeof value[0] === "string"
+      ? value[0]
+      : undefined;
 
-  if (Array.isArray(value)) {
-    const firstValue = value[0];
-
-    if (typeof firstValue === "string") {
-      return firstValue;
-    }
-  }
-
-  return undefined;
-};
-
-const getRequiredObservationId = (
-  value: string | string[] | undefined,
-): string => {
-  const observationId = Array.isArray(value) ? value[0] : value;
-
-  if (!observationId) {
-    throw new AppError("Observation id is required.", 400);
-  }
-
-  return observationIdParamSchema.parse({
-    id: observationId,
-  }).id;
-};
-
-const getRequiredAuthorizationSummary = (request: Request): AuthorizationSummary => {
-  if (!request.authorizationSummary) {
+const requireAccess = (request: Request): AuthorizationSummary => {
+  if (!request.authorizationSummary)
     throw new AppError("Authorization required.", 401);
-  }
-
   return request.authorizationSummary;
 };
 
-const getNestedId = (value: unknown, key: string): string | null => {
-  if (!value || typeof value !== "object") return null;
-  const record = value as Record<string, unknown>;
-  const direct = record[key];
-  if (typeof direct === "string") return direct;
-  if (direct instanceof Date) return direct.toISOString();
-  if (typeof direct === "number") return String(direct);
-  if (direct && typeof direct === "object" && typeof (direct as Record<string, unknown>).id === "string") {
-    return (direct as Record<string, unknown>).id as string;
-  }
-  return null;
-};
-
-const getObservationActivityType = (previous: unknown, current: unknown): string => {
-  if (getNestedId(previous, "status") !== getNestedId(current, "status")) return "OBSERVATION_STATUS_CHANGED";
-  if (getNestedId(previous, "riskLevel") !== getNestedId(current, "riskLevel")) return "OBSERVATION_RISK_CHANGED";
-  if (getNestedId(previous, "responsibleUser") !== getNestedId(current, "responsibleUser")) return "OBSERVATION_ASSIGNED";
-  if (getNestedId(previous, "area") !== getNestedId(current, "area")) return "OBSERVATION_ASSIGNED";
-  const previousDueDate = getNestedId(previous, "dueDate");
-  const currentDueDate = getNestedId(current, "dueDate");
-  if (previousDueDate !== currentDueDate) return "OBSERVATION_DUE_DATE_CHANGED";
-  return "OBSERVATION_UPDATED";
-};
+const observationId = (request: Request): string =>
+  observationIdParamSchema.parse({ id: queryValue(request.params.id) }).id;
 
 export const observationsController = {
+  async close(request: Request, response: Response) {
+    const access = requireAccess(request);
+    const result = await observationsService.closeObservation(
+      observationId(request),
+      access,
+    );
+    const actor = getRequestLogActorContext(request);
+    await Promise.all([
+      activityLogService.logUserAction({
+        ...actor,
+        action: OBSERVATIONS_PERMISSIONS.close,
+        entityId: result.current.id,
+        entityType: OBSERVATIONS_ENTITY_TYPE,
+        metadata: {
+          identifier: result.current.displayCode,
+          summary: `Se concluyó ${result.current.displayCode}.`,
+        },
+      }),
+      auditLogService.create({
+        ...actor,
+        entityId: result.current.id,
+        entityType: OBSERVATIONS_ENTITY_TYPE,
+        newValues: result.current,
+        oldValues: result.previous,
+      }),
+      entityActivityService.recordEntityChange({
+        action: "close",
+        activityType: "OBSERVATION_CLOSED",
+        actorUserId: actor.userId,
+        description:
+          "Auditoría aprobó el cierre después de validar todos los planes de acción.",
+        entityId: result.current.id,
+        entityType: "OBSERVATION",
+        newData: result.current,
+        observationId: result.current.id,
+        previousData: result.previous,
+        targetUrl: `/observaciones/${result.current.id}`,
+        title: "Observación concluida",
+      }),
+    ]);
+    sendSuccess(response, result.current);
+  },
+
   async create(request: Request, response: Response) {
-    const payload = createObservationSchema.parse(request.body);
-    const actorContext = getRequestLogActorContext(request);
-    const access = getRequiredAuthorizationSummary(request);
-    const observation = await observationsService.createObservation(payload, access);
+    const access = requireAccess(request);
+    const observation = await observationsService.createObservation(
+      createObservationSchema.parse(request.body),
+      access,
+    );
+    const actor = getRequestLogActorContext(request);
 
     await Promise.all([
       activityLogService.logUserAction({
-        ...actorContext,
+        ...actor,
         action: OBSERVATIONS_PERMISSIONS.create,
         entityId: observation.id,
         entityType: OBSERVATIONS_ENTITY_TYPE,
         metadata: {
-          code: observation.code,
-          summary: `Observation ${observation.code} was created.`,
+          identifier: observation.displayCode,
+          summary: `Se creó ${observation.displayCode}.`,
           title: observation.title,
         },
       }),
       auditLogService.create({
-        ...actorContext,
+        ...actor,
         entityId: observation.id,
         entityType: OBSERVATIONS_ENTITY_TYPE,
         newValues: observation,
@@ -108,7 +108,8 @@ export const observationsController = {
       entityActivityService.recordEntityChange({
         action: "create",
         activityType: "OBSERVATION_CREATED",
-        actorUserId: actorContext.userId,
+        actorUserId: actor.userId,
+        description: `Se creó ${observation.displayCode}.`,
         entityId: observation.id,
         entityType: "OBSERVATION",
         newData: observation,
@@ -121,119 +122,126 @@ export const observationsController = {
     sendSuccess(response, observation, 201);
   },
 
-  async getById(request: Request, response: Response) {
-    const observation = await observationsService.getObservationById(
-      getRequiredObservationId(request.params.id),
-      getRequiredAuthorizationSummary(request),
+  async getActionItems(request: Request, response: Response) {
+    const access = requireAccess(request);
+    const context = await observationsService.getObservationForActionItems(
+      observationId(request),
+      access,
     );
+    sendSuccess(
+      response,
+      await observationCompletenessService.getForObservation(context, access),
+    );
+  },
 
-    sendSuccess(response, observation);
+  async getById(request: Request, response: Response) {
+    sendSuccess(
+      response,
+      await observationsService.getObservationById(
+        observationId(request),
+        requireAccess(request),
+      ),
+    );
   },
 
   async list(request: Request, response: Response) {
     const query = listObservationsQuerySchema.parse({
-      areaId: getQueryValue(request.query["filter.areaId"]),
-      dueDateFrom: getQueryValue(request.query["filter.dueDateFrom"]),
-      dueDateTo: getQueryValue(request.query["filter.dueDateTo"]),
-      overdue: getQueryValue(request.query["filter.overdue"]),
-      page: getQueryValue(request.query.page),
-      perPage: getQueryValue(request.query.perPage),
-      responsibleUserId: getQueryValue(request.query["filter.responsibleUserId"]),
-      riskLevelId: getQueryValue(request.query["filter.riskLevelId"]),
-      search: getQueryValue(request.query.search),
-      sortBy: getQueryValue(request.query.sortBy),
-      sortDirection: getQueryValue(request.query.sortDirection),
-      statusId: getQueryValue(request.query["filter.statusId"]),
+      actionPlanResponsibleUserId: queryValue(
+        request.query["filter.actionPlanResponsibleUserId"],
+      ),
+      areaId: queryValue(request.query["filter.areaId"]),
+      areaResponsibleUserId: queryValue(
+        request.query["filter.areaResponsibleUserId"],
+      ),
+      auditReportId: queryValue(request.query["filter.auditReportId"]),
+      currentDueDateFrom: queryValue(
+        request.query["filter.currentDueDateFrom"],
+      ),
+      currentDueDateTo: queryValue(request.query["filter.currentDueDateTo"]),
+      mainObservationId: queryValue(request.query["filter.mainObservationId"]),
+      observationStatus: queryValue(request.query["filter.observationStatus"]),
+      overdue: queryValue(request.query["filter.overdue"]),
+      page: queryValue(request.query.page),
+      perPage: queryValue(request.query.perPage),
+      processOwnerUserId: queryValue(
+        request.query["filter.processOwnerUserId"],
+      ),
+      riskId: queryValue(request.query["filter.riskId"]),
+      riskLevelId: queryValue(request.query["filter.riskLevelId"]),
+      search: queryValue(request.query.search),
+      sortBy: queryValue(request.query.sortBy),
+      sortDirection: queryValue(request.query.sortDirection),
     });
-
     const result = await observationsService.listObservations(
       query,
-      getRequiredAuthorizationSummary(request),
+      requireAccess(request),
     );
-
     sendPaginated(response, result.data, result.pagination);
   },
 
   async options(request: Request, response: Response) {
-    const result = await observationsService.getObservationFormOptions(
-      getRequiredAuthorizationSummary(request),
+    sendSuccess(
+      response,
+      await observationsService.getObservationFormOptions(
+        requireAccess(request),
+      ),
     );
-
-    sendSuccess(response, result);
   },
 
   async remove(request: Request, response: Response) {
-    const actorContext = getRequestLogActorContext(request);
-    const observation = await observationsService.deleteObservation(
-      getRequiredObservationId(request.params.id),
+    const actor = getRequestLogActorContext(request);
+    const previous = await observationsService.deleteObservation(
+      observationId(request),
+      requireAccess(request),
     );
-
     await Promise.all([
       activityLogService.logUserAction({
-        ...actorContext,
+        ...actor,
         action: OBSERVATIONS_PERMISSIONS.delete,
-        entityId: observation.id,
+        entityId: previous.id,
         entityType: OBSERVATIONS_ENTITY_TYPE,
         metadata: {
-          code: observation.code,
-          summary: `Observation ${observation.code} was deleted.`,
-          title: observation.title,
+          identifier: previous.displayCode,
+          summary: `Se archivó ${previous.displayCode}.`,
         },
       }),
       auditLogService.create({
-        ...actorContext,
-        entityId: observation.id,
+        ...actor,
+        entityId: previous.id,
         entityType: OBSERVATIONS_ENTITY_TYPE,
         newValues: null,
-        oldValues: observation,
-      }),
-      entityActivityService.recordEntityChange({
-        action: "delete",
-        activityType: "OBSERVATION_CLOSED",
-        actorUserId: actorContext.userId,
-        description: `La observación ${observation.code} fue retirada del flujo activo.`,
-        entityId: observation.id,
-        entityType: "OBSERVATION",
-        previousData: observation,
-        observationId: observation.id,
-        targetUrl: `/observaciones/${observation.id}`,
-        title: "Observación cerrada",
+        oldValues: previous,
       }),
     ]);
-
-    sendSuccess(response, {
-      deleted: true,
-      id: observation.id,
-    });
+    sendSuccess(response, { deleted: true, id: previous.id });
   },
 
   async update(request: Request, response: Response) {
-    const payload = updateObservationSchema.parse(request.body);
-    const actorContext = getRequestLogActorContext(request);
     const result = await observationsService.updateObservation(
-      getRequiredObservationId(request.params.id),
-      payload,
+      observationId(request),
+      updateObservationSchema.parse(request.body),
+      requireAccess(request),
     );
-
+    const actor = getRequestLogActorContext(request);
+    const activityType =
+      result.previous.riskLevel.id !== result.current.riskLevel.id
+        ? "OBSERVATION_RISK_LEVEL_CHANGED"
+        : result.previous.currentDueDate !== result.current.currentDueDate
+          ? "OBSERVATION_DEADLINE_RECALCULATED"
+          : "OBSERVATION_UPDATED";
     await Promise.all([
       activityLogService.logUserAction({
-        ...actorContext,
+        ...actor,
         action: OBSERVATIONS_PERMISSIONS.edit,
         entityId: result.current.id,
         entityType: OBSERVATIONS_ENTITY_TYPE,
         metadata: {
-          code: result.current.code,
-          statusAfter: result.current.status.name,
-          statusBefore: result.previous.status.name,
-          summary:
-            result.previous.status.id !== result.current.status.id
-              ? `Observation ${result.current.code} changed status from ${result.previous.status.name} to ${result.current.status.name}.`
-              : `Observation ${result.current.code} was updated.`,
-          title: result.current.title,
+          identifier: result.current.displayCode,
+          summary: `Se actualizó ${result.current.displayCode}.`,
         },
       }),
       auditLogService.create({
-        ...actorContext,
+        ...actor,
         entityId: result.current.id,
         entityType: OBSERVATIONS_ENTITY_TYPE,
         newValues: result.current,
@@ -241,25 +249,17 @@ export const observationsController = {
       }),
       entityActivityService.recordEntityChange({
         action: "update",
-        activityType: getObservationActivityType(result.previous, result.current),
-        actorUserId: actorContext.userId,
-        description:
-          result.previous.status.id !== result.current.status.id
-            ? `El estado cambió de ${result.previous.status.name} a ${result.current.status.name}.`
-            : `Se actualizó la observación ${result.current.code}.`,
+        activityType,
+        actorUserId: actor.userId,
         entityId: result.current.id,
         entityType: "OBSERVATION",
         newData: result.current,
         observationId: result.current.id,
         previousData: result.previous,
         targetUrl: `/observaciones/${result.current.id}`,
-        title:
-          result.previous.status.id !== result.current.status.id
-            ? "Estado de observación cambiado"
-            : "Observación actualizada",
+        title: "Observación actualizada",
       }),
     ]);
-
     sendSuccess(response, result.current);
   },
 };

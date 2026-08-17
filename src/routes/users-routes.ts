@@ -74,7 +74,9 @@ usersRouter.get(
   "/users/profile",
   requireAuth(),
   asyncHandler(async (request, response) => {
-    const profile = await usersService.getProfile(getAuthenticatedUserId(request));
+    const profile = await usersService.getProfile(
+      getAuthenticatedUserId(request),
+    );
     sendSuccess(response, profile);
   }),
 );
@@ -129,11 +131,14 @@ usersRouter.post(
       size: file.size,
     });
 
-    const avatar = await usersService.uploadAvatar(getAuthenticatedUserId(request), {
-      buffer: file.buffer,
-      mimetype: metadata.mimetype,
-      originalName: metadata.originalName,
-    });
+    const avatar = await usersService.uploadAvatar(
+      getAuthenticatedUserId(request),
+      {
+        buffer: file.buffer,
+        mimetype: metadata.mimetype,
+        originalName: metadata.originalName,
+      },
+    );
 
     sendSuccess(response, avatar);
   }),
@@ -178,7 +183,9 @@ usersRouter.get(
   "/users/:userId",
   requirePermission("users.view"),
   asyncHandler(async (request, response) => {
-    const user = await usersService.getUserById(getRequiredUserId(request.params.userId));
+    const user = await usersService.getUserById(
+      getRequiredUserId(request.params.userId),
+    );
     sendSuccess(response, user);
   }),
 );

@@ -61,7 +61,16 @@ test("la clave de deduplicación es estable y cambia por ciclo o canal", () => {
     eventType: "OBSERVATION_DUE_SOON",
     recipientUserId: "user-1",
   };
-  assert.equal(buildNotificationDedupeKey({ ...base, channel: "IN_APP" }), buildNotificationDedupeKey({ ...base, channel: "IN_APP" }));
-  assert.notEqual(buildNotificationDedupeKey({ ...base, channel: "IN_APP" }), buildNotificationDedupeKey({ ...base, channel: "EMAIL" }));
-  assert.notEqual(buildNotificationDedupeKey({ ...base, channel: "IN_APP", cycle: "due-1" }), buildNotificationDedupeKey({ ...base, channel: "IN_APP" }));
+  assert.equal(
+    buildNotificationDedupeKey({ ...base, channel: "IN_APP" }),
+    buildNotificationDedupeKey({ ...base, channel: "IN_APP" }),
+  );
+  assert.notEqual(
+    buildNotificationDedupeKey({ ...base, channel: "IN_APP" }),
+    buildNotificationDedupeKey({ ...base, channel: "EMAIL" }),
+  );
+  assert.notEqual(
+    buildNotificationDedupeKey({ ...base, channel: "IN_APP", cycle: "due-1" }),
+    buildNotificationDedupeKey({ ...base, channel: "IN_APP" }),
+  );
 });

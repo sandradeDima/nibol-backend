@@ -1,4 +1,7 @@
-import type { CatalogType, SystemParameterValueType } from "./configuration.validators.js";
+import type {
+  CatalogType,
+  SystemParameterValueType,
+} from "./configuration.validators.js";
 
 export type ConfigurationUserSummary = {
   email: string;
@@ -78,7 +81,12 @@ export type ConfigurationBootstrap = {
   riskLevels: Array<
     Pick<
       RiskLevelRecord,
-      "colorToken" | "defaultDeadlineDays" | "id" | "key" | "name" | "severityOrder"
+      | "colorToken"
+      | "defaultDeadlineDays"
+      | "id"
+      | "key"
+      | "name"
+      | "severityOrder"
     >
   >;
   statuses: Array<

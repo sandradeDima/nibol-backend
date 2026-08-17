@@ -56,7 +56,9 @@ const writeFile = async (filePath: string, content: string): Promise<void> => {
   await fs.writeFile(filePath, content, "utf8");
 };
 
-const readModuleDirectories = async (modulesRoot: string): Promise<string[]> => {
+const readModuleDirectories = async (
+  modulesRoot: string,
+): Promise<string[]> => {
   const entries = await fs.readdir(modulesRoot, {
     withFileTypes: true,
   });
@@ -81,7 +83,11 @@ const collectGeneratedModules = async (
   const modules: GeneratedModuleDescriptor[] = [];
 
   for (const directory of directories) {
-    const routesFilePath = path.join(backendModulesRoot, directory, `${directory}.routes.ts`);
+    const routesFilePath = path.join(
+      backendModulesRoot,
+      directory,
+      `${directory}.routes.ts`,
+    );
     const permissionsFilePath = path.join(
       backendModulesRoot,
       directory,
@@ -89,7 +95,10 @@ const collectGeneratedModules = async (
     );
 
     try {
-      await Promise.all([fs.access(routesFilePath), fs.access(permissionsFilePath)]);
+      await Promise.all([
+        fs.access(routesFilePath),
+        fs.access(permissionsFilePath),
+      ]);
       modules.push({
         label: toDisplayLabel(directory),
         permissionResource: directory.replace(/-/g, "_"),
@@ -103,7 +112,9 @@ const collectGeneratedModules = async (
   return modules;
 };
 
-const renderBackendRegistry = (modules: GeneratedModuleDescriptor[]): string => {
+const renderBackendRegistry = (
+  modules: GeneratedModuleDescriptor[],
+): string => {
   const importLines = modules.map(
     (module) =>
       `import { ${module.routeSegment.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase())}Router } from "./${module.routeSegment}/${module.routeSegment}.routes.js";`,
@@ -123,7 +134,9 @@ ${routerNames.map((routerName) => `  ${routerName},`).join("\n")}
 `;
 };
 
-const renderFrontendRegistry = (modules: GeneratedModuleDescriptor[]): string => {
+const renderFrontendRegistry = (
+  modules: GeneratedModuleDescriptor[],
+): string => {
   return `import { Package } from "lucide-react";
 
 export const generatedPermissionResources = [
@@ -174,7 +187,12 @@ const createBackendFiles = async (
   backendRoot: string,
   names: ModuleNames,
 ): Promise<void> => {
-  const moduleDirectory = path.join(backendRoot, "src", "modules", names.routeSegment);
+  const moduleDirectory = path.join(
+    backendRoot,
+    "src",
+    "modules",
+    names.routeSegment,
+  );
 
   await ensureDirectory(moduleDirectory);
 
@@ -218,11 +236,22 @@ const createFrontendFiles = async (
   frontendRoot: string,
   names: ModuleNames,
 ): Promise<void> => {
-  const moduleDirectory = path.join(frontendRoot, "src", "modules", names.routeSegment);
+  const moduleDirectory = path.join(
+    frontendRoot,
+    "src",
+    "modules",
+    names.routeSegment,
+  );
   const pagesDirectory = path.join(moduleDirectory, "pages");
   const componentsDirectory = path.join(moduleDirectory, "components");
   const hooksDirectory = path.join(moduleDirectory, "hooks");
-  const appDirectory = path.join(frontendRoot, "src", "app", "(app)", names.routeSegment);
+  const appDirectory = path.join(
+    frontendRoot,
+    "src",
+    "app",
+    "(app)",
+    names.routeSegment,
+  );
   const appDetailDirectory = path.join(appDirectory, `[${names.pageParam}]`);
   const appEditDirectory = path.join(appDetailDirectory, "edit");
   const appCreateDirectory = path.join(appDirectory, "new");
@@ -239,8 +268,14 @@ const createFrontendFiles = async (
   ]);
 
   await Promise.all([
-    writeFile(path.join(moduleDirectory, "constants.ts"), renderFrontendConstantsTemplate(names)),
-    writeFile(path.join(moduleDirectory, "types.ts"), renderFrontendTypesTemplate(names)),
+    writeFile(
+      path.join(moduleDirectory, "constants.ts"),
+      renderFrontendConstantsTemplate(names),
+    ),
+    writeFile(
+      path.join(moduleDirectory, "types.ts"),
+      renderFrontendTypesTemplate(names),
+    ),
     writeFile(
       path.join(hooksDirectory, `use${names.entityLabelPlural}.ts`),
       renderFrontendHookTemplate(names),
@@ -253,11 +288,26 @@ const createFrontendFiles = async (
       path.join(componentsDirectory, `${names.entityLabelSingular}Table.tsx`),
       renderFrontendTableTemplate(names),
     ),
-    writeFile(path.join(pagesDirectory, "list.tsx"), renderFrontendListPageTemplate(names)),
-    writeFile(path.join(pagesDirectory, "create.tsx"), renderFrontendCreatePageTemplate(names)),
-    writeFile(path.join(pagesDirectory, "edit.tsx"), renderFrontendEditPageTemplate(names)),
-    writeFile(path.join(pagesDirectory, "view.tsx"), renderFrontendViewPageTemplate(names)),
-    writeFile(path.join(appDirectory, "page.tsx"), renderFrontendAppListPageTemplate(names)),
+    writeFile(
+      path.join(pagesDirectory, "list.tsx"),
+      renderFrontendListPageTemplate(names),
+    ),
+    writeFile(
+      path.join(pagesDirectory, "create.tsx"),
+      renderFrontendCreatePageTemplate(names),
+    ),
+    writeFile(
+      path.join(pagesDirectory, "edit.tsx"),
+      renderFrontendEditPageTemplate(names),
+    ),
+    writeFile(
+      path.join(pagesDirectory, "view.tsx"),
+      renderFrontendViewPageTemplate(names),
+    ),
+    writeFile(
+      path.join(appDirectory, "page.tsx"),
+      renderFrontendAppListPageTemplate(names),
+    ),
     writeFile(
       path.join(appCreateDirectory, "page.tsx"),
       renderFrontendAppCreatePageTemplate(names),
@@ -279,9 +329,22 @@ export const generateModuleScaffold = async ({
 }: GenerateModuleScaffoldOptions) => {
   const frontendRoot = path.resolve(backendRoot, "..", "frontend");
   const names = buildModuleNames(moduleName);
-  const backendModuleDir = path.join(backendRoot, "src", "modules", names.routeSegment);
-  const frontendModuleDir = path.join(frontendRoot, "src", "modules", names.routeSegment);
-  const backendEntryFile = path.join(backendModuleDir, `${names.fileStem}.routes.ts`);
+  const backendModuleDir = path.join(
+    backendRoot,
+    "src",
+    "modules",
+    names.routeSegment,
+  );
+  const frontendModuleDir = path.join(
+    frontendRoot,
+    "src",
+    "modules",
+    names.routeSegment,
+  );
+  const backendEntryFile = path.join(
+    backendModuleDir,
+    `${names.fileStem}.routes.ts`,
+  );
   const frontendEntryFile = path.join(frontendModuleDir, "constants.ts");
 
   if (await pathExists(backendEntryFile)) {

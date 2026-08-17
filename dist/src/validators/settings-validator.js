@@ -1,7 +1,7 @@
 import { z } from "zod";
 const supportedTimezones = new Set([
     "UTC",
-    ...((Intl.supportedValuesOf?.("timeZone")) ?? []),
+    ...(Intl.supportedValuesOf?.("timeZone") ?? []),
 ]);
 export const supportedDateFormats = [
     "YYYY-MM-DD",
@@ -44,13 +44,12 @@ export const updateSettingsSchema = z.object({
     }),
 });
 export const logoUploadSchema = z.object({
-    mimetype: z.enum([
-        "image/jpeg",
-        "image/png",
-        "image/svg+xml",
-        "image/webp",
-    ]),
+    mimetype: z.enum(["image/jpeg", "image/png", "image/svg+xml", "image/webp"]),
     originalName: z.string().trim().min(1).max(255),
-    size: z.number().int().positive().max(5 * 1024 * 1024),
+    size: z
+        .number()
+        .int()
+        .positive()
+        .max(5 * 1024 * 1024),
 });
 //# sourceMappingURL=settings-validator.js.map

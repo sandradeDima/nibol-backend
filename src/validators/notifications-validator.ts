@@ -1,13 +1,13 @@
 import { z } from "zod";
 
-const notificationTypeValues = [
-  "info",
-  "success",
-  "warning",
-  "error",
-] as const;
+const notificationTypeValues = ["info", "success", "warning", "error"] as const;
 
-const notificationPriorityValues = ["LOW", "NORMAL", "HIGH", "CRITICAL"] as const;
+const notificationPriorityValues = [
+  "LOW",
+  "NORMAL",
+  "HIGH",
+  "CRITICAL",
+] as const;
 
 const booleanQuerySchema = z.enum(["true", "false"]).transform((value) => {
   return value === "true";
@@ -43,6 +43,8 @@ export const createNotificationSchema = z.object({
 });
 
 export type CreateNotificationInput = z.infer<typeof createNotificationSchema>;
-export type ListNotificationsQuery = z.infer<typeof listNotificationsQuerySchema>;
+export type ListNotificationsQuery = z.infer<
+  typeof listNotificationsQuerySchema
+>;
 export type NotificationType = (typeof notificationTypeValues)[number];
 export type NotificationPriority = (typeof notificationPriorityValues)[number];

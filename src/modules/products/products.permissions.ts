@@ -7,6 +7,4 @@ export const PRODUCTS_PERMISSIONS = {
   view: `${PRODUCTS_PERMISSION_RESOURCE}.view`,
 } as const;
 
-export const PRODUCTS_PERMISSION_NAMES = Object.values(
-  PRODUCTS_PERMISSIONS,
-);
+export const PRODUCTS_PERMISSION_NAMES = Object.values(PRODUCTS_PERMISSIONS);

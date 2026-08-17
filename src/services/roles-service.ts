@@ -11,10 +11,7 @@ import type {
   UpdateRoleInput,
 } from "../validators/roles-validator.js";
 import { adminSafeguardService } from "./admin-safeguard-service.js";
-import {
-  areStringArraysEqual,
-  type LogActorContext,
-} from "./logging-utils.js";
+import { areStringArraysEqual, type LogActorContext } from "./logging-utils.js";
 
 const MAX_ROLE_NAME_LENGTH = 191;
 
@@ -231,7 +228,9 @@ const getRoleAuditSnapshot = async (
     description: role.description,
     id: role.id,
     name: role.name,
-    permissionNames: role.rolePermissions.map(({ permission }) => permission.name),
+    permissionNames: role.rolePermissions.map(
+      ({ permission }) => permission.name,
+    ),
     userCount: role._count.userRoles,
   };
 };
@@ -452,7 +451,11 @@ export const rolesService = {
     };
   },
 
-  async updateRole(roleId: string, input: UpdateRoleInput, context?: LogActorContext) {
+  async updateRole(
+    roleId: string,
+    input: UpdateRoleInput,
+    context?: LogActorContext,
+  ) {
     const existingRole = await prisma.role.findFirst({
       select: {
         id: true,

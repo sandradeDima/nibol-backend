@@ -1,138 +1,47 @@
 import { z } from "zod";
 
-import {
-  commitmentStatusValues,
-  remediationPlanStatusValues,
-} from "./remediation.constants.js";
+export const actionPlanIdParamSchema = z.object({ id: z.uuid() });
+export const observationActionPlanParamsSchema = z.object({ id: z.uuid() });
 
-const booleanFilterSchema = z
-  .enum(["false", "true"])
-  .transform((value) => value === "true")
-  .optional();
-
-const dateFilterSchema = z
-  .string()
-  .trim()
-  .regex(/^\d{4}-\d{2}-\d{2}$/)
-  .optional();
-
-const nullableTextSchema = z
-  .union([z.string(), z.null(), z.undefined()])
-  .transform((value) => {
-    if (value === null || value === undefined) {
-      return null;
-    }
-
-    const trimmed = value.trim();
-    return trimmed.length > 0 ? trimmed : null;
-  });
-
-const nullableUuidSchema = z
-  .union([z.uuid(), z.null(), z.undefined()])
-  .transform((value) => value ?? null);
-
-export const observationRemediationParamsSchema = z.object({
-  id: z.uuid(),
-});
-
-export const observationRemediationQuerySchema = z.object({
-  areaId: z.uuid().optional(),
-});
-
-export const remediationPlanIdParamSchema = z.object({
-  id: z.uuid(),
-});
-
-export const commitmentIdParamSchema = z.object({
-  id: z.uuid(),
-});
-
-export const remediationPlanMutationSchema = z.object({
-  additionalComments: nullableTextSchema,
-  areaId: z.uuid(),
-  mitigationText: nullableTextSchema,
-  ownerUserId: nullableUuidSchema,
-  strategyText: z.string().trim().min(1).max(20_000),
-});
-
-export const remediationPlanUpdateSchema = remediationPlanMutationSchema
-  .omit({
-    areaId: true,
-  })
-  .partial()
-  .refine((value) => Object.keys(value).length > 0, {
-    message: "At least one remediation field is required.",
-  });
-
-export const remediationPlanReturnSchema = z.object({
-  reason: z.string().trim().min(3).max(5_000),
-});
-
-export const createCommitmentSchema = z.object({
-  description: nullableTextSchema,
+const fields = {
+  description: z.string().trim().min(1).max(10_000),
   dueDate: z.coerce.date(),
-  progressPercent: z.coerce.number().int().min(0).max(100).default(0),
-  responsibleUserId: nullableUuidSchema,
+  observationAreaId: z.uuid(),
+  responsibleUserId: z.uuid(),
   sortOrder: z.coerce.number().int().min(0).optional(),
-  status: z.enum(commitmentStatusValues).optional(),
-  title: z.string().trim().min(1).max(191),
-});
+  title: z.string().trim().min(2).max(191),
+};
 
-export const updateCommitmentSchema = createCommitmentSchema
+export const createActionPlanSchema = z.object(fields);
+export const updateActionPlanSchema = z
+  .object(fields)
   .partial()
   .refine((value) => Object.keys(value).length > 0, {
-    message: "At least one commitment field is required.",
+    message: "At least one field is required.",
   });
 
-export const listRemediationPlansQuerySchema = z.object({
+export const listActionPlansQuerySchema = z.object({
   areaId: z.uuid().optional(),
-  overdue: booleanFilterSchema,
-  page: z.coerce.number().int().min(1).default(1),
-  perPage: z.coerce.number().int().min(1).max(100).default(10),
-  responsibleUserId: z.uuid().optional(),
-  riskLevelId: z.uuid().optional(),
-  search: z.string().trim().default(""),
-  sortBy: z
-    .enum(["areaName", "observationCode", "status", "updatedAt"])
-    .default("updatedAt"),
-  sortDirection: z.enum(["asc", "desc"]).default("desc"),
-  status: z.enum(remediationPlanStatusValues).optional(),
-});
-
-export const listCommitmentsQuerySchema = z.object({
-  areaId: z.uuid().optional(),
-  dueDateFrom: dateFilterSchema,
-  dueDateTo: dateFilterSchema,
-  overdue: booleanFilterSchema,
-  page: z.coerce.number().int().min(1).default(1),
-  perPage: z.coerce.number().int().min(1).max(100).default(10),
+  dueDateFrom: z.coerce.date().optional(),
+  dueDateTo: z.coerce.date().optional(),
+  observationId: z.uuid().optional(),
+  overdue: z
+    .enum(["false", "true"])
+    .transform((value) => value === "true")
+    .optional(),
+  page: z.coerce.number().int().positive().default(1),
+  perPage: z.coerce.number().int().positive().max(100).default(20),
   responsibleUserId: z.uuid().optional(),
   search: z.string().trim().default(""),
   sortBy: z
-    .enum(["dueDate", "progressPercent", "title", "updatedAt"])
-    .default("dueDate"),
+    .enum(["currentDueDate", "progressPercent", "title", "updatedAt"])
+    .default("currentDueDate"),
   sortDirection: z.enum(["asc", "desc"]).default("asc"),
-  status: z.enum(commitmentStatusValues).optional(),
+  status: z
+    .enum(["NOT_STARTED", "STARTED", "WITH_PROGRESS", "CONCLUDED"])
+    .optional(),
 });
 
-export type ObservationRemediationQuery = z.infer<
-  typeof observationRemediationQuerySchema
->;
-export type RemediationPlanMutationInput = z.infer<
-  typeof remediationPlanMutationSchema
->;
-export type RemediationPlanUpdateInput = z.infer<
-  typeof remediationPlanUpdateSchema
->;
-export type RemediationPlanReturnInput = z.infer<
-  typeof remediationPlanReturnSchema
->;
-export type CreateCommitmentInput = z.infer<typeof createCommitmentSchema>;
-export type UpdateCommitmentInput = z.infer<typeof updateCommitmentSchema>;
-export type ListRemediationPlansQuery = z.infer<
-  typeof listRemediationPlansQuerySchema
->;
-export type ListCommitmentsQuery = z.infer<
-  typeof listCommitmentsQuerySchema
->;
-
+export type CreateActionPlanInput = z.infer<typeof createActionPlanSchema>;
+export type UpdateActionPlanInput = z.infer<typeof updateActionPlanSchema>;
+export type ListActionPlansQuery = z.infer<typeof listActionPlansQuerySchema>;

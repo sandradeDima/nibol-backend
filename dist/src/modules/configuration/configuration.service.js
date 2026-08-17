@@ -84,21 +84,18 @@ const catalogRecordSelect = {
     updatedAt: true,
 };
 const accessibleObservationSelect = {
-    area: {
-        select: areaOptionSelect,
-    },
     areaAssignments: {
         select: {
             area: {
                 select: areaOptionSelect,
             },
-            responsibleUser: {
+            areaResponsible: {
+                select: userSummarySelect,
+            },
+            processOwner: {
                 select: userSummarySelect,
             },
         },
-    },
-    responsibleUser: {
-        select: userSummarySelect,
     },
 };
 const normalizeRoleName = (value) => {
@@ -126,25 +123,14 @@ const buildObservationVisibilityCondition = (access) => {
     return {
         OR: [
             {
-                responsibleUserId: access.userId,
-            },
-            {
                 auditorUserId: access.userId,
-            },
-            {
-                area: {
-                    active: true,
-                    deletedAt: null,
-                    managerUserId: access.userId,
-                },
             },
             {
                 areaAssignments: {
                     some: {
                         OR: [
-                            {
-                                responsibleUserId: access.userId,
-                            },
+                            { areaResponsibleUserId: access.userId },
+                            { processOwnerUserId: access.userId },
                             {
                                 area: {
                                     active: true,
@@ -844,7 +830,9 @@ export const configurationService = {
         await Promise.all([
             assertAreaNameAvailable(input.name),
             assertAreaCodeAvailable(input.code),
-            input.managerUserId ? assertActiveUserExists(input.managerUserId) : Promise.resolve(),
+            input.managerUserId
+                ? assertActiveUserExists(input.managerUserId)
+                : Promise.resolve(),
         ]);
         const record = await prisma.area.create({
             data: {
@@ -1115,15 +1103,10 @@ export const configurationService = {
         const areaMap = new Map();
         const userMap = new Map();
         accessibleObservations.forEach((observation) => {
-            areaMap.set(observation.area.id, observation.area);
-            if (observation.responsibleUser) {
-                userMap.set(observation.responsibleUser.id, observation.responsibleUser);
-            }
             observation.areaAssignments.forEach((assignment) => {
                 areaMap.set(assignment.area.id, assignment.area);
-                if (assignment.responsibleUser) {
-                    userMap.set(assignment.responsibleUser.id, assignment.responsibleUser);
-                }
+                userMap.set(assignment.areaResponsible.id, assignment.areaResponsible);
+                userMap.set(assignment.processOwner.id, assignment.processOwner);
             });
         });
         return {
@@ -1288,7 +1271,9 @@ export const configurationService = {
         await Promise.all([
             assertAreaNameAvailable(input.name, id),
             assertAreaCodeAvailable(input.code, id),
-            input.managerUserId ? assertActiveUserExists(input.managerUserId) : Promise.resolve(),
+            input.managerUserId
+                ? assertActiveUserExists(input.managerUserId)
+                : Promise.resolve(),
         ]);
         const record = await prisma.area.update({
             data: {

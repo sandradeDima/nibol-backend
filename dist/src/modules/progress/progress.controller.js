@@ -2,354 +2,143 @@ import { createReadStream } from "node:fs";
 import { activityLogService } from "../../services/activity-log-service.js";
 import { auditLogService } from "../../services/audit-log-service.js";
 import { entityActivityService } from "../../services/entity-activity-service.js";
-import { getProgressActivityType } from "../../services/entity-activity-mapping.js";
 import { AppError } from "../../utils/app-error.js";
 import { getRequestLogActorContext } from "../../utils/request-context.js";
 import { sendPaginated, sendSuccess } from "../../utils/response.js";
-import { PROGRESS_ACTIVITY_ACTIONS, PROGRESS_ENTITY_TYPES, } from "./progress.constants.js";
 import { progressService } from "./progress.service.js";
-import { commentIdParamSchema, createCommentSchema, createProgressUpdateSchema, evidenceIdParamSchema, listProgressUpdatesQuerySchema, observationIdParamSchema, progressUpdateIdParamSchema, reviewProgressUpdateSchema, updateCommentSchema, updateProgressUpdateSchema, uploadObservationEvidenceSchema, } from "./progress.validators.js";
-const getQueryValue = (value) => {
-    if (typeof value === "string") {
-        return value;
-    }
-    if (Array.isArray(value)) {
-        const firstValue = value[0];
-        if (typeof firstValue === "string") {
-            return firstValue;
-        }
-    }
-    return undefined;
-};
-const getRequiredObservationId = (value) => {
-    const observationId = Array.isArray(value) ? value[0] : value;
-    if (!observationId) {
-        throw new AppError("Observation id is required.", 400);
-    }
-    return observationIdParamSchema.parse({
-        id: observationId,
-    }).id;
-};
-const getRequiredProgressUpdateId = (value) => {
-    const progressUpdateId = Array.isArray(value) ? value[0] : value;
-    if (!progressUpdateId) {
-        throw new AppError("Progress update id is required.", 400);
-    }
-    return progressUpdateIdParamSchema.parse({
-        id: progressUpdateId,
-    }).id;
-};
-const getRequiredEvidenceId = (value) => {
-    const evidenceId = Array.isArray(value) ? value[0] : value;
-    if (!evidenceId) {
-        throw new AppError("Evidence id is required.", 400);
-    }
-    return evidenceIdParamSchema.parse({
-        id: evidenceId,
-    }).id;
-};
-const getRequiredCommentId = (value) => {
-    const commentId = Array.isArray(value) ? value[0] : value;
-    if (!commentId) {
-        throw new AppError("Comment id is required.", 400);
-    }
-    return commentIdParamSchema.parse({
-        id: commentId,
-    }).id;
-};
-const getRequiredAuthorizationSummary = (request) => {
-    if (!request.authorizationSummary) {
+import { actionPlanIdParamSchema, commentIdParamSchema, createCommentSchema, createProgressEvaluationSchema, evidenceIdParamSchema, listProgressEvaluationsQuerySchema, observationIdParamSchema, progressEvaluationIdParamSchema, reviewProgressEvaluationSchema, updateCommentSchema, updateProgressEvaluationSchema, uploadEvidenceSchema, } from "./progress.validators.js";
+const value = (input) => typeof input === "string" ? input : undefined;
+const access = (request) => {
+    if (!request.authorizationSummary)
         throw new AppError("Authorization required.", 401);
-    }
     return request.authorizationSummary;
 };
-const getActivityVisibility = (entityType, values) => {
-    if (entityType !== PROGRESS_ENTITY_TYPES.comment || !values || typeof values !== "object")
-        return "ALL_AUTHORIZED";
-    const visibility = values.visibility;
-    return visibility === "INTERNAL_AUDIT" ? "AUDIT_ONLY" : "ALL_AUTHORIZED";
-};
-const logAction = async ({ action, entityId, entityType, newValues, oldValues, request, summary, }) => {
-    const actorContext = getRequestLogActorContext(request);
-    await Promise.all([
-        activityLogService.logUserAction({
-            ...actorContext,
-            action,
-            entityId,
-            entityType,
-            metadata: {
-                summary,
-            },
-        }),
-        auditLogService.create({
-            ...actorContext,
-            entityId,
-            entityType,
-            newValues,
-            oldValues,
-        }),
-        entityActivityService.recordEntityChange({
-            action,
-            activityType: getProgressActivityType(entityType, action),
-            actorUserId: actorContext.userId,
-            description: summary,
-            entityId,
-            entityType: entityType === "evidence_file"
-                ? "EVIDENCE"
-                : entityType === "observation_comment"
-                    ? "COMMENT"
-                    : "PROGRESS_UPDATE",
-            metadata: { summary },
-            newData: newValues,
-            previousData: oldValues,
-            visibility: getActivityVisibility(entityType, newValues ?? oldValues),
-            title: summary,
-        }),
-    ]);
-};
-const getMultipartFiles = (request) => {
-    const files = request.files;
-    if (!files || !Array.isArray(files) || files.length === 0) {
+const idWith = (request, schema) => schema.parse({ id: value(request.params.id) }).id;
+const files = (request) => {
+    if (!Array.isArray(request.files) || request.files.length === 0)
         throw new AppError("At least one file is required.", 400);
-    }
-    return files.map((file) => ({
+    return request.files.map((file) => ({
         buffer: file.buffer,
         mimetype: file.mimetype,
         originalName: file.originalname,
         size: file.size,
     }));
 };
+const log = async (request, action, entityType, current, previous) => {
+    const record = current ?? previous;
+    if (!record)
+        return;
+    const actor = getRequestLogActorContext(request);
+    await Promise.all([
+        activityLogService.logUserAction({
+            ...actor,
+            action,
+            entityId: record.id,
+            entityType,
+            metadata: { summary: action },
+        }),
+        auditLogService.create({
+            ...actor,
+            entityId: record.id,
+            entityType,
+            newValues: current,
+            oldValues: previous,
+        }),
+        entityActivityService.recordEntityChange({
+            action,
+            activityType: action
+                .toUpperCase()
+                .replaceAll(".", "_")
+                .replaceAll("-", "_"),
+            actorUserId: actor.userId,
+            entityId: record.id,
+            entityType,
+            newData: current,
+            observationId: record.observation?.id,
+            previousData: previous,
+            title: action,
+        }),
+    ]);
+};
 export const progressController = {
-    async approveProgressUpdate(request, response) {
-        const progressUpdate = await progressService.reviewProgressUpdate(getRequiredProgressUpdateId(request.params.id), "approve", reviewProgressUpdateSchema.parse(request.body), getRequiredAuthorizationSummary(request));
-        await logAction({
-            action: PROGRESS_ACTIVITY_ACTIONS.approveProgressUpdate,
-            entityId: progressUpdate.id,
-            entityType: PROGRESS_ENTITY_TYPES.progressUpdate,
-            newValues: progressUpdate,
-            oldValues: {
-                id: progressUpdate.id,
-                status: "SENT_TO_AUDIT",
-            },
-            request,
-            summary: `El avance ${progressUpdate.id} fue aprobado por Auditoria.`,
-        });
-        sendSuccess(response, progressUpdate);
+    async approveProgressEvaluation(request, response) {
+        const result = await progressService.reviewProgressEvaluation(idWith(request, progressEvaluationIdParamSchema), "approve", reviewProgressEvaluationSchema.parse(request.body), access(request));
+        await log(request, "progress_evaluations.approve", "PROGRESS_EVALUATION", result.current, result.previous);
+        sendSuccess(response, result.current);
     },
     async createComment(request, response) {
-        const observationId = getRequiredObservationId(request.params.id);
-        const comment = await progressService.createObservationComment(observationId, createCommentSchema.parse(request.body), getRequiredAuthorizationSummary(request));
-        await logAction({
-            action: PROGRESS_ACTIVITY_ACTIONS.createComment,
-            entityId: comment.id,
-            entityType: PROGRESS_ENTITY_TYPES.comment,
-            newValues: comment,
-            oldValues: null,
-            request,
-            summary: `Se registro un comentario sobre la observacion ${observationId}.`,
-        });
-        sendSuccess(response, comment, 201);
+        const record = await progressService.createObservationComment(idWith(request, observationIdParamSchema), createCommentSchema.parse(request.body), access(request));
+        sendSuccess(response, record, 201);
     },
     async createObservationEvidence(request, response) {
-        const observationId = getRequiredObservationId(request.params.id);
-        const evidences = await progressService.uploadObservationEvidence(observationId, getMultipartFiles(request), uploadObservationEvidenceSchema.parse(request.body), getRequiredAuthorizationSummary(request));
-        await Promise.all(evidences.map((evidence) => logAction({
-            action: PROGRESS_ACTIVITY_ACTIONS.createEvidence,
-            entityId: evidence.id,
-            entityType: PROGRESS_ENTITY_TYPES.evidence,
-            newValues: evidence,
-            oldValues: null,
-            request,
-            summary: `Se cargo la evidencia ${evidence.originalName} para la observacion ${observationId}.`,
-        })));
-        sendSuccess(response, evidences, 201);
+        sendSuccess(response, await progressService.uploadObservationEvidence(idWith(request, observationIdParamSchema), files(request), uploadEvidenceSchema.parse(request.body), access(request)), 201);
     },
-    async createProgressUpdate(request, response) {
-        const observationId = getRequiredObservationId(request.params.id);
-        const progressUpdate = await progressService.createProgressUpdate(observationId, createProgressUpdateSchema.parse(request.body), getRequiredAuthorizationSummary(request));
-        await logAction({
-            action: PROGRESS_ACTIVITY_ACTIONS.createProgressUpdate,
-            entityId: progressUpdate.id,
-            entityType: PROGRESS_ENTITY_TYPES.progressUpdate,
-            newValues: progressUpdate,
-            oldValues: null,
-            request,
-            summary: `Se registro un nuevo avance para la observacion ${observationId}.`,
-        });
-        sendSuccess(response, progressUpdate, 201);
+    async createActionPlanEvidence(request, response) {
+        sendSuccess(response, await progressService.uploadActionPlanEvidence(idWith(request, actionPlanIdParamSchema), files(request), uploadEvidenceSchema.parse(request.body), access(request)), 201);
     },
-    async createProgressUpdateEvidence(request, response) {
-        const progressUpdateId = getRequiredProgressUpdateId(request.params.id);
-        const evidences = await progressService.createProgressUpdateEvidence(progressUpdateId, getMultipartFiles(request), uploadObservationEvidenceSchema.parse(request.body), getRequiredAuthorizationSummary(request));
-        await Promise.all(evidences.map((evidence) => logAction({
-            action: PROGRESS_ACTIVITY_ACTIONS.createEvidence,
-            entityId: evidence.id,
-            entityType: PROGRESS_ENTITY_TYPES.evidence,
-            newValues: evidence,
-            oldValues: null,
-            request,
-            summary: `Se adjunto la evidencia ${evidence.originalName} al avance ${progressUpdateId}.`,
-        })));
-        sendSuccess(response, evidences, 201);
+    async createProgressEvaluation(request, response) {
+        const record = await progressService.createProgressEvaluation(idWith(request, actionPlanIdParamSchema), createProgressEvaluationSchema.parse(request.body), access(request));
+        await log(request, "progress_evaluations.submit", "PROGRESS_EVALUATION", record, null);
+        sendSuccess(response, record, 201);
+    },
+    async createProgressEvaluationEvidence(request, response) {
+        sendSuccess(response, await progressService.uploadProgressEvaluationEvidence(idWith(request, progressEvaluationIdParamSchema), files(request), uploadEvidenceSchema.parse(request.body), access(request)), 201);
     },
     async deleteComment(request, response) {
-        const comment = await progressService.deleteComment(getRequiredCommentId(request.params.id), getRequiredAuthorizationSummary(request));
-        await logAction({
-            action: PROGRESS_ACTIVITY_ACTIONS.deleteComment,
-            entityId: comment.id,
-            entityType: PROGRESS_ENTITY_TYPES.comment,
-            newValues: null,
-            oldValues: comment,
-            request,
-            summary: `Se elimino logicamente el comentario ${comment.id}.`,
-        });
-        sendSuccess(response, {
-            deleted: true,
-            id: comment.id,
-        });
+        const record = await progressService.deleteComment(idWith(request, commentIdParamSchema), access(request));
+        sendSuccess(response, { deleted: true, id: record.id });
     },
     async deleteEvidence(request, response) {
-        const evidence = await progressService.deleteEvidence(getRequiredEvidenceId(request.params.id), getRequiredAuthorizationSummary(request));
-        await logAction({
-            action: PROGRESS_ACTIVITY_ACTIONS.deleteEvidence,
-            entityId: evidence.id,
-            entityType: PROGRESS_ENTITY_TYPES.evidence,
-            newValues: null,
-            oldValues: evidence,
-            request,
-            summary: `Se elimino logicamente la evidencia ${evidence.originalName}.`,
-        });
-        sendSuccess(response, {
-            deleted: true,
-            id: evidence.id,
-        });
+        const record = await progressService.deleteEvidence(idWith(request, evidenceIdParamSchema), access(request));
+        sendSuccess(response, { deleted: true, id: record.id });
     },
     async downloadEvidence(request, response) {
-        const evidence = await progressService.downloadEvidence(getRequiredEvidenceId(request.params.id), getRequiredAuthorizationSummary(request));
-        await logAction({
-            action: PROGRESS_ACTIVITY_ACTIONS.downloadEvidence,
-            entityId: getRequiredEvidenceId(request.params.id),
-            entityType: PROGRESS_ENTITY_TYPES.evidence,
-            newValues: {
-                downloadedAt: new Date().toISOString(),
-                fileName: evidence.fileName,
-            },
-            oldValues: null,
-            request,
-            summary: `Se descargo la evidencia ${evidence.fileName}.`,
-        });
-        response.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(evidence.fileName)}"`);
-        response.setHeader("Content-Type", evidence.mimeType);
-        const stream = createReadStream(evidence.absolutePath);
-        stream.pipe(response);
+        const file = await progressService.downloadEvidence(idWith(request, evidenceIdParamSchema), access(request));
+        response.setHeader("Content-Type", file.mimeType);
+        response.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(file.originalName)}`);
+        createReadStream(file.absolutePath).pipe(response);
     },
     async getObservationComments(request, response) {
-        const comments = await progressService.getObservationComments(getRequiredObservationId(request.params.id), getRequiredAuthorizationSummary(request));
-        sendSuccess(response, comments);
+        sendSuccess(response, await progressService.getObservationComments(idWith(request, observationIdParamSchema), access(request)));
     },
     async getObservationEvidence(request, response) {
-        const evidences = await progressService.getObservationEvidence(getRequiredObservationId(request.params.id), getRequiredAuthorizationSummary(request));
-        sendSuccess(response, evidences);
+        sendSuccess(response, await progressService.getObservationEvidence(idWith(request, observationIdParamSchema), access(request)));
     },
-    async getObservationProgressWorkspace(request, response) {
-        const workspace = await progressService.getObservationProgressWorkspace(getRequiredObservationId(request.params.id), getRequiredAuthorizationSummary(request));
-        sendSuccess(response, workspace);
+    async getProgressEvaluation(request, response) {
+        sendSuccess(response, await progressService.getProgressEvaluation(idWith(request, progressEvaluationIdParamSchema), access(request)));
     },
-    async listProgressUpdates(request, response) {
-        const result = await progressService.listProgressUpdates(listProgressUpdatesQuerySchema.parse({
-            areaId: getQueryValue(request.query["filter.areaId"]),
-            dateFrom: getQueryValue(request.query["filter.dateFrom"]),
-            dateTo: getQueryValue(request.query["filter.dateTo"]),
-            evidencePending: getQueryValue(request.query["filter.evidencePending"]),
-            page: getQueryValue(request.query.page),
-            perPage: getQueryValue(request.query.perPage),
-            responsibleUserId: getQueryValue(request.query["filter.responsibleUserId"]),
-            riskLevelId: getQueryValue(request.query["filter.riskLevelId"]),
-            search: getQueryValue(request.query.search),
-            sortBy: getQueryValue(request.query.sortBy),
-            sortDirection: getQueryValue(request.query.sortDirection),
-            status: getQueryValue(request.query["filter.status"]),
-            type: getQueryValue(request.query["filter.type"]),
-        }), getRequiredAuthorizationSummary(request));
+    async listProgressEvaluations(request, response) {
+        const result = await progressService.listProgressEvaluations(listProgressEvaluationsQuerySchema.parse({
+            actionPlanId: value(request.query["filter.actionPlanId"]),
+            areaId: value(request.query["filter.areaId"]),
+            dateFrom: value(request.query["filter.dateFrom"]),
+            dateTo: value(request.query["filter.dateTo"]),
+            observationId: value(request.query["filter.observationId"]),
+            page: value(request.query.page),
+            perPage: value(request.query.perPage),
+            reviewStatus: value(request.query["filter.reviewStatus"]),
+            search: value(request.query.search),
+        }), access(request));
         sendPaginated(response, result.data, result.pagination);
     },
-    async rejectProgressUpdate(request, response) {
-        const progressUpdate = await progressService.reviewProgressUpdate(getRequiredProgressUpdateId(request.params.id), "reject", reviewProgressUpdateSchema.parse(request.body), getRequiredAuthorizationSummary(request));
-        await logAction({
-            action: PROGRESS_ACTIVITY_ACTIONS.rejectProgressUpdate,
-            entityId: progressUpdate.id,
-            entityType: PROGRESS_ENTITY_TYPES.progressUpdate,
-            newValues: progressUpdate,
-            oldValues: {
-                id: progressUpdate.id,
-                status: "SENT_TO_AUDIT",
-            },
-            request,
-            summary: `El avance ${progressUpdate.id} fue rechazado por Auditoria.`,
-        });
-        sendSuccess(response, progressUpdate);
+    async rejectProgressEvaluation(request, response) {
+        const result = await progressService.reviewProgressEvaluation(idWith(request, progressEvaluationIdParamSchema), "reject", reviewProgressEvaluationSchema.parse(request.body), access(request));
+        sendSuccess(response, result.current);
     },
-    async returnProgressUpdate(request, response) {
-        const progressUpdate = await progressService.reviewProgressUpdate(getRequiredProgressUpdateId(request.params.id), "return", reviewProgressUpdateSchema.parse(request.body), getRequiredAuthorizationSummary(request));
-        await logAction({
-            action: PROGRESS_ACTIVITY_ACTIONS.returnProgressUpdate,
-            entityId: progressUpdate.id,
-            entityType: PROGRESS_ENTITY_TYPES.progressUpdate,
-            newValues: progressUpdate,
-            oldValues: {
-                id: progressUpdate.id,
-                status: "SENT_TO_AUDIT",
-            },
-            request,
-            summary: `El avance ${progressUpdate.id} fue devuelto con observaciones.`,
-        });
-        sendSuccess(response, progressUpdate);
+    async returnProgressEvaluation(request, response) {
+        const result = await progressService.reviewProgressEvaluation(idWith(request, progressEvaluationIdParamSchema), "return", reviewProgressEvaluationSchema.parse(request.body), access(request));
+        sendSuccess(response, result.current);
     },
-    async sendProgressUpdateToAudit(request, response) {
-        const progressUpdate = await progressService.sendProgressUpdateToAudit(getRequiredProgressUpdateId(request.params.id), getRequiredAuthorizationSummary(request));
-        await logAction({
-            action: PROGRESS_ACTIVITY_ACTIONS.sendProgressUpdateToAudit,
-            entityId: progressUpdate.id,
-            entityType: PROGRESS_ENTITY_TYPES.progressUpdate,
-            newValues: progressUpdate,
-            oldValues: {
-                id: progressUpdate.id,
-                status: "DRAFT",
-            },
-            request,
-            summary: `El avance ${progressUpdate.id} fue enviado a Auditoria.`,
-        });
-        sendSuccess(response, progressUpdate);
+    async sendProgressEvaluationToAudit(request, response) {
+        const result = await progressService.sendProgressEvaluationToAudit(idWith(request, progressEvaluationIdParamSchema), access(request));
+        sendSuccess(response, result.current);
     },
     async updateComment(request, response) {
-        const comment = await progressService.updateObservationComment(getRequiredCommentId(request.params.id), updateCommentSchema.parse(request.body), getRequiredAuthorizationSummary(request));
-        await logAction({
-            action: PROGRESS_ACTIVITY_ACTIONS.updateComment,
-            entityId: comment.id,
-            entityType: PROGRESS_ENTITY_TYPES.comment,
-            newValues: comment,
-            oldValues: {
-                id: comment.id,
-            },
-            request,
-            summary: `Se actualizo el comentario ${comment.id}.`,
-        });
-        sendSuccess(response, comment);
+        sendSuccess(response, await progressService.updateComment(idWith(request, commentIdParamSchema), updateCommentSchema.parse(request.body), access(request)));
     },
-    async updateProgressUpdate(request, response) {
-        const progressUpdate = await progressService.updateProgressUpdate(getRequiredProgressUpdateId(request.params.id), updateProgressUpdateSchema.parse(request.body), getRequiredAuthorizationSummary(request));
-        await logAction({
-            action: PROGRESS_ACTIVITY_ACTIONS.updateProgressUpdate,
-            entityId: progressUpdate.id,
-            entityType: PROGRESS_ENTITY_TYPES.progressUpdate,
-            newValues: progressUpdate,
-            oldValues: {
-                id: progressUpdate.id,
-            },
-            request,
-            summary: `Se actualizo el avance ${progressUpdate.id}.`,
-        });
-        sendSuccess(response, progressUpdate);
+    async updateProgressEvaluation(request, response) {
+        const result = await progressService.updateProgressEvaluation(idWith(request, progressEvaluationIdParamSchema), updateProgressEvaluationSchema.parse(request.body), access(request));
+        sendSuccess(response, result.current);
     },
 };
 //# sourceMappingURL=progress.controller.js.map

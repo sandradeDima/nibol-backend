@@ -72,7 +72,7 @@ export type DashboardObservationRow = {
   updatedAt: string;
 };
 
-export type DashboardCommitmentRow = {
+export type DashboardActionPlanRow = {
   area: DashboardAreaSummary;
   dueDate: string;
   href: string;
@@ -140,7 +140,7 @@ export type AuditDashboardData = {
     criticalObservations: DashboardObservationRow[];
     latestUpdates: DashboardActivityRow[];
     pendingReviews: DashboardReviewQueueRow[];
-    upcomingCommitments: DashboardCommitmentRow[];
+    upcomingActionPlans: DashboardActionPlanRow[];
   };
   viewerProfile: DashboardViewerProfile;
 };
@@ -161,16 +161,16 @@ export type AreaDashboardData = {
     assignedObservations: number;
     averageProgress: number;
     extensionsInProcess: number;
-    overdueCommitments: number;
-    pendingCommitments: number;
-    returnedProgressUpdates: number;
-    upcomingCommitments: number;
+    overdueActionPlans: number;
+    pendingActionPlans: number;
+    returnedProgressEvaluations: number;
+    upcomingActionPlans: number;
   };
   tables: {
     criticalObservations: DashboardObservationRow[];
     latestUpdates: DashboardActivityRow[];
     reviewQueue: DashboardReviewQueueRow[];
-    upcomingCommitments: DashboardCommitmentRow[];
+    upcomingActionPlans: DashboardActionPlanRow[];
   };
   viewerProfile: DashboardViewerProfile;
 };

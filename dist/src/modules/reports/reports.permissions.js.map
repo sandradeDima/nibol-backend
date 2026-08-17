@@ -1,0 +1,1 @@
+{"version":3,"file":"reports.permissions.js","sourceRoot":"","sources":["../../../../src/modules/reports/reports.permissions.ts"],"names":[],"mappings":"AAAA,MAAM,CAAC,MAAM,mBAAmB,GAAG;IACjC,MAAM,EAAE,gBAAgB;IACxB,IAAI,EAAE,cAAc;CACZ,CAAC;AAEX,MAAM,CAAC,MAAM,yBAAyB,GAAG;IACvC,MAAM,EAAE,sBAAsB;IAC9B,IAAI,EAAE,oBAAoB;CAClB,CAAC"}

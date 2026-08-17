@@ -20,7 +20,9 @@ export const getRequestIpAddress = (request: Request): string | null => {
   return getForwardedIpAddress(request) ?? request.ip ?? null;
 };
 
-export const getRequestLogActorContext = (request: Request): LogActorContext => {
+export const getRequestLogActorContext = (
+  request: Request,
+): LogActorContext => {
   return {
     ipAddress: getRequestIpAddress(request),
     userId: request.authSession?.user.id ?? null,

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { asyncHandler } from "../middleware/async-handler.js";
-import { requirePermission, } from "../middleware/authorization-middleware.js";
+import { requirePermission } from "../middleware/authorization-middleware.js";
 import { invitationsService } from "../services/invitations-service.js";
 import { AppError } from "../utils/app-error.js";
 import { sendPaginated, sendSuccess } from "../utils/response.js";

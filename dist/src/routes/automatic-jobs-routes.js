@@ -10,6 +10,7 @@ import { env } from "../utils/env.js";
 import { sendPaginated, sendSuccess } from "../utils/response.js";
 import { deadlineMonitorService } from "../jobs/deadline-monitor/deadline-monitor.service.js";
 import { DEADLINE_MONITOR_PARAMETER_DEFAULTS } from "../jobs/deadline-monitor/deadline-monitor.constants.js";
+import { workflowTimerService } from "../modules/workflows/workflow-timer.service.js";
 const paginationSchema = z.object({
     page: z.coerce.number().int().min(1).default(1),
     perPage: z.coerce.number().int().min(1).max(100).default(20),
@@ -41,7 +42,10 @@ const requireSystemOperator = async (request, response, next) => {
         const summary = await authorizationService.getUserAuthorizationSummary(userId);
         request.authorizationSummary = summary;
         if (!isSystemOperator(summary.roles, summary.isAdmin)) {
-            response.status(403).json({ success: false, message: "Acceso restringido a Admin o Sistemas." });
+            response.status(403).json({
+                success: false,
+                message: "Acceso restringido a Admin o Sistemas.",
+            });
             return;
         }
         next();
@@ -74,6 +78,15 @@ automaticJobsRouter.post("/internal/jobs/deadline-monitor", asyncHandler(async (
     const result = await deadlineMonitorService.run({ triggeredBy: "CRON" });
     sendSuccess(response, result);
 }));
+automaticJobsRouter.post("/internal/jobs/workflow-timers", asyncHandler(async (request, response) => {
+    if (!env.CRON_SECRET) {
+        throw new AppError("CRON_SECRET is not configured.", 503);
+    }
+    if (!hasValidCronSecret(extractCronSecret(request))) {
+        throw new AppError("Invalid cron credentials.", 401);
+    }
+    sendSuccess(response, await workflowTimerService.run({ triggeredBy: "CRON" }));
+}));
 automaticJobsRouter.get("/automatic-jobs/executions", requireSystemOperator, asyncHandler(async (request, response) => {
     const pagination = paginationSchema.parse({
         page: getQueryValue(request.query.page),
@@ -95,6 +108,31 @@ automaticJobsRouter.post("/automatic-jobs/deadline-monitor/run", requireSystemOp
         entityId: result.jobName,
         entityType: "scheduled_job_execution",
         newValues: { status: result.status, triggeredBy: "USER" },
+        userId,
+    });
+    sendSuccess(response, result);
+}));
+automaticJobsRouter.get("/automatic-jobs/workflow-timers/executions", requireSystemOperator, asyncHandler(async (request, response) => {
+    const pagination = paginationSchema.parse({
+        page: getQueryValue(request.query.page),
+        perPage: getQueryValue(request.query.perPage),
+    });
+    const result = await workflowTimerService.listExecutions(pagination.page, pagination.perPage);
+    sendPaginated(response, result.data, result.pagination);
+}));
+automaticJobsRouter.get("/automatic-jobs/workflow-timers/latest", requireSystemOperator, asyncHandler(async (_request, response) => {
+    sendSuccess(response, await workflowTimerService.getLatestExecution());
+}));
+automaticJobsRouter.post("/automatic-jobs/workflow-timers/run", requireSystemOperator, asyncHandler(async (request, response) => {
+    const userId = getUserId(request);
+    const result = await workflowTimerService.run({
+        triggeredBy: "USER",
+        triggeredByUserId: userId,
+    });
+    await auditLogService.create({
+        entityId: result.jobName,
+        entityType: "scheduled_job_execution",
+        newValues: { lockSkipped: result.lockSkipped, triggeredBy: "USER" },
         userId,
     });
     sendSuccess(response, result);
@@ -128,10 +166,13 @@ automaticJobsRouter.get("/automatic-jobs/rules", requireSystemOperator, asyncHan
             key,
             name: key.replaceAll("_", " "),
             updatedAt: null,
-            valueType: typeof DEADLINE_MONITOR_PARAMETER_DEFAULTS[key] === "number" ? "number" : "boolean",
+            valueType: typeof DEADLINE_MONITOR_PARAMETER_DEFAULTS[key] === "number"
+                ? "number"
+                : "boolean",
         }),
         defaultValue: String(DEADLINE_MONITOR_PARAMETER_DEFAULTS[key]),
-        value: byKey.get(key)?.value ?? String(DEADLINE_MONITOR_PARAMETER_DEFAULTS[key]),
+        value: byKey.get(key)?.value ??
+            String(DEADLINE_MONITOR_PARAMETER_DEFAULTS[key]),
         updatedAt: byKey.get(key)?.updatedAt?.toISOString() ?? null,
     })));
 }));
@@ -142,7 +183,9 @@ automaticJobsRouter.patch("/automatic-jobs/rules/:key", requireSystemOperator, a
     }
     const payload = ruleUpdateSchema.parse(request.body);
     const userId = getUserId(request);
-    const previous = await prisma.systemParameter.findUnique({ where: { key } });
+    const previous = await prisma.systemParameter.findUnique({
+        where: { key },
+    });
     const current = previous
         ? await prisma.systemParameter.update({
             data: { value: payload.value, active: true },
@@ -157,7 +200,9 @@ automaticJobsRouter.patch("/automatic-jobs/rules/:key", requireSystemOperator, a
                 key,
                 name: key.replaceAll("_", " "),
                 value: payload.value,
-                valueType: typeof DEADLINE_MONITOR_PARAMETER_DEFAULTS[key] === "number" ? "number" : "boolean",
+                valueType: typeof DEADLINE_MONITOR_PARAMETER_DEFAULTS[key] === "number"
+                    ? "number"
+                    : "boolean",
             },
         });
     await auditLogService.create({
@@ -167,6 +212,9 @@ automaticJobsRouter.patch("/automatic-jobs/rules/:key", requireSystemOperator, a
         oldValues: previous ? { key, value: previous.value } : null,
         userId,
     });
-    sendSuccess(response, { ...current, updatedAt: current.updatedAt.toISOString() });
+    sendSuccess(response, {
+        ...current,
+        updatedAt: current.updatedAt.toISOString(),
+    });
 }));
 //# sourceMappingURL=automatic-jobs-routes.js.map

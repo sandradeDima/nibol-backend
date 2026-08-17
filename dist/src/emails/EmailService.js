@@ -130,7 +130,9 @@ export class EmailService {
      * Sends multiple email requests without failing the entire operation on individual errors.
      */
     async sendBulk(requests) {
-        const results = await Promise.all(requests.map((request) => isTemplateRequest(request) ? this.sendTemplate(request) : this.sendEmail(request)));
+        const results = await Promise.all(requests.map((request) => isTemplateRequest(request)
+            ? this.sendTemplate(request)
+            : this.sendEmail(request)));
         const sentCount = results.filter((result) => result.success).length;
         const failedCount = results.length - sentCount;
         return {
@@ -149,7 +151,9 @@ export class EmailService {
             return await emailProvider.verifyConnection();
         }
         catch (error) {
-            const message = error instanceof Error ? error.message : "Unknown email connection error";
+            const message = error instanceof Error
+                ? error.message
+                : "Unknown email connection error";
             logger.error("Email provider verification failed.", {
                 message,
             });
@@ -176,7 +180,9 @@ export class EmailService {
             return await settingsService.getEmailBrandingSettings();
         }
         catch (error) {
-            const message = error instanceof Error ? error.message : "Unknown settings lookup error";
+            const message = error instanceof Error
+                ? error.message
+                : "Unknown settings lookup error";
             logger.warn("Settings lookup failed. Falling back to environment email configuration.", {
                 message,
             });

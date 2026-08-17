@@ -3,7 +3,7 @@ import { unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { ADMIN_ROLE_NAME } from "../permissions/definitions.js";
 import { env } from "../utils/env.js";
-import { buildLogoUrl, logoUploadsDir, } from "../utils/uploads.js";
+import { buildLogoUrl, logoUploadsDir } from "../utils/uploads.js";
 import { prisma } from "../utils/prisma.js";
 import { activityLogService } from "./activity-log-service.js";
 import { auditLogService } from "./audit-log-service.js";

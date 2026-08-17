@@ -65,7 +65,9 @@ export interface EmailTemplateVariablesMap {
 
 export type EmailTemplateName = keyof EmailTemplateVariablesMap;
 
-export type EmailTemplateRequest<TTemplate extends EmailTemplateName = EmailTemplateName> = {
+export type EmailTemplateRequest<
+  TTemplate extends EmailTemplateName = EmailTemplateName,
+> = {
   bcc?: EmailAddressLike;
   cc?: EmailAddressLike;
   headers?: Record<string, string>;

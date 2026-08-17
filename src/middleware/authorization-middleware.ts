@@ -23,12 +23,10 @@ const storeAuthorizationSummary = async (request: Request): Promise<void> => {
     return;
   }
 
-  request.authorizationSummary = await authorizationService.getUserAuthorizationSummary(
-    userId,
-    {
+  request.authorizationSummary =
+    await authorizationService.getUserAuthorizationSummary(userId, {
       cache: getRequestCache(request),
-    },
-  );
+    });
 };
 
 export const requireAuth = (): RequestHandler => {
@@ -57,9 +55,13 @@ export const requirePermission = (permission: string): RequestHandler => {
     }
 
     try {
-      const hasPermission = await authorizationService.hasPermission(userId, permission, {
-        cache: getRequestCache(request),
-      });
+      const hasPermission = await authorizationService.hasPermission(
+        userId,
+        permission,
+        {
+          cache: getRequestCache(request),
+        },
+      );
 
       await storeAuthorizationSummary(request);
 
@@ -111,7 +113,9 @@ export const requireAnyPermission = (permissions: string[]): RequestHandler => {
   };
 };
 
-export const requireAllPermissions = (permissions: string[]): RequestHandler => {
+export const requireAllPermissions = (
+  permissions: string[],
+): RequestHandler => {
   return async (request, response, next) => {
     const userId = getAuthenticatedUserId(request);
 

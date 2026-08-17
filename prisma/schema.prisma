@@ -54,23 +54,20 @@ enum RemediationPlanStatus {
   CLOSED
 }
 
-enum CommitmentStatus {
-  PENDING
-  IN_PROGRESS
-  SENT_TO_AUDIT
-  APPROVED
-  RETURNED
-  COMPLETED
-  OVERDUE
+enum ActionPlanStatus {
+  NOT_STARTED
+  STARTED
+  WITH_PROGRESS
+  CONCLUDED
 }
 
-enum ProgressUpdateType {
+enum ProgressEvaluationType {
   ADVANCE
   FINALIZATION
   CORRECTION
 }
 
-enum ProgressUpdateStatus {
+enum ProgressEvaluationReviewStatus {
   DRAFT
   SENT_TO_AUDIT
   APPROVED
@@ -100,6 +97,18 @@ enum DeadlineExtensionStatus {
   AUDIT_APPROVED
   AUDIT_REJECTED
   CANCELLED
+}
+
+enum DeadlineExtensionTarget {
+  OBSERVATION
+  ACTION_PLAN
+}
+
+enum EvidenceContext {
+  FINDING
+  ACTION_PLAN
+  PROGRESS_EVALUATION
+  CLOSURE
 }
 
 enum WorkflowDefinitionStatus {
@@ -192,50 +201,52 @@ enum WorkflowConditionOperator {
 }
 
 model User {
-  id                                String                      @id @default(uuid()) @db.Char(36)
-  name                              String                      @db.VarChar(191)
-  email                             String                      @unique @db.VarChar(191)
-  password                          String?                     @db.VarChar(255)
-  avatar                            String?                     @db.VarChar(255)
-  isActive                          Boolean                     @default(true) @map("is_active")
-  emailVerified                     Boolean                     @default(false) @map("email_verified")
-  lastLoginAt                       DateTime?                   @map("last_login_at")
-  createdAt                         DateTime                    @default(now()) @map("created_at")
-  updatedAt                         DateTime                    @updatedAt @map("updated_at")
-  deletedAt                         DateTime?                   @map("deleted_at")
+  id                                String                     @id @default(uuid()) @db.Char(36)
+  name                              String                     @db.VarChar(191)
+  email                             String                     @unique @db.VarChar(191)
+  password                          String?                    @db.VarChar(255)
+  avatar                            String?                    @db.VarChar(255)
+  jobTitle                          String?                    @map("job_title") @db.VarChar(191)
+  isActive                          Boolean                    @default(true) @map("is_active")
+  emailVerified                     Boolean                    @default(false) @map("email_verified")
+  lastLoginAt                       DateTime?                  @map("last_login_at")
+  createdAt                         DateTime                   @default(now()) @map("created_at")
+  updatedAt                         DateTime                   @updatedAt @map("updated_at")
+  deletedAt                         DateTime?                  @map("deleted_at")
   accounts                          Account[]
   sessions                          Session[]
-  createdInvites                    Invitation[]                @relation("InvitationCreatedBy")
+  createdInvites                    Invitation[]               @relation("InvitationCreatedBy")
   userRoles                         UserRole[]
   notifications                     Notification[]
   activityLogs                      ActivityLog[]
-  changedAuditLogs                  AuditLog[]                  @relation("AuditLogChangedBy")
-  managedAreas                      Area[]                      @relation("AreaManager")
-  responsibleObservations           Observation[]               @relation("ObservationResponsible")
-  auditedObservations               Observation[]               @relation("ObservationAuditor")
-  observationAreaAssignments        ObservationAreaAssignment[] @relation("ObservationAreaResponsible")
-  remediationPlanOwners             RemediationPlan[]           @relation("RemediationPlanOwner")
-  createdRemediationPlans           RemediationPlan[]           @relation("RemediationPlanCreatedBy")
-  approvedRemediationPlans          RemediationPlan[]           @relation("RemediationPlanApprovedBy")
-  returnedRemediationPlans          RemediationPlan[]           @relation("RemediationPlanReturnedBy")
-  commitmentAssignments             Commitment[]                @relation("CommitmentResponsible")
-  submittedProgressUpdates          ProgressUpdate[]            @relation("ProgressUpdateSubmittedBy")
-  reviewedProgressUpdates           ProgressUpdate[]            @relation("ProgressUpdateReviewedBy")
-  uploadedEvidenceFiles             EvidenceFile[]              @relation("EvidenceUploadedBy")
-  observationComments               ObservationComment[]        @relation("ObservationCommentAuthor")
-  progressReviewHistoryItems        ProgressReviewHistory[]     @relation("ProgressReviewHistoryActor")
-  requestedDeadlineExtensions       DeadlineExtensionRequest[]  @relation("DeadlineExtensionRequestedBy")
-  managerReviewedDeadlineExtensions DeadlineExtensionRequest[]  @relation("DeadlineExtensionManagerReviewer")
-  auditReviewedDeadlineExtensions   DeadlineExtensionRequest[]  @relation("DeadlineExtensionAuditReviewer")
-  notificationDeliveries            NotificationDelivery[]      @relation("NotificationDeliveryRecipient")
-  scheduledJobExecutions            ScheduledJobExecution[]     @relation("ScheduledJobExecutionTriggeredBy")
-  entityActivities                  EntityActivity[]            @relation("EntityActivityActor")
-  createdWorkflowDefinitions        WorkflowDefinition[]        @relation("WorkflowDefinitionCreatedBy")
-  createdWorkflowVersions           WorkflowVersion[]           @relation("WorkflowVersionCreatedBy")
-  publishedWorkflowVersions         WorkflowVersion[]           @relation("WorkflowVersionPublishedBy")
-  startedWorkflowInstances          WorkflowInstance[]          @relation("WorkflowInstanceStartedBy")
-  assignedWorkflowTasks             WorkflowTask[]              @relation("WorkflowTaskAssignedUser")
-  performedWorkflowTransitions      WorkflowTransitionLog[]     @relation("WorkflowTransitionPerformedBy")
+  changedAuditLogs                  AuditLog[]                 @relation("AuditLogChangedBy")
+  managedAreas                      Area[]                     @relation("AreaManager")
+  auditedObservations               Observation[]              @relation("ObservationAuditor")
+  createdAuditReports               AuditReport[]              @relation("AuditReportCreatedBy")
+  processOwnedObservationAreas      ObservationArea[]          @relation("ObservationAreaProcessOwner")
+  responsibleObservationAreas       ObservationArea[]          @relation("ObservationAreaResponsible")
+  remediationPlanOwners             RemediationPlan[]          @relation("RemediationPlanOwner")
+  createdRemediationPlans           RemediationPlan[]          @relation("RemediationPlanCreatedBy")
+  approvedRemediationPlans          RemediationPlan[]          @relation("RemediationPlanApprovedBy")
+  returnedRemediationPlans          RemediationPlan[]          @relation("RemediationPlanReturnedBy")
+  actionPlanAssignments             ActionPlan[]               @relation("ActionPlanResponsible")
+  submittedProgressEvaluations      ProgressEvaluation[]       @relation("ProgressEvaluationSubmittedBy")
+  reviewedProgressEvaluations       ProgressEvaluation[]       @relation("ProgressEvaluationReviewedBy")
+  uploadedEvidenceFiles             EvidenceFile[]             @relation("EvidenceUploadedBy")
+  observationComments               ObservationComment[]       @relation("ObservationCommentAuthor")
+  progressReviewHistoryItems        ProgressReviewHistory[]    @relation("ProgressReviewHistoryActor")
+  requestedDeadlineExtensions       DeadlineExtensionRequest[] @relation("DeadlineExtensionRequestedBy")
+  managerReviewedDeadlineExtensions DeadlineExtensionRequest[] @relation("DeadlineExtensionManagerReviewer")
+  auditReviewedDeadlineExtensions   DeadlineExtensionRequest[] @relation("DeadlineExtensionAuditReviewer")
+  notificationDeliveries            NotificationDelivery[]     @relation("NotificationDeliveryRecipient")
+  scheduledJobExecutions            ScheduledJobExecution[]    @relation("ScheduledJobExecutionTriggeredBy")
+  entityActivities                  EntityActivity[]           @relation("EntityActivityActor")
+  createdWorkflowDefinitions        WorkflowDefinition[]       @relation("WorkflowDefinitionCreatedBy")
+  createdWorkflowVersions           WorkflowVersion[]          @relation("WorkflowVersionCreatedBy")
+  publishedWorkflowVersions         WorkflowVersion[]          @relation("WorkflowVersionPublishedBy")
+  startedWorkflowInstances          WorkflowInstance[]         @relation("WorkflowInstanceStartedBy")
+  assignedWorkflowTasks             WorkflowTask[]             @relation("WorkflowTaskAssignedUser")
+  performedWorkflowTransitions      WorkflowTransitionLog[]    @relation("WorkflowTransitionPerformedBy")
 
   @@index([deletedAt])
   @@map("users")
@@ -442,6 +453,18 @@ model ScheduledJobExecution {
   @@map("scheduled_job_executions")
 }
 
+model ScheduledJobLock {
+  jobName    String   @id @map("job_name") @db.VarChar(100)
+  lockToken  String   @unique @map("lock_token") @db.Char(36)
+  acquiredAt DateTime @map("acquired_at")
+  expiresAt  DateTime @map("expires_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@index([expiresAt])
+  @@map("scheduled_job_locks")
+}
+
 model ModuleRecord {
   id          String    @id @default(uuid()) @db.Char(36)
   moduleKey   String    @map("module_key") @db.VarChar(100)
@@ -537,26 +560,68 @@ model ObservationStatus {
 }
 
 model Area {
-  id                        String                      @id @default(uuid()) @db.Char(36)
-  name                      String                      @unique @db.VarChar(191)
-  code                      String?                     @unique @db.VarChar(100)
-  description               String?                     @db.VarChar(500)
-  managerUserId             String?                     @map("manager_user_id") @db.Char(36)
-  active                    Boolean                     @default(true)
-  createdAt                 DateTime                    @default(now()) @map("created_at")
-  updatedAt                 DateTime                    @updatedAt @map("updated_at")
-  deletedAt                 DateTime?                   @map("deleted_at")
-  managerUser               User?                       @relation("AreaManager", fields: [managerUserId], references: [id], onDelete: SetNull)
-  observations              Observation[]               @relation("ObservationArea")
-  observationAssignments    ObservationAreaAssignment[] @relation("ObservationAssignmentArea")
-  remediationPlans          RemediationPlan[]
-  deadlineExtensionRequests DeadlineExtensionRequest[]
-  assignedWorkflowTasks     WorkflowTask[]              @relation("WorkflowTaskAssignedArea")
+  id                    String            @id @default(uuid()) @db.Char(36)
+  name                  String            @unique @db.VarChar(191)
+  code                  String?           @unique @db.VarChar(100)
+  description           String?           @db.VarChar(500)
+  managerUserId         String?           @map("manager_user_id") @db.Char(36)
+  active                Boolean           @default(true)
+  createdAt             DateTime          @default(now()) @map("created_at")
+  updatedAt             DateTime          @updatedAt @map("updated_at")
+  deletedAt             DateTime?         @map("deleted_at")
+  managerUser           User?             @relation("AreaManager", fields: [managerUserId], references: [id], onDelete: SetNull)
+  observationAreas      ObservationArea[] @relation("ObservationAreaArea")
+  remediationPlans      RemediationPlan[]
+  assignedWorkflowTasks WorkflowTask[]    @relation("WorkflowTaskAssignedArea")
 
   @@index([active, deletedAt])
   @@index([deletedAt])
   @@index([managerUserId])
   @@map("areas")
+}
+
+model AuditReport {
+  id              String        @id @default(uuid()) @db.Char(36)
+  reportNumber    String        @unique @map("report_number") @db.VarChar(64)
+  title           String        @db.VarChar(191)
+  reportDate      DateTime      @map("report_date") @db.Date
+  createdByUserId String        @map("created_by_user_id") @db.Char(36)
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  deletedAt       DateTime?     @map("deleted_at")
+  createdByUser   User          @relation("AuditReportCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  observations    Observation[]
+
+  @@index([createdByUserId])
+  @@index([reportDate])
+  @@index([deletedAt])
+  @@map("audit_reports")
+}
+
+model ObservationDictionary {
+  id           String        @id @default(uuid()) @db.Char(36)
+  name         String        @unique @db.VarChar(191)
+  description  String?       @db.Text
+  isActive     Boolean       @default(true) @map("is_active")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+  observations Observation[]
+
+  @@index([isActive])
+  @@map("observation_dictionary")
+}
+
+model Risk {
+  id               String            @id @default(uuid()) @db.Char(36)
+  name             String            @unique @db.VarChar(191)
+  description      String?           @db.Text
+  isActive         Boolean           @default(true) @map("is_active")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+  observationRisks ObservationRisk[]
+
+  @@index([isActive])
+  @@map("risks")
 }
 
 model SystemParameter {
@@ -600,69 +665,86 @@ model Catalog {
 }
 
 model Observation {
-  id                        String                      @id @default(uuid()) @db.Char(36)
-  code                      String                      @unique @db.VarChar(64)
-  title                     String                      @db.VarChar(191)
-  description               String                      @db.Text
-  auditRecommendation       String                      @map("audit_recommendation") @db.Text
-  riskLevelId               String                      @map("risk_level_id") @db.Char(36)
-  statusId                  String                      @map("status_id") @db.Char(36)
-  areaId                    String                      @map("area_id") @db.Char(36)
-  responsibleUserId         String?                     @map("responsible_user_id") @db.Char(36)
-  auditorUserId             String                      @map("auditor_user_id") @db.Char(36)
-  dueDate                   DateTime                    @map("due_date")
-  detectedAt                DateTime                    @map("detected_at")
-  observationType           String?                     @map("observation_type") @db.VarChar(191)
-  source                    String?                     @db.VarChar(191)
-  process                   String?                     @map("process_name") @db.VarChar(191)
-  category                  String?                     @db.VarChar(191)
-  progressPercent           Int                         @default(0) @map("progress_percent")
-  currentStage              String?                     @map("current_stage") @db.VarChar(191)
-  createdAt                 DateTime                    @default(now()) @map("created_at")
-  updatedAt                 DateTime                    @updatedAt @map("updated_at")
-  deletedAt                 DateTime?                   @map("deleted_at")
-  riskLevel                 RiskLevel                   @relation(fields: [riskLevelId], references: [id], onDelete: Restrict)
-  status                    ObservationStatus           @relation(fields: [statusId], references: [id], onDelete: Restrict)
-  area                      Area                        @relation("ObservationArea", fields: [areaId], references: [id], onDelete: Restrict)
-  responsibleUser           User?                       @relation("ObservationResponsible", fields: [responsibleUserId], references: [id], onDelete: SetNull)
-  auditorUser               User                        @relation("ObservationAuditor", fields: [auditorUserId], references: [id], onDelete: Restrict)
-  areaAssignments           ObservationAreaAssignment[]
+  id                        String                     @id @default(uuid()) @db.Char(36)
+  auditReportId             String                     @map("audit_report_id") @db.Char(36)
+  observationNumber         Int                        @map("observation_number")
+  mainObservationId         String                     @map("main_observation_id") @db.Char(36)
+  title                     String                     @db.VarChar(191)
+  description               String                     @db.Text
+  auditRecommendation       String                     @map("audit_recommendation") @db.Text
+  riskLevelId               String                     @map("risk_level_id") @db.Char(36)
+  statusId                  String                     @map("status_id") @db.Char(36)
+  auditorUserId             String                     @map("auditor_user_id") @db.Char(36)
+  originalDueDate           DateTime                   @map("original_due_date") @db.Date
+  currentDueDate            DateTime                   @map("current_due_date") @db.Date
+  source                    String?                    @db.VarChar(191)
+  process                   String?                    @map("process_name") @db.VarChar(191)
+  category                  String?                    @db.VarChar(191)
+  progressPercent           Int                        @default(0) @map("progress_percent")
+  currentStage              String?                    @map("current_stage") @db.VarChar(191)
+  createdAt                 DateTime                   @default(now()) @map("created_at")
+  updatedAt                 DateTime                   @updatedAt @map("updated_at")
+  deletedAt                 DateTime?                  @map("deleted_at")
+  auditReport               AuditReport                @relation(fields: [auditReportId], references: [id], onDelete: Restrict)
+  mainObservation           ObservationDictionary      @relation(fields: [mainObservationId], references: [id], onDelete: Restrict)
+  riskLevel                 RiskLevel                  @relation(fields: [riskLevelId], references: [id], onDelete: Restrict)
+  status                    ObservationStatus          @relation(fields: [statusId], references: [id], onDelete: Restrict)
+  auditorUser               User                       @relation("ObservationAuditor", fields: [auditorUserId], references: [id], onDelete: Restrict)
+  risks                     ObservationRisk[]
+  areaAssignments           ObservationArea[]
   remediationPlans          RemediationPlan[]
-  commitments               Commitment[]
-  progressUpdates           ProgressUpdate[]
+  actionPlans               ActionPlan[]
   evidenceFiles             EvidenceFile[]
   comments                  ObservationComment[]
   deadlineExtensionRequests DeadlineExtensionRequest[]
   entityActivities          EntityActivity[]
 
-  @@index([areaId])
+  @@unique([auditReportId, observationNumber])
+  @@index([auditReportId])
   @@index([auditorUserId])
   @@index([deletedAt])
-  @@index([detectedAt])
-  @@index([dueDate])
-  @@index([responsibleUserId])
+  @@index([currentDueDate])
+  @@index([mainObservationId])
+  @@index([originalDueDate])
   @@index([riskLevelId])
   @@index([statusId])
   @@map("observations")
 }
 
-model ObservationAreaAssignment {
-  id                String      @id @default(uuid()) @db.Char(36)
-  observationId     String      @map("observation_id") @db.Char(36)
-  areaId            String      @map("area_id") @db.Char(36)
-  responsibleUserId String?     @map("responsible_user_id") @db.Char(36)
-  roleInFinding     String?     @map("role_in_finding") @db.VarChar(191)
-  createdAt         DateTime    @default(now()) @map("created_at")
-  updatedAt         DateTime    @updatedAt @map("updated_at")
-  observation       Observation @relation(fields: [observationId], references: [id], onDelete: Cascade)
-  area              Area        @relation("ObservationAssignmentArea", fields: [areaId], references: [id], onDelete: Restrict)
-  responsibleUser   User?       @relation("ObservationAreaResponsible", fields: [responsibleUserId], references: [id], onDelete: SetNull)
+model ObservationRisk {
+  id            String      @id @default(uuid()) @db.Char(36)
+  observationId String      @map("observation_id") @db.Char(36)
+  riskId        String      @map("risk_id") @db.Char(36)
+  createdAt     DateTime    @default(now()) @map("created_at")
+  observation   Observation @relation(fields: [observationId], references: [id], onDelete: Cascade)
+  risk          Risk        @relation(fields: [riskId], references: [id], onDelete: Restrict)
+
+  @@unique([observationId, riskId])
+  @@index([riskId])
+  @@map("observation_risks")
+}
+
+model ObservationArea {
+  id                        String                     @id @default(uuid()) @db.Char(36)
+  observationId             String                     @map("observation_id") @db.Char(36)
+  areaId                    String                     @map("area_id") @db.Char(36)
+  processOwnerUserId        String                     @map("process_owner_user_id") @db.Char(36)
+  areaResponsibleUserId     String                     @map("area_responsible_user_id") @db.Char(36)
+  createdAt                 DateTime                   @default(now()) @map("created_at")
+  updatedAt                 DateTime                   @updatedAt @map("updated_at")
+  observation               Observation                @relation(fields: [observationId], references: [id], onDelete: Cascade)
+  area                      Area                       @relation("ObservationAreaArea", fields: [areaId], references: [id], onDelete: Restrict)
+  processOwner              User                       @relation("ObservationAreaProcessOwner", fields: [processOwnerUserId], references: [id], onDelete: Restrict)
+  areaResponsible           User                       @relation("ObservationAreaResponsible", fields: [areaResponsibleUserId], references: [id], onDelete: Restrict)
+  actionPlans               ActionPlan[]
+  deadlineExtensionRequests DeadlineExtensionRequest[]
 
   @@unique([observationId, areaId])
   @@index([areaId])
   @@index([observationId])
-  @@index([responsibleUserId])
-  @@map("observation_area_assignments")
+  @@index([processOwnerUserId])
+  @@index([areaResponsibleUserId])
+  @@map("observation_areas")
 }
 
 model RemediationPlan {
@@ -684,15 +766,14 @@ model RemediationPlan {
   createdAt          DateTime              @default(now()) @map("created_at")
   updatedAt          DateTime              @updatedAt @map("updated_at")
   deletedAt          DateTime?             @map("deleted_at")
+  workflowInstanceId String?               @map("workflow_instance_id") @db.Char(36)
   observation        Observation           @relation(fields: [observationId], references: [id], onDelete: Cascade)
   area               Area                  @relation(fields: [areaId], references: [id], onDelete: Restrict)
   ownerUser          User?                 @relation("RemediationPlanOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
   approvedByUser     User?                 @relation("RemediationPlanApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
   returnedByUser     User?                 @relation("RemediationPlanReturnedBy", fields: [returnedByUserId], references: [id], onDelete: SetNull)
   createdByUser      User                  @relation("RemediationPlanCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
-  commitments        Commitment[]
-  progressUpdates    ProgressUpdate[]
-  evidenceFiles      EvidenceFile[]
+  actionPlans        ActionPlan[]
   comments           ObservationComment[]
 
   @@unique([observationId, areaId])
@@ -704,80 +785,89 @@ model RemediationPlan {
   @@index([status])
   @@index([approvedByUserId])
   @@index([returnedByUserId])
+  @@index([workflowInstanceId])
   @@map("remediation_plans")
 }
 
-model Commitment {
+model ActionPlan {
   id                        String                     @id @default(uuid()) @db.Char(36)
-  remediationPlanId         String                     @map("remediation_plan_id") @db.Char(36)
+  remediationPlanId         String?                    @map("remediation_plan_id") @db.Char(36)
   observationId             String                     @map("observation_id") @db.Char(36)
+  observationAreaId         String                     @map("observation_area_id") @db.Char(36)
+  responsibleUserId         String                     @map("responsible_user_id") @db.Char(36)
   title                     String                     @db.VarChar(191)
-  description               String?                    @db.Text
-  responsibleUserId         String?                    @map("responsible_user_id") @db.Char(36)
-  dueDate                   DateTime                   @map("due_date")
+  description               String                     @db.Text
+  originalDueDate           DateTime                   @map("original_due_date") @db.Date
+  currentDueDate            DateTime                   @map("current_due_date") @db.Date
   completedAt               DateTime?                  @map("completed_at")
   progressPercent           Int                        @default(0) @map("progress_percent")
-  status                    CommitmentStatus           @default(PENDING)
+  status                    ActionPlanStatus           @default(NOT_STARTED)
   sortOrder                 Int                        @default(0) @map("sort_order")
   createdAt                 DateTime                   @default(now()) @map("created_at")
   updatedAt                 DateTime                   @updatedAt @map("updated_at")
   deletedAt                 DateTime?                  @map("deleted_at")
-  remediationPlan           RemediationPlan            @relation(fields: [remediationPlanId], references: [id], onDelete: Cascade)
+  remediationPlan           RemediationPlan?           @relation(fields: [remediationPlanId], references: [id], onDelete: SetNull)
   observation               Observation                @relation(fields: [observationId], references: [id], onDelete: Cascade)
-  responsibleUser           User?                      @relation("CommitmentResponsible", fields: [responsibleUserId], references: [id], onDelete: SetNull)
-  progressUpdates           ProgressUpdate[]
+  observationArea           ObservationArea            @relation(fields: [observationAreaId], references: [id], onDelete: Restrict)
+  responsibleUser           User                       @relation("ActionPlanResponsible", fields: [responsibleUserId], references: [id], onDelete: Restrict)
+  progressEvaluations       ProgressEvaluation[]
   evidenceFiles             EvidenceFile[]
   comments                  ObservationComment[]
   deadlineExtensionRequests DeadlineExtensionRequest[]
 
   @@index([completedAt])
   @@index([deletedAt])
-  @@index([dueDate])
+  @@index([currentDueDate])
+  @@index([originalDueDate])
   @@index([observationId])
   @@index([progressPercent])
   @@index([remediationPlanId])
+  @@index([observationAreaId])
   @@index([responsibleUserId])
   @@index([sortOrder])
   @@index([status])
-  @@map("commitments")
+  @@map("action_plans")
 }
 
 model DeadlineExtensionRequest {
-  id                String                        @id @default(uuid()) @db.Char(36)
-  observationId     String                        @map("observation_id") @db.Char(36)
-  commitmentId      String?                       @map("commitment_id") @db.Char(36)
-  requestedByUserId String                        @map("requested_by_user_id") @db.Char(36)
-  areaId            String                        @map("area_id") @db.Char(36)
-  currentDueDate    DateTime                      @map("current_due_date")
-  requestedDueDate  DateTime                      @map("requested_due_date")
-  reason            String                        @db.LongText
-  status            DeadlineExtensionStatus       @default(DRAFT)
-  managerReviewerId String?                       @map("manager_reviewer_id") @db.Char(36)
-  managerReviewedAt DateTime?                     @map("manager_reviewed_at")
-  managerComment    String?                       @map("manager_comment") @db.LongText
-  auditReviewerId   String?                       @map("audit_reviewer_id") @db.Char(36)
-  auditReviewedAt   DateTime?                     @map("audit_reviewed_at")
-  auditComment      String?                       @map("audit_comment") @db.LongText
-  finalApprovedAt   DateTime?                     @map("final_approved_at")
-  createdAt         DateTime                      @default(now()) @map("created_at")
-  updatedAt         DateTime                      @updatedAt @map("updated_at")
-  deletedAt         DateTime?                     @map("deleted_at")
-  observation       Observation                   @relation(fields: [observationId], references: [id], onDelete: Cascade)
-  commitment        Commitment?                   @relation(fields: [commitmentId], references: [id], onDelete: SetNull)
-  requestedByUser   User                          @relation("DeadlineExtensionRequestedBy", fields: [requestedByUserId], references: [id], onDelete: Restrict)
-  area              Area                          @relation(fields: [areaId], references: [id], onDelete: Restrict)
-  managerReviewer   User?                         @relation("DeadlineExtensionManagerReviewer", fields: [managerReviewerId], references: [id], onDelete: SetNull)
-  auditReviewer     User?                         @relation("DeadlineExtensionAuditReviewer", fields: [auditReviewerId], references: [id], onDelete: SetNull)
-  attachments       DeadlineExtensionAttachment[]
+  id                 String                        @id @default(uuid()) @db.Char(36)
+  targetType         DeadlineExtensionTarget       @map("target_type")
+  observationId      String?                       @map("observation_id") @db.Char(36)
+  actionPlanId       String?                       @map("action_plan_id") @db.Char(36)
+  observationAreaId  String?                       @map("observation_area_id") @db.Char(36)
+  requestedByUserId  String                        @map("requested_by_user_id") @db.Char(36)
+  previousDueDate    DateTime                      @map("previous_due_date") @db.Date
+  proposedDueDate    DateTime                      @map("proposed_due_date") @db.Date
+  reason             String                        @db.LongText
+  status             DeadlineExtensionStatus       @default(DRAFT)
+  managerReviewerId  String?                       @map("manager_reviewer_id") @db.Char(36)
+  managerReviewedAt  DateTime?                     @map("manager_reviewed_at")
+  managerComment     String?                       @map("manager_comment") @db.LongText
+  auditReviewerId    String?                       @map("audit_reviewer_id") @db.Char(36)
+  auditReviewedAt    DateTime?                     @map("audit_reviewed_at")
+  auditComment       String?                       @map("audit_comment") @db.LongText
+  finalApprovedAt    DateTime?                     @map("final_approved_at")
+  createdAt          DateTime                      @default(now()) @map("created_at")
+  updatedAt          DateTime                      @updatedAt @map("updated_at")
+  deletedAt          DateTime?                     @map("deleted_at")
+  workflowInstanceId String?                       @map("workflow_instance_id") @db.Char(36)
+  observation        Observation?                  @relation(fields: [observationId], references: [id], onDelete: Cascade)
+  actionPlan         ActionPlan?                   @relation(fields: [actionPlanId], references: [id], onDelete: Cascade)
+  observationArea    ObservationArea?              @relation(fields: [observationAreaId], references: [id], onDelete: SetNull)
+  requestedByUser    User                          @relation("DeadlineExtensionRequestedBy", fields: [requestedByUserId], references: [id], onDelete: Restrict)
+  managerReviewer    User?                         @relation("DeadlineExtensionManagerReviewer", fields: [managerReviewerId], references: [id], onDelete: SetNull)
+  auditReviewer      User?                         @relation("DeadlineExtensionAuditReviewer", fields: [auditReviewerId], references: [id], onDelete: SetNull)
+  attachments        DeadlineExtensionAttachment[]
 
-  @@index([areaId])
+  @@index([observationAreaId])
   @@index([auditReviewerId])
-  @@index([commitmentId])
+  @@index([actionPlanId])
   @@index([deletedAt])
   @@index([managerReviewerId])
-  @@index([observationId, commitmentId, status, deletedAt], map: "der_observation_commitment_status_deleted_idx")
+  @@index([observationId, actionPlanId, status, deletedAt], map: "der_observation_action_plan_status_deleted_idx")
   @@index([requestedByUserId])
   @@index([status, updatedAt])
+  @@index([workflowInstanceId])
   @@map("deadline_extension_requests")
 }
 
@@ -843,48 +933,46 @@ model Verification {
   @@map("verifications")
 }
 
-model ProgressUpdate {
-  id                String                  @id @default(uuid()) @db.Char(36)
-  observationId     String                  @map("observation_id") @db.Char(36)
-  remediationPlanId String?                 @map("remediation_plan_id") @db.Char(36)
-  commitmentId      String?                 @map("commitment_id") @db.Char(36)
-  submittedByUserId String                  @map("submitted_by_user_id") @db.Char(36)
-  type              ProgressUpdateType
-  progressPercent   Int?                    @map("progress_percent")
-  comment           String                  @db.LongText
-  status            ProgressUpdateStatus    @default(DRAFT)
-  reviewedByUserId  String?                 @map("reviewed_by_user_id") @db.Char(36)
-  reviewedAt        DateTime?               @map("reviewed_at")
-  reviewComment     String?                 @map("review_comment") @db.LongText
-  createdAt         DateTime                @default(now()) @map("created_at")
-  updatedAt         DateTime                @updatedAt @map("updated_at")
-  deletedAt         DateTime?               @map("deleted_at")
-  observation       Observation             @relation(fields: [observationId], references: [id], onDelete: Cascade)
-  remediationPlan   RemediationPlan?        @relation(fields: [remediationPlanId], references: [id], onDelete: SetNull)
-  commitment        Commitment?             @relation(fields: [commitmentId], references: [id], onDelete: SetNull)
-  submittedByUser   User                    @relation("ProgressUpdateSubmittedBy", fields: [submittedByUserId], references: [id], onDelete: Restrict)
-  reviewedByUser    User?                   @relation("ProgressUpdateReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
-  evidenceFiles     EvidenceFile[]
-  comments          ObservationComment[]
-  reviewHistory     ProgressReviewHistory[]
+model ProgressEvaluation {
+  id                 String                         @id @default(uuid()) @db.Char(36)
+  actionPlanId       String                         @map("action_plan_id") @db.Char(36)
+  submittedByUserId  String                         @map("submitted_by_user_id") @db.Char(36)
+  type               ProgressEvaluationType         @default(ADVANCE)
+  progressPercent    Int                            @map("progress_percent")
+  actionPlanStatus   ActionPlanStatus               @map("action_plan_status")
+  comment            String                         @db.LongText
+  reviewStatus       ProgressEvaluationReviewStatus @default(DRAFT) @map("review_status")
+  reviewedByUserId   String?                        @map("reviewed_by_user_id") @db.Char(36)
+  submittedAt        DateTime                       @default(now()) @map("submitted_at")
+  reviewedAt         DateTime?                      @map("reviewed_at")
+  reviewComment      String?                        @map("review_comment") @db.LongText
+  createdAt          DateTime                       @default(now()) @map("created_at")
+  updatedAt          DateTime                       @updatedAt @map("updated_at")
+  deletedAt          DateTime?                      @map("deleted_at")
+  workflowInstanceId String?                        @map("workflow_instance_id") @db.Char(36)
+  actionPlan         ActionPlan                     @relation(fields: [actionPlanId], references: [id], onDelete: Cascade)
+  submittedByUser    User                           @relation("ProgressEvaluationSubmittedBy", fields: [submittedByUserId], references: [id], onDelete: Restrict)
+  reviewedByUser     User?                          @relation("ProgressEvaluationReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  evidenceFiles      EvidenceFile[]
+  comments           ObservationComment[]
+  reviewHistory      ProgressReviewHistory[]
 
-  @@index([commitmentId])
+  @@index([actionPlanId, submittedAt])
   @@index([deletedAt])
-  @@index([observationId, createdAt])
-  @@index([observationId, status, deletedAt])
-  @@index([remediationPlanId])
+  @@index([reviewStatus, deletedAt])
   @@index([reviewedByUserId])
-  @@index([status])
+  @@index([reviewStatus])
   @@index([submittedByUserId])
-  @@map("progress_updates")
+  @@index([workflowInstanceId])
+  @@map("progress_evaluations")
 }
 
 model EvidenceFile {
   id                           String                        @id @default(uuid()) @db.Char(36)
   observationId                String                        @map("observation_id") @db.Char(36)
-  remediationPlanId            String?                       @map("remediation_plan_id") @db.Char(36)
-  commitmentId                 String?                       @map("commitment_id") @db.Char(36)
-  progressUpdateId             String?                       @map("progress_update_id") @db.Char(36)
+  context                      EvidenceContext
+  actionPlanId                 String?                       @map("action_plan_id") @db.Char(36)
+  progressEvaluationId         String?                       @map("progress_evaluation_id") @db.Char(36)
   uploadedByUserId             String                        @map("uploaded_by_user_id") @db.Char(36)
   originalName                 String                        @map("original_name") @db.VarChar(255)
   storedName                   String                        @map("stored_name") @db.VarChar(255)
@@ -896,63 +984,62 @@ model EvidenceFile {
   createdAt                    DateTime                      @default(now()) @map("created_at")
   deletedAt                    DateTime?                     @map("deleted_at")
   observation                  Observation                   @relation(fields: [observationId], references: [id], onDelete: Cascade)
-  remediationPlan              RemediationPlan?              @relation(fields: [remediationPlanId], references: [id], onDelete: SetNull)
-  commitment                   Commitment?                   @relation(fields: [commitmentId], references: [id], onDelete: SetNull)
-  progressUpdate               ProgressUpdate?               @relation(fields: [progressUpdateId], references: [id], onDelete: SetNull)
+  actionPlan                   ActionPlan?                   @relation(fields: [actionPlanId], references: [id], onDelete: Cascade)
+  progressEvaluation           ProgressEvaluation?           @relation(fields: [progressEvaluationId], references: [id], onDelete: Cascade)
   uploadedByUser               User                          @relation("EvidenceUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
   deadlineExtensionAttachments DeadlineExtensionAttachment[]
 
-  @@index([commitmentId])
+  @@index([actionPlanId])
+  @@index([context])
   @@index([deletedAt])
   @@index([observationId, createdAt])
-  @@index([progressUpdateId])
-  @@index([remediationPlanId])
+  @@index([progressEvaluationId])
   @@index([uploadedByUserId])
   @@map("evidence_files")
 }
 
 model ObservationComment {
-  id                String            @id @default(uuid()) @db.Char(36)
-  observationId     String            @map("observation_id") @db.Char(36)
-  remediationPlanId String?           @map("remediation_plan_id") @db.Char(36)
-  commitmentId      String?           @map("commitment_id") @db.Char(36)
-  progressUpdateId  String?           @map("progress_update_id") @db.Char(36)
-  authorUserId      String            @map("author_user_id") @db.Char(36)
-  visibility        CommentVisibility @default(AREA_VISIBLE)
-  body              String            @db.LongText
-  createdAt         DateTime          @default(now()) @map("created_at")
-  updatedAt         DateTime          @updatedAt @map("updated_at")
-  deletedAt         DateTime?         @map("deleted_at")
-  observation       Observation       @relation(fields: [observationId], references: [id], onDelete: Cascade)
-  remediationPlan   RemediationPlan?  @relation(fields: [remediationPlanId], references: [id], onDelete: SetNull)
-  commitment        Commitment?       @relation(fields: [commitmentId], references: [id], onDelete: SetNull)
-  progressUpdate    ProgressUpdate?   @relation(fields: [progressUpdateId], references: [id], onDelete: SetNull)
-  authorUser        User              @relation("ObservationCommentAuthor", fields: [authorUserId], references: [id], onDelete: Restrict)
+  id                   String              @id @default(uuid()) @db.Char(36)
+  observationId        String              @map("observation_id") @db.Char(36)
+  remediationPlanId    String?             @map("remediation_plan_id") @db.Char(36)
+  actionPlanId         String?             @map("action_plan_id") @db.Char(36)
+  progressEvaluationId String?             @map("progress_evaluation_id") @db.Char(36)
+  authorUserId         String              @map("author_user_id") @db.Char(36)
+  visibility           CommentVisibility   @default(AREA_VISIBLE)
+  body                 String              @db.LongText
+  createdAt            DateTime            @default(now()) @map("created_at")
+  updatedAt            DateTime            @updatedAt @map("updated_at")
+  deletedAt            DateTime?           @map("deleted_at")
+  observation          Observation         @relation(fields: [observationId], references: [id], onDelete: Cascade)
+  remediationPlan      RemediationPlan?    @relation(fields: [remediationPlanId], references: [id], onDelete: SetNull)
+  actionPlan           ActionPlan?         @relation(fields: [actionPlanId], references: [id], onDelete: SetNull)
+  progressEvaluation   ProgressEvaluation? @relation(fields: [progressEvaluationId], references: [id], onDelete: SetNull)
+  authorUser           User                @relation("ObservationCommentAuthor", fields: [authorUserId], references: [id], onDelete: Restrict)
 
   @@index([authorUserId])
-  @@index([commitmentId])
+  @@index([actionPlanId])
   @@index([deletedAt])
   @@index([observationId, createdAt])
-  @@index([progressUpdateId])
+  @@index([progressEvaluationId])
   @@index([remediationPlanId])
   @@index([visibility])
   @@map("observation_comments")
 }
 
 model ProgressReviewHistory {
-  id               String                @id @default(uuid()) @db.Char(36)
-  progressUpdateId String                @map("progress_update_id") @db.Char(36)
-  action           ProgressReviewAction
-  fromStatus       ProgressUpdateStatus? @map("from_status")
-  toStatus         ProgressUpdateStatus  @map("to_status")
-  userId           String                @map("user_id") @db.Char(36)
-  comment          String?               @db.LongText
-  createdAt        DateTime              @default(now()) @map("created_at")
-  progressUpdate   ProgressUpdate        @relation(fields: [progressUpdateId], references: [id], onDelete: Cascade)
-  user             User                  @relation("ProgressReviewHistoryActor", fields: [userId], references: [id], onDelete: Restrict)
+  id                   String                          @id @default(uuid()) @db.Char(36)
+  progressEvaluationId String                          @map("progress_evaluation_id") @db.Char(36)
+  action               ProgressReviewAction
+  fromStatus           ProgressEvaluationReviewStatus? @map("from_status")
+  toStatus             ProgressEvaluationReviewStatus  @map("to_status")
+  userId               String                          @map("user_id") @db.Char(36)
+  comment              String?                         @db.LongText
+  createdAt            DateTime                        @default(now()) @map("created_at")
+  progressEvaluation   ProgressEvaluation              @relation(fields: [progressEvaluationId], references: [id], onDelete: Cascade)
+  user                 User                            @relation("ProgressReviewHistoryActor", fields: [userId], references: [id], onDelete: Restrict)
 
   @@index([createdAt])
-  @@index([progressUpdateId, createdAt])
+  @@index([progressEvaluationId, createdAt])
   @@index([userId])
   @@map("progress_review_history")
 }
@@ -1099,6 +1186,10 @@ model WorkflowInstance {
   startedById          String                 @map("started_by_id") @db.Char(36)
   startedAt            DateTime               @default(now()) @map("started_at")
   completedAt          DateTime?              @map("completed_at")
+  finalResult          String?                @map("final_result") @db.VarChar(64)
+  runtimeErrorCode     String?                @map("runtime_error_code") @db.VarChar(100)
+  runtimeErrorMessage  String?                @map("runtime_error_message") @db.Text
+  lastExecutionAt      DateTime?              @map("last_execution_at")
   contextJson          Json                   @map("context_json")
 
   definition  WorkflowDefinition      @relation(fields: [workflowDefinitionId], references: [id], onDelete: Restrict)
@@ -1119,18 +1210,22 @@ model WorkflowInstance {
 }
 
 model WorkflowTask {
-  id                 String             @id @default(uuid()) @db.Char(36)
-  workflowInstanceId String             @map("workflow_instance_id") @db.Char(36)
-  nodeId             String             @map("node_id") @db.Char(36)
-  assignedUserId     String?            @map("assigned_user_id") @db.Char(36)
-  assignedRoleId     String?            @map("assigned_role_id") @db.Char(36)
-  assignedAreaId     String?            @map("assigned_area_id") @db.Char(36)
-  status             WorkflowTaskStatus @default(PENDING)
-  dueAt              DateTime?          @map("due_at")
-  completedAt        DateTime?          @map("completed_at")
-  decision           String?            @db.VarChar(100)
-  comments           String?            @db.LongText
-  createdAt          DateTime           @default(now()) @map("created_at")
+  id                     String             @id @default(uuid()) @db.Char(36)
+  workflowInstanceId     String             @map("workflow_instance_id") @db.Char(36)
+  nodeId                 String             @map("node_id") @db.Char(36)
+  assignedUserId         String?            @map("assigned_user_id") @db.Char(36)
+  assignedRoleId         String?            @map("assigned_role_id") @db.Char(36)
+  assignedAreaId         String?            @map("assigned_area_id") @db.Char(36)
+  status                 WorkflowTaskStatus @default(PENDING)
+  entrySequence          Int                @default(1) @map("entry_sequence")
+  dueAt                  DateTime?          @map("due_at")
+  completedAt            DateTime?          @map("completed_at")
+  decision               String?            @db.VarChar(100)
+  comments               String?            @db.LongText
+  assignmentSnapshotJson Json?              @map("assignment_snapshot_json")
+  assignmentHistoryJson  Json?              @map("assignment_history_json")
+  evidenceReferencesJson Json?              @map("evidence_references_json")
+  createdAt              DateTime           @default(now()) @map("created_at")
 
   instance     WorkflowInstance @relation(fields: [workflowInstanceId], references: [id], onDelete: Restrict)
   node         WorkflowNode     @relation(fields: [nodeId], references: [id], onDelete: Restrict)
@@ -1139,6 +1234,7 @@ model WorkflowTask {
   assignedArea Area?            @relation("WorkflowTaskAssignedArea", fields: [assignedAreaId], references: [id], onDelete: SetNull)
   timers       WorkflowTimer[]
 
+  @@unique([workflowInstanceId, nodeId, entrySequence], map: "workflow_tasks_instance_node_entry_key")
   @@index([assignedUserId, status, dueAt])
   @@index([assignedRoleId, status])
   @@index([assignedAreaId, status])
@@ -1156,6 +1252,8 @@ model WorkflowTransitionLog {
   triggerType         String   @map("trigger_type") @db.VarChar(64)
   performedById       String?  @map("performed_by_id") @db.Char(36)
   decision            String?  @db.VarChar(100)
+  eventType           String?  @map("event_type") @db.VarChar(64)
+  detailsJson         Json?    @map("details_json")
   contextSnapshotJson Json     @map("context_snapshot_json")
   createdAt           DateTime @default(now()) @map("created_at")
 
@@ -1168,6 +1266,7 @@ model WorkflowTransitionLog {
   @@index([sourceNodeId])
   @@index([targetNodeId])
   @@index([performedById])
+  @@index([workflowInstanceId, eventType, createdAt])
   @@map("workflow_transition_logs")
 }
 
@@ -1182,11 +1281,14 @@ model WorkflowTimer {
   configurationJson  Json                @map("configuration_json")
   attempts           Int                 @default(0)
   lastError          String?             @map("last_error") @db.Text
+  lastAttemptAt      DateTime?           @map("last_attempt_at")
   createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
 
   instance WorkflowInstance @relation(fields: [workflowInstanceId], references: [id], onDelete: Restrict)
   task     WorkflowTask?    @relation(fields: [workflowTaskId], references: [id], onDelete: SetNull)
 
+  @@unique([workflowTaskId, timerType], map: "workflow_timers_task_type_key")
   @@index([status, executeAt])
   @@index([workflowInstanceId, status])
   @@index([workflowTaskId, status])

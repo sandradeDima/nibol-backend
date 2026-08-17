@@ -25,7 +25,9 @@ export type AdminSeedConfig = {
 
 const normalizeEmail = (email: string): string => email.trim().toLowerCase();
 
-export const resolveAdminSeedConfigs = (rawEnv: NodeJS.ProcessEnv): AdminSeedConfig[] => {
+export const resolveAdminSeedConfigs = (
+  rawEnv: NodeJS.ProcessEnv,
+): AdminSeedConfig[] => {
   const env = adminSeedEnvSchema.parse(rawEnv);
   const adminSeeds: AdminSeedConfig[] = [DEFAULT_ADMIN_SEED];
 
@@ -33,7 +35,10 @@ export const resolveAdminSeedConfigs = (rawEnv: NodeJS.ProcessEnv): AdminSeedCon
     return adminSeeds;
   }
 
-  if (normalizeEmail(env.SEED_ADMIN_EMAIL) === normalizeEmail(DEFAULT_ADMIN_SEED.email)) {
+  if (
+    normalizeEmail(env.SEED_ADMIN_EMAIL) ===
+    normalizeEmail(DEFAULT_ADMIN_SEED.email)
+  ) {
     return adminSeeds;
   }
 
@@ -47,8 +52,12 @@ export const resolveAdminSeedConfigs = (rawEnv: NodeJS.ProcessEnv): AdminSeedCon
   return adminSeeds;
 };
 
-export const getPrimaryAdminSeed = (adminSeeds: AdminSeedConfig[]): AdminSeedConfig => {
-  return adminSeeds.find((adminSeed) => adminSeed.source === "env") ?? adminSeeds[0]!;
+export const getPrimaryAdminSeed = (
+  adminSeeds: AdminSeedConfig[],
+): AdminSeedConfig => {
+  return (
+    adminSeeds.find((adminSeed) => adminSeed.source === "env") ?? adminSeeds[0]!
+  );
 };
 
 export const getAdminSeedIds = (

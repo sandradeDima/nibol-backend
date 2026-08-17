@@ -38,10 +38,7 @@ const SYSTEM_WIDE_ROLE_NAMES = new Set([
   "systems",
 ]);
 
-const configurationPrisma = prisma as typeof prisma & {
-  catalog: any;
-  systemParameter: any;
-};
+const configurationPrisma = prisma;
 
 const userSummarySelect = {
   email: true,
@@ -125,21 +122,18 @@ const catalogRecordSelect = {
 } as const;
 
 const accessibleObservationSelect = {
-  area: {
-    select: areaOptionSelect,
-  },
   areaAssignments: {
     select: {
       area: {
         select: areaOptionSelect,
       },
-      responsibleUser: {
+      areaResponsible: {
+        select: userSummarySelect,
+      },
+      processOwner: {
         select: userSummarySelect,
       },
     },
-  },
-  responsibleUser: {
-    select: userSummarySelect,
   },
 } as const;
 
@@ -164,7 +158,9 @@ const hasGlobalObservationAccess = (access: AuthorizationSummary): boolean => {
     return true;
   }
 
-  return access.roles.some((role) => SYSTEM_WIDE_ROLE_NAMES.has(normalizeRoleName(role)));
+  return access.roles.some((role) =>
+    SYSTEM_WIDE_ROLE_NAMES.has(normalizeRoleName(role)),
+  );
 };
 
 const buildObservationVisibilityCondition = (
@@ -177,25 +173,14 @@ const buildObservationVisibilityCondition = (
   return {
     OR: [
       {
-        responsibleUserId: access.userId,
-      },
-      {
         auditorUserId: access.userId,
-      },
-      {
-        area: {
-          active: true,
-          deletedAt: null,
-          managerUserId: access.userId,
-        },
       },
       {
         areaAssignments: {
           some: {
             OR: [
-              {
-                responsibleUserId: access.userId,
-              },
+              { areaResponsibleUserId: access.userId },
+              { processOwnerUserId: access.userId },
               {
                 area: {
                   active: true,
@@ -283,12 +268,11 @@ type CatalogRecordRow = {
 };
 
 type AccessibleObservationRow = {
-  area: AreaOptionRow;
   areaAssignments: Array<{
     area: AreaOptionRow;
-    responsibleUser: ConfigurationUserSummary | null;
+    areaResponsible: ConfigurationUserSummary;
+    processOwner: ConfigurationUserSummary;
   }>;
-  responsibleUser: ConfigurationUserSummary | null;
 };
 
 const mapUserSummary = (
@@ -568,7 +552,10 @@ const assertObservationStatusNameAvailable = async (
   });
 
   if (existing) {
-    throw new AppError("Ya existe un estado de observación con este nombre.", 400);
+    throw new AppError(
+      "Ya existe un estado de observación con este nombre.",
+      400,
+    );
   }
 };
 
@@ -594,7 +581,10 @@ const assertObservationStatusKeyAvailable = async (
   });
 
   if (existing) {
-    throw new AppError("Ya existe un estado de observación con esta clave.", 400);
+    throw new AppError(
+      "Ya existe un estado de observación con esta clave.",
+      400,
+    );
   }
 };
 
@@ -783,7 +773,9 @@ const findSystemParameterRecordOrThrow = async (
   return record;
 };
 
-const findCatalogRecordOrThrow = async (id: string): Promise<CatalogRecordRow> => {
+const findCatalogRecordOrThrow = async (
+  id: string,
+): Promise<CatalogRecordRow> => {
   const record = await configurationPrisma.catalog.findFirst({
     select: catalogRecordSelect,
     where: {
@@ -861,9 +853,7 @@ const buildAreasOrderBy = (
   }
 };
 
-const buildRiskLevelsWhere = (
-  query: ListRiskLevelsQuery,
-) => {
+const buildRiskLevelsWhere = (query: ListRiskLevelsQuery) => {
   return {
     deletedAt: null,
     ...(query.active !== undefined
@@ -915,9 +905,7 @@ const buildRiskLevelsOrderBy = (
   }
 };
 
-const buildObservationStatusesWhere = (
-  query: ListObservationStatusesQuery,
-) => {
+const buildObservationStatusesWhere = (query: ListObservationStatusesQuery) => {
   return {
     deletedAt: null,
     ...(query.active !== undefined
@@ -967,9 +955,7 @@ const buildObservationStatusesOrderBy = (
   }
 };
 
-const buildSystemParametersWhere = (
-  query: ListSystemParametersQuery,
-) => {
+const buildSystemParametersWhere = (query: ListSystemParametersQuery) => {
   return {
     deletedAt: null,
     ...(query.active !== undefined
@@ -1036,9 +1022,7 @@ const buildSystemParametersOrderBy = (
   }
 };
 
-const buildCatalogsWhere = (
-  query: ListCatalogsQuery,
-) => {
+const buildCatalogsWhere = (query: ListCatalogsQuery) => {
   return {
     deletedAt: null,
     ...(query.active !== undefined
@@ -1105,7 +1089,9 @@ export const configurationService = {
     await Promise.all([
       assertAreaNameAvailable(input.name),
       assertAreaCodeAvailable(input.code),
-      input.managerUserId ? assertActiveUserExists(input.managerUserId) : Promise.resolve(),
+      input.managerUserId
+        ? assertActiveUserExists(input.managerUserId)
+        : Promise.resolve(),
     ]);
 
     const record = await prisma.area.create({
@@ -1177,7 +1163,9 @@ export const configurationService = {
     return mapObservationStatus(record);
   },
 
-  async createRiskLevel(input: RiskLevelMutationInput): Promise<RiskLevelRecord> {
+  async createRiskLevel(
+    input: RiskLevelMutationInput,
+  ): Promise<RiskLevelRecord> {
     await Promise.all([
       assertRiskLevelNameAvailable(input.name),
       assertRiskLevelKeyAvailable(input.key),
@@ -1306,7 +1294,9 @@ export const configurationService = {
     return mapArea(await findAreaRecordOrThrow(id));
   },
 
-  async getBootstrap(access: AuthorizationSummary): Promise<ConfigurationBootstrap> {
+  async getBootstrap(
+    access: AuthorizationSummary,
+  ): Promise<ConfigurationBootstrap> {
     const [riskLevels, statuses, catalogRecords] = await prisma.$transaction([
       prisma.riskLevel.findMany({
         orderBy: {
@@ -1418,18 +1408,10 @@ export const configurationService = {
     const userMap = new Map<string, ConfigurationUserSummary>();
 
     accessibleObservations.forEach((observation: AccessibleObservationRow) => {
-      areaMap.set(observation.area.id, observation.area);
-
-      if (observation.responsibleUser) {
-        userMap.set(observation.responsibleUser.id, observation.responsibleUser);
-      }
-
       observation.areaAssignments.forEach((assignment) => {
         areaMap.set(assignment.area.id, assignment.area);
-
-        if (assignment.responsibleUser) {
-          userMap.set(assignment.responsibleUser.id, assignment.responsibleUser);
-        }
+        userMap.set(assignment.areaResponsible.id, assignment.areaResponsible);
+        userMap.set(assignment.processOwner.id, assignment.processOwner);
       });
     });
 
@@ -1460,7 +1442,9 @@ export const configurationService = {
         name: record.name,
         sortOrder: record.sortOrder,
       })),
-      users: [...userMap.values()].sort((left, right) => left.name.localeCompare(right.name)),
+      users: [...userMap.values()].sort((left, right) =>
+        left.name.localeCompare(right.name),
+      ),
     };
   },
 
@@ -1505,7 +1489,9 @@ export const configurationService = {
     };
   },
 
-  async listCatalogs(query: ListCatalogsQuery): Promise<PaginatedResult<CatalogRecord>> {
+  async listCatalogs(
+    query: ListCatalogsQuery,
+  ): Promise<PaginatedResult<CatalogRecord>> {
     const where = buildCatalogsWhere(query);
     const [total, records] = await prisma.$transaction([
       configurationPrisma.catalog.count({
@@ -1539,7 +1525,10 @@ export const configurationService = {
         where,
       }),
       prisma.observationStatus.findMany({
-        orderBy: buildObservationStatusesOrderBy(query.sortBy, query.sortDirection),
+        orderBy: buildObservationStatusesOrderBy(
+          query.sortBy,
+          query.sortDirection,
+        ),
         select: observationStatusRecordSelect,
         skip: (query.page - 1) * query.perPage,
         take: query.perPage,
@@ -1593,7 +1582,10 @@ export const configurationService = {
         where,
       }),
       configurationPrisma.systemParameter.findMany({
-        orderBy: buildSystemParametersOrderBy(query.sortBy, query.sortDirection),
+        orderBy: buildSystemParametersOrderBy(
+          query.sortBy,
+          query.sortDirection,
+        ),
         select: systemParameterRecordSelect,
         skip: (query.page - 1) * query.perPage,
         take: query.perPage,
@@ -1625,7 +1617,9 @@ export const configurationService = {
     await Promise.all([
       assertAreaNameAvailable(input.name, id),
       assertAreaCodeAvailable(input.code, id),
-      input.managerUserId ? assertActiveUserExists(input.managerUserId) : Promise.resolve(),
+      input.managerUserId
+        ? assertActiveUserExists(input.managerUserId)
+        : Promise.resolve(),
     ]);
 
     const record = await prisma.area.update({

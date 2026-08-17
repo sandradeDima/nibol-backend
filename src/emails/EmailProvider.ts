@@ -23,9 +23,9 @@ type ProviderSendResult = {
 
 const isSmtpConfigured = Boolean(
   env.SMTP_HOST &&
-    env.SMTP_PORT &&
-    env.SMTP_USER &&
-    (env.SMTP_PASSWORD || env.SMTP_PASS),
+  env.SMTP_PORT &&
+  env.SMTP_USER &&
+  (env.SMTP_PASSWORD || env.SMTP_PASS),
 );
 
 const toStringArray = (value: unknown): string[] => {
@@ -69,7 +69,9 @@ const toNodemailerAddressLike = (
  * Wraps Nodemailer so the rest of the application only depends on this provider boundary.
  */
 export class EmailProvider {
-  private readonly providerMode: EmailProviderMode = isSmtpConfigured ? "smtp" : "json";
+  private readonly providerMode: EmailProviderMode = isSmtpConfigured
+    ? "smtp"
+    : "json";
 
   private readonly transport = isSmtpConfigured
     ? nodemailer.createTransport({
@@ -114,20 +116,23 @@ export class EmailProvider {
       payload.replyTo = toNodemailerAddressLike(message.replyTo);
     }
 
-    const info = await new Promise<nodemailer.SentMessageInfo>((resolve, reject) => {
-      this.transport.sendMail(payload, (error, sentMessageInfo) => {
-        if (error) {
-          reject(error);
-          return;
-        }
+    const info = await new Promise<nodemailer.SentMessageInfo>(
+      (resolve, reject) => {
+        this.transport.sendMail(payload, (error, sentMessageInfo) => {
+          if (error) {
+            reject(error);
+            return;
+          }
 
-        resolve(sentMessageInfo);
-      });
-    });
+          resolve(sentMessageInfo);
+        });
+      },
+    );
 
     return {
       accepted: toStringArray(info.accepted),
-      messageId: typeof info.messageId === "string" ? info.messageId : undefined,
+      messageId:
+        typeof info.messageId === "string" ? info.messageId : undefined,
       providerMode: this.providerMode,
       rejected: toStringArray(info.rejected),
     };

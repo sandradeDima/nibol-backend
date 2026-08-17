@@ -13,9 +13,10 @@ const storeAuthorizationSummary = async (request) => {
         request.authorizationSummary = null;
         return;
     }
-    request.authorizationSummary = await authorizationService.getUserAuthorizationSummary(userId, {
-        cache: getRequestCache(request),
-    });
+    request.authorizationSummary =
+        await authorizationService.getUserAuthorizationSummary(userId, {
+            cache: getRequestCache(request),
+        });
 };
 export const requireAuth = () => {
     return async (request, response, next) => {

@@ -19,7 +19,8 @@ export const resolveAdminSeedConfigs = (rawEnv) => {
     if (!env.SEED_ADMIN_EMAIL) {
         return adminSeeds;
     }
-    if (normalizeEmail(env.SEED_ADMIN_EMAIL) === normalizeEmail(DEFAULT_ADMIN_SEED.email)) {
+    if (normalizeEmail(env.SEED_ADMIN_EMAIL) ===
+        normalizeEmail(DEFAULT_ADMIN_SEED.email)) {
         return adminSeeds;
     }
     adminSeeds.push({
@@ -31,7 +32,7 @@ export const resolveAdminSeedConfigs = (rawEnv) => {
     return adminSeeds;
 };
 export const getPrimaryAdminSeed = (adminSeeds) => {
-    return adminSeeds.find((adminSeed) => adminSeed.source === "env") ?? adminSeeds[0];
+    return (adminSeeds.find((adminSeed) => adminSeed.source === "env") ?? adminSeeds[0]);
 };
 export const getAdminSeedIds = (adminSeed) => {
     if (adminSeed.source === "default") {

@@ -18,7 +18,7 @@ const configuredLevel = rawConfiguredLevel === "debug" ||
     ? rawConfiguredLevel
     : "info";
 const shouldLog = (level) => {
-    return logPriority[level] >= (logPriority[configuredLevel] ?? logPriority.info);
+    return (logPriority[level] >= (logPriority[configuredLevel] ?? logPriority.info));
 };
 const formatMessage = (level, message, meta) => {
     const metadata = meta === undefined ? "" : ` ${JSON.stringify(meta)}`;

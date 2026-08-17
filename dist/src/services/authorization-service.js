@@ -34,7 +34,9 @@ const buildAuthorizationSummary = async (userId) => {
             },
         },
     });
-    const roles = userRoles.map(({ role }) => role.name).sort((left, right) => {
+    const roles = userRoles
+        .map(({ role }) => role.name)
+        .sort((left, right) => {
         return left.localeCompare(right);
     });
     const permissions = Array.from(new Set(userRoles.flatMap(({ role }) => role.rolePermissions.map(({ permission }) => permission.name)))).sort((left, right) => {

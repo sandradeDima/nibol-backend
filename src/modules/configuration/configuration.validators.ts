@@ -7,7 +7,9 @@ const booleanFilterSchema = z
   .transform((value) => value === "true")
   .optional();
 
-const normalizeNullableText = (value: string | null | undefined): string | null => {
+const normalizeNullableText = (
+  value: string | null | undefined,
+): string | null => {
   if (value === null || value === undefined) {
     return null;
   }
@@ -89,9 +91,12 @@ export const listAreasQuerySchema = z.object({
 export const areaMutationSchema = z.object({
   active: z.boolean().default(true),
   code: nullableUppercaseCodeSchema,
-  description: nullableTextSchema.refine((value) => value === null || value.length <= 500, {
-    message: "La descripción es demasiado extensa.",
-  }),
+  description: nullableTextSchema.refine(
+    (value) => value === null || value.length <= 500,
+    {
+      message: "La descripción es demasiado extensa.",
+    },
+  ),
   managerUserId: z.union([z.uuid(), z.null()]).default(null),
   name: z.string().trim().min(2).max(191),
 });
@@ -116,13 +121,19 @@ export const listRiskLevelsQuerySchema = z.object({
 
 export const riskLevelMutationSchema = z.object({
   active: z.boolean().default(true),
-  colorToken: nullableTextSchema.refine((value) => value === null || value.length <= 64, {
-    message: "El token de color es demasiado largo.",
-  }),
+  colorToken: nullableTextSchema.refine(
+    (value) => value === null || value.length <= 64,
+    {
+      message: "El token de color es demasiado largo.",
+    },
+  ),
   defaultDeadlineDays: z.coerce.number().int().min(1).max(3650).nullable(),
-  description: nullableTextSchema.refine((value) => value === null || value.length <= 500, {
-    message: "La descripción es demasiado extensa.",
-  }),
+  description: nullableTextSchema.refine(
+    (value) => value === null || value.length <= 500,
+    {
+      message: "La descripción es demasiado extensa.",
+    },
+  ),
   key: uppercaseKeySchema,
   name: z.string().trim().min(2).max(100),
   severityOrder: z.coerce.number().int().min(1).max(999),
@@ -133,7 +144,9 @@ export const listObservationStatusesQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   perPage: z.coerce.number().int().min(1).max(100).default(10),
   search: z.string().trim().default(""),
-  sortBy: z.enum(["createdAt", "key", "name", "sortOrder", "updatedAt"]).default("sortOrder"),
+  sortBy: z
+    .enum(["createdAt", "key", "name", "sortOrder", "updatedAt"])
+    .default("sortOrder"),
   sortDirection: z.enum(["asc", "desc"]).default("asc"),
 });
 
@@ -141,9 +154,12 @@ export const observationStatusMutationSchema = z
   .object({
     active: z.boolean().default(true),
     countsAsOverdue: z.boolean().default(false),
-    description: nullableTextSchema.refine((value) => value === null || value.length <= 500, {
-      message: "La descripción es demasiado extensa.",
-    }),
+    description: nullableTextSchema.refine(
+      (value) => value === null || value.length <= 500,
+      {
+        message: "La descripción es demasiado extensa.",
+      },
+    ),
     isFinal: z.boolean().default(false),
     isInitial: z.boolean().default(false),
     key: uppercaseKeySchema,
@@ -170,9 +186,12 @@ export const listSystemParametersQuerySchema = z.object({
 
 export const systemParameterMutationSchema = z.object({
   active: z.boolean().default(true),
-  description: nullableTextSchema.refine((value) => value === null || value.length <= 500, {
-    message: "La descripción es demasiado extensa.",
-  }),
+  description: nullableTextSchema.refine(
+    (value) => value === null || value.length <= 500,
+    {
+      message: "La descripción es demasiado extensa.",
+    },
+  ),
   editable: z.boolean().default(true),
   group: groupSlugSchema,
   key: keySlugSchema,
@@ -186,16 +205,21 @@ export const listCatalogsQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   perPage: z.coerce.number().int().min(1).max(100).default(10),
   search: z.string().trim().default(""),
-  sortBy: z.enum(["createdAt", "key", "name", "sortOrder", "type", "updatedAt"]).default("type"),
+  sortBy: z
+    .enum(["createdAt", "key", "name", "sortOrder", "type", "updatedAt"])
+    .default("type"),
   sortDirection: z.enum(["asc", "desc"]).default("asc"),
   type: catalogTypeSchema.optional(),
 });
 
 export const catalogMutationSchema = z.object({
   active: z.boolean().default(true),
-  description: nullableTextSchema.refine((value) => value === null || value.length <= 500, {
-    message: "La descripción es demasiado extensa.",
-  }),
+  description: nullableTextSchema.refine(
+    (value) => value === null || value.length <= 500,
+    {
+      message: "La descripción es demasiado extensa.",
+    },
+  ),
   key: nullableUppercaseKeySchema,
   name: z.string().trim().min(2).max(191),
   sortOrder: z.coerce.number().int().min(0).max(999),
@@ -214,8 +238,12 @@ export type ListObservationStatusesQuery = z.infer<
 export type ObservationStatusMutationInput = z.infer<
   typeof observationStatusMutationSchema
 >;
-export type ListSystemParametersQuery = z.infer<typeof listSystemParametersQuerySchema>;
-export type SystemParameterMutationInput = z.infer<typeof systemParameterMutationSchema>;
+export type ListSystemParametersQuery = z.infer<
+  typeof listSystemParametersQuerySchema
+>;
+export type SystemParameterMutationInput = z.infer<
+  typeof systemParameterMutationSchema
+>;
 export type ListCatalogsQuery = z.infer<typeof listCatalogsQuerySchema>;
 export type CatalogMutationInput = z.infer<typeof catalogMutationSchema>;
 export type CatalogType = z.infer<typeof catalogTypeSchema>;

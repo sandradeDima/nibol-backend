@@ -2,9 +2,11 @@ import { z } from "zod";
 
 const supportedTimezones = new Set([
   "UTC",
-  ...(((Intl as typeof Intl & {
-    supportedValuesOf?: (key: string) => string[];
-  }).supportedValuesOf?.("timeZone")) ?? []),
+  ...((
+    Intl as typeof Intl & {
+      supportedValuesOf?: (key: string) => string[];
+    }
+  ).supportedValuesOf?.("timeZone") ?? []),
 ]);
 
 export const supportedDateFormats = [
@@ -53,14 +55,13 @@ export const updateSettingsSchema = z.object({
 });
 
 export const logoUploadSchema = z.object({
-  mimetype: z.enum([
-    "image/jpeg",
-    "image/png",
-    "image/svg+xml",
-    "image/webp",
-  ]),
+  mimetype: z.enum(["image/jpeg", "image/png", "image/svg+xml", "image/webp"]),
   originalName: z.string().trim().min(1).max(255),
-  size: z.number().int().positive().max(5 * 1024 * 1024),
+  size: z
+    .number()
+    .int()
+    .positive()
+    .max(5 * 1024 * 1024),
 });
 
 export type UpdateSettingsInput = z.infer<typeof updateSettingsSchema>;

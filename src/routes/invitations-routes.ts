@@ -2,9 +2,7 @@ import { Router } from "express";
 import type { Request } from "express";
 
 import { asyncHandler } from "../middleware/async-handler.js";
-import {
-  requirePermission,
-} from "../middleware/authorization-middleware.js";
+import { requirePermission } from "../middleware/authorization-middleware.js";
 import { invitationsService } from "../services/invitations-service.js";
 import { AppError } from "../utils/app-error.js";
 import { sendPaginated, sendSuccess } from "../utils/response.js";
@@ -32,7 +30,9 @@ const getQueryValue = (value: unknown): string | undefined => {
   return undefined;
 };
 
-const getRequiredInvitationId = (value: string | string[] | undefined): string => {
+const getRequiredInvitationId = (
+  value: string | string[] | undefined,
+): string => {
   const invitationId = Array.isArray(value) ? value[0] : value;
 
   if (!invitationId) {

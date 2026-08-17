@@ -1,286 +1,96 @@
 import { activityLogService } from "../../services/activity-log-service.js";
 import { auditLogService } from "../../services/audit-log-service.js";
 import { entityActivityService } from "../../services/entity-activity-service.js";
-import { getRemediationActivityType } from "../../services/entity-activity-mapping.js";
 import { AppError } from "../../utils/app-error.js";
 import { getRequestLogActorContext } from "../../utils/request-context.js";
 import { sendPaginated, sendSuccess } from "../../utils/response.js";
-import { OBSERVATIONS_PERMISSIONS } from "../observations/observations.permissions.js";
-import { REMEDIATION_ACTIVITY_ACTIONS, REMEDIATION_ENTITY_TYPES, } from "./remediation.constants.js";
 import { remediationService } from "./remediation.service.js";
-import { commitmentIdParamSchema, createCommitmentSchema, listCommitmentsQuerySchema, listRemediationPlansQuerySchema, observationRemediationParamsSchema, observationRemediationQuerySchema, remediationPlanIdParamSchema, remediationPlanMutationSchema, remediationPlanReturnSchema, remediationPlanUpdateSchema, updateCommitmentSchema, } from "./remediation.validators.js";
-const getQueryValue = (value) => {
-    if (typeof value === "string") {
-        return value;
-    }
-    if (Array.isArray(value)) {
-        const firstValue = value[0];
-        if (typeof firstValue === "string") {
-            return firstValue;
-        }
-    }
-    return undefined;
-};
-const getRequiredAuthorizationSummary = (request) => {
-    if (!request.authorizationSummary) {
+import { actionPlanIdParamSchema, createActionPlanSchema, listActionPlansQuerySchema, observationActionPlanParamsSchema, updateActionPlanSchema, } from "./remediation.validators.js";
+const value = (input) => typeof input === "string" ? input : undefined;
+const access = (request) => {
+    if (!request.authorizationSummary)
         throw new AppError("Authorization required.", 401);
-    }
     return request.authorizationSummary;
 };
-const getRequiredObservationId = (value) => {
-    const observationId = Array.isArray(value) ? value[0] : value;
-    if (!observationId) {
-        throw new AppError("Observation id is required.", 400);
-    }
-    return observationRemediationParamsSchema.parse({
-        id: observationId,
-    }).id;
-};
-const getRequiredPlanId = (value) => {
-    const planId = Array.isArray(value) ? value[0] : value;
-    if (!planId) {
-        throw new AppError("Remediation plan id is required.", 400);
-    }
-    return remediationPlanIdParamSchema.parse({
-        id: planId,
-    }).id;
-};
-const getRequiredCommitmentId = (value) => {
-    const commitmentId = Array.isArray(value) ? value[0] : value;
-    if (!commitmentId) {
-        throw new AppError("Commitment id is required.", 400);
-    }
-    return commitmentIdParamSchema.parse({
-        id: commitmentId,
-    }).id;
-};
-const logAction = async ({ action, entityId, entityType, newValues, oldValues, request, summary, }) => {
-    const actorContext = getRequestLogActorContext(request);
+const actionPlanId = (request) => actionPlanIdParamSchema.parse({ id: value(request.params.id) }).id;
+const observationId = (request) => observationActionPlanParamsSchema.parse({ id: value(request.params.id) }).id;
+const log = async (request, action, current, previous) => {
+    const record = current ?? previous;
+    if (!record)
+        return;
+    const actor = getRequestLogActorContext(request);
     await Promise.all([
         activityLogService.logUserAction({
-            ...actorContext,
+            ...actor,
             action,
-            entityId,
-            entityType,
-            metadata: {
-                summary,
-            },
+            entityId: record.id,
+            entityType: "ACTION_PLAN",
+            metadata: { summary: `Plan de acción: ${record.title}.` },
         }),
         auditLogService.create({
-            ...actorContext,
-            entityId,
-            entityType,
-            newValues,
-            oldValues,
+            ...actor,
+            entityId: record.id,
+            entityType: "ACTION_PLAN",
+            newValues: current,
+            oldValues: previous,
         }),
         entityActivityService.recordEntityChange({
             action,
-            activityType: getRemediationActivityType(entityType, action),
-            actorUserId: actorContext.userId,
-            description: summary,
-            entityId,
-            entityType: entityType === "remediation_plan" ? "REMEDIATION_PLAN" : "COMMITMENT",
-            metadata: { summary },
-            newData: newValues,
-            previousData: oldValues,
-            title: summary,
+            activityType: action
+                .toUpperCase()
+                .replaceAll(".", "_")
+                .replaceAll("-", "_"),
+            actorUserId: actor.userId,
+            entityId: record.id,
+            entityType: "ACTION_PLAN",
+            newData: current,
+            observationId: record.observation.id,
+            previousData: previous,
+            targetUrl: `/planes-accion/${record.id}`,
+            title: `Plan de acción: ${record.title}`,
         }),
     ]);
 };
 export const remediationController = {
-    async approvePlan(request, response) {
-        const plan = await remediationService.approvePlan(getRequiredPlanId(request.params.id), getRequiredAuthorizationSummary(request));
-        await logAction({
-            action: REMEDIATION_ACTIVITY_ACTIONS.approvePlan,
-            entityId: plan.id,
-            entityType: REMEDIATION_ENTITY_TYPES.remediationPlan,
-            newValues: plan,
-            oldValues: {
-                id: plan.id,
-                status: "SENT_TO_AUDIT",
-            },
-            request,
-            summary: `El plan de remediacion ${plan.id} fue aprobado por Auditoria.`,
-        });
-        sendSuccess(response, plan);
+    async createActionPlan(request, response) {
+        const record = await remediationService.createActionPlan(observationId(request), createActionPlanSchema.parse(request.body), access(request));
+        await log(request, "action_plans.create", record, null);
+        sendSuccess(response, record, 201);
     },
-    async createCommitment(request, response) {
-        const commitment = await remediationService.createCommitment(getRequiredPlanId(request.params.id), createCommitmentSchema.parse(request.body), getRequiredAuthorizationSummary(request));
-        await logAction({
-            action: REMEDIATION_ACTIVITY_ACTIONS.createCommitment,
-            entityId: commitment.id,
-            entityType: REMEDIATION_ENTITY_TYPES.commitment,
-            newValues: commitment,
-            oldValues: null,
-            request,
-            summary: `Se registro el compromiso "${commitment.title}".`,
-        });
-        sendSuccess(response, commitment, 201);
+    async deleteActionPlan(request, response) {
+        const record = await remediationService.deleteActionPlan(actionPlanId(request), access(request));
+        await log(request, "action_plans.delete", null, record);
+        sendSuccess(response, { deleted: true, id: record.id });
     },
-    async deleteCommitment(request, response) {
-        const commitment = await remediationService.deleteCommitment(getRequiredCommitmentId(request.params.id), getRequiredAuthorizationSummary(request));
-        await logAction({
-            action: REMEDIATION_ACTIVITY_ACTIONS.deleteCommitment,
-            entityId: commitment.id,
-            entityType: REMEDIATION_ENTITY_TYPES.commitment,
-            newValues: null,
-            oldValues: commitment,
-            request,
-            summary: `El compromiso "${commitment.title}" fue eliminado logicamente.`,
-        });
-        sendSuccess(response, {
-            deleted: true,
-            id: commitment.id,
-        });
+    async getActionPlan(request, response) {
+        sendSuccess(response, await remediationService.getActionPlanById(actionPlanId(request), access(request)));
     },
-    async getObservationWorkspace(request, response) {
-        const workspace = await remediationService.getObservationRemediationWorkspace(getRequiredObservationId(request.params.id), observationRemediationQuerySchema.parse({
-            areaId: getQueryValue(request.query.areaId),
-        }), getRequiredAuthorizationSummary(request));
-        sendSuccess(response, workspace);
-    },
-    async listCommitments(request, response) {
-        const result = await remediationService.listCommitments(listCommitmentsQuerySchema.parse({
-            areaId: getQueryValue(request.query["filter.areaId"]),
-            dueDateFrom: getQueryValue(request.query["filter.dueDateFrom"]),
-            dueDateTo: getQueryValue(request.query["filter.dueDateTo"]),
-            overdue: getQueryValue(request.query["filter.overdue"]),
-            page: getQueryValue(request.query.page),
-            perPage: getQueryValue(request.query.perPage),
-            responsibleUserId: getQueryValue(request.query["filter.responsibleUserId"]),
-            search: getQueryValue(request.query.search),
-            sortBy: getQueryValue(request.query.sortBy),
-            sortDirection: getQueryValue(request.query.sortDirection),
-            status: getQueryValue(request.query["filter.status"]),
-        }), getRequiredAuthorizationSummary(request));
+    async listActionPlans(request, response) {
+        const result = await remediationService.listActionPlans(listActionPlansQuerySchema.parse({
+            areaId: value(request.query["filter.areaId"]),
+            dueDateFrom: value(request.query["filter.dueDateFrom"]),
+            dueDateTo: value(request.query["filter.dueDateTo"]),
+            observationId: value(request.query["filter.observationId"]),
+            overdue: value(request.query["filter.overdue"]),
+            page: value(request.query.page),
+            perPage: value(request.query.perPage),
+            responsibleUserId: value(request.query["filter.responsibleUserId"]),
+            search: value(request.query.search),
+            sortBy: value(request.query.sortBy),
+            sortDirection: value(request.query.sortDirection),
+            status: value(request.query["filter.status"]),
+        }), access(request));
         sendPaginated(response, result.data, result.pagination);
     },
-    async listPlanCommitments(request, response) {
-        const commitments = await remediationService.listPlanCommitments(getRequiredPlanId(request.params.id), getRequiredAuthorizationSummary(request));
-        sendSuccess(response, commitments);
+    async markActionPlanComplete(request, response) {
+        const result = await remediationService.markActionPlanComplete(actionPlanId(request), access(request));
+        await log(request, "action_plans.complete", result.current, result.previous);
+        sendSuccess(response, result.current);
     },
-    async listPlans(request, response) {
-        const result = await remediationService.listRemediationPlans(listRemediationPlansQuerySchema.parse({
-            areaId: getQueryValue(request.query["filter.areaId"]),
-            overdue: getQueryValue(request.query["filter.overdue"]),
-            page: getQueryValue(request.query.page),
-            perPage: getQueryValue(request.query.perPage),
-            responsibleUserId: getQueryValue(request.query["filter.responsibleUserId"]),
-            riskLevelId: getQueryValue(request.query["filter.riskLevelId"]),
-            search: getQueryValue(request.query.search),
-            sortBy: getQueryValue(request.query.sortBy),
-            sortDirection: getQueryValue(request.query.sortDirection),
-            status: getQueryValue(request.query["filter.status"]),
-        }), getRequiredAuthorizationSummary(request));
-        sendPaginated(response, result.data, result.pagination);
-    },
-    async markCommitmentComplete(request, response) {
-        const commitment = await remediationService.markCommitmentComplete(getRequiredCommitmentId(request.params.id), getRequiredAuthorizationSummary(request));
-        await logAction({
-            action: REMEDIATION_ACTIVITY_ACTIONS.markCommitmentComplete,
-            entityId: commitment.id,
-            entityType: REMEDIATION_ENTITY_TYPES.commitment,
-            newValues: commitment,
-            oldValues: {
-                id: commitment.id,
-                status: commitment.status,
-            },
-            request,
-            summary: `El compromiso "${commitment.title}" fue marcado como completado.`,
-        });
-        sendSuccess(response, commitment);
-    },
-    async returnPlan(request, response) {
-        const plan = await remediationService.returnPlan(getRequiredPlanId(request.params.id), remediationPlanReturnSchema.parse(request.body), getRequiredAuthorizationSummary(request));
-        await logAction({
-            action: REMEDIATION_ACTIVITY_ACTIONS.returnPlan,
-            entityId: plan.id,
-            entityType: REMEDIATION_ENTITY_TYPES.remediationPlan,
-            newValues: plan,
-            oldValues: {
-                id: plan.id,
-                status: "SENT_TO_AUDIT",
-            },
-            request,
-            summary: `El plan de remediacion ${plan.id} fue devuelto al area responsable.`,
-        });
-        sendSuccess(response, plan);
-    },
-    async saveObservationPlan(request, response) {
-        const plan = await remediationService.createOrUpdateObservationPlan(getRequiredObservationId(request.params.id), remediationPlanMutationSchema.parse(request.body), getRequiredAuthorizationSummary(request));
-        await logAction({
-            action: REMEDIATION_ACTIVITY_ACTIONS.createPlan,
-            entityId: plan.id,
-            entityType: REMEDIATION_ENTITY_TYPES.remediationPlan,
-            newValues: plan,
-            oldValues: {
-                id: plan.id,
-            },
-            request,
-            summary: `Se guardo el plan de remediacion ${plan.id} en borrador.`,
-        });
-        sendSuccess(response, plan, 201);
-    },
-    async sendCommitmentToAudit(request, response) {
-        const commitment = await remediationService.sendCommitmentToAudit(getRequiredCommitmentId(request.params.id), getRequiredAuthorizationSummary(request));
-        await logAction({
-            action: REMEDIATION_ACTIVITY_ACTIONS.sendCommitmentToAudit,
-            entityId: commitment.id,
-            entityType: REMEDIATION_ENTITY_TYPES.commitment,
-            newValues: commitment,
-            oldValues: {
-                id: commitment.id,
-            },
-            request,
-            summary: `El compromiso "${commitment.title}" fue enviado a Auditoria.`,
-        });
-        sendSuccess(response, commitment);
-    },
-    async sendPlanToAudit(request, response) {
-        const plan = await remediationService.sendPlanToAudit(getRequiredPlanId(request.params.id), getRequiredAuthorizationSummary(request));
-        await logAction({
-            action: REMEDIATION_ACTIVITY_ACTIONS.sendPlanToAudit,
-            entityId: plan.id,
-            entityType: REMEDIATION_ENTITY_TYPES.remediationPlan,
-            newValues: plan,
-            oldValues: {
-                id: plan.id,
-                status: "DRAFT",
-            },
-            request,
-            summary: `El plan de remediacion ${plan.id} fue enviado a Auditoria para revision.`,
-        });
-        sendSuccess(response, plan);
-    },
-    async updateCommitment(request, response) {
-        const commitment = await remediationService.updateCommitment(getRequiredCommitmentId(request.params.id), updateCommitmentSchema.parse(request.body), getRequiredAuthorizationSummary(request));
-        await logAction({
-            action: REMEDIATION_ACTIVITY_ACTIONS.updateCommitment,
-            entityId: commitment.id,
-            entityType: REMEDIATION_ENTITY_TYPES.commitment,
-            newValues: commitment,
-            oldValues: {
-                id: commitment.id,
-            },
-            request,
-            summary: `El compromiso "${commitment.title}" fue actualizado.`,
-        });
-        sendSuccess(response, commitment);
-    },
-    async updatePlan(request, response) {
-        const plan = await remediationService.updatePlan(getRequiredPlanId(request.params.id), remediationPlanUpdateSchema.parse(request.body), getRequiredAuthorizationSummary(request));
-        await logAction({
-            action: REMEDIATION_ACTIVITY_ACTIONS.updatePlan,
-            entityId: plan.id,
-            entityType: REMEDIATION_ENTITY_TYPES.remediationPlan,
-            newValues: plan,
-            oldValues: {
-                id: plan.id,
-            },
-            request,
-            summary: `El plan de remediacion ${plan.id} fue actualizado.`,
-        });
-        sendSuccess(response, plan);
+    async updateActionPlan(request, response) {
+        const result = await remediationService.updateActionPlan(actionPlanId(request), updateActionPlanSchema.parse(request.body), access(request));
+        await log(request, "action_plans.edit", result.current, result.previous);
+        sendSuccess(response, result.current);
     },
 };
 //# sourceMappingURL=remediation.controller.js.map

@@ -11,7 +11,7 @@ import { AppError } from "../utils/app-error.js";
 import { prisma } from "../utils/prisma.js";
 import { avatarUploadsDir, buildAvatarUrl } from "../utils/uploads.js";
 import { adminSafeguardService } from "./admin-safeguard-service.js";
-import { areStringArraysEqual, } from "./logging-utils.js";
+import { areStringArraysEqual } from "./logging-utils.js";
 import { notificationService } from "./notification-service.js";
 const credentialProviderId = "credential";
 const buildOrderBy = (sortBy, sortDirection) => {
@@ -181,7 +181,8 @@ const getDeletedUserByEmail = async (email) => {
         },
     });
 };
-const isUniqueConstraintError = (error) => error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+const isUniqueConstraintError = (error) => error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === "P2002";
 const getUserDetailsRecord = async (userId) => {
     return prisma.user.findFirst({
         select: {
@@ -191,6 +192,7 @@ const getUserDetailsRecord = async (userId) => {
             emailVerified: true,
             id: true,
             isActive: true,
+            jobTitle: true,
             lastLoginAt: true,
             name: true,
             updatedAt: true,
@@ -230,6 +232,7 @@ const mapUserDetails = (user) => {
         emailVerified: user.emailVerified,
         id: user.id,
         isActive: user.isActive,
+        jobTitle: user.jobTitle,
         lastLoginAt: user.lastLoginAt?.toISOString() ?? null,
         name: user.name,
         roleIds: user.userRoles.map(({ role }) => role.id),
@@ -441,6 +444,7 @@ export const usersService = {
                             deletedAt: null,
                             emailVerified: false,
                             isActive: input.isActive,
+                            jobTitle: input.jobTitle ?? null,
                             lastLoginAt: null,
                             name: input.name,
                             password: passwordHash,
@@ -555,6 +559,7 @@ export const usersService = {
                         email: input.email,
                         emailVerified: false,
                         isActive: input.isActive,
+                        jobTitle: input.jobTitle ?? null,
                         name: input.name,
                         password: passwordHash,
                     },
@@ -754,6 +759,7 @@ export const usersService = {
                     emailVerified: true,
                     id: true,
                     isActive: true,
+                    jobTitle: true,
                     lastLoginAt: true,
                     name: true,
                     userRoles: {
@@ -788,6 +794,7 @@ export const usersService = {
                 emailVerified: user.emailVerified,
                 id: user.id,
                 isActive: user.isActive,
+                jobTitle: user.jobTitle,
                 lastLoginAt: user.lastLoginAt?.toISOString() ?? null,
                 name: user.name,
                 roles: user.userRoles.map(({ role }) => role.name),
@@ -812,10 +819,12 @@ export const usersService = {
             select: {
                 email: true,
                 id: true,
+                jobTitle: true,
                 name: true,
             },
             where: {
                 deletedAt: null,
+                isActive: true,
             },
         });
         return users;
@@ -987,6 +996,7 @@ export const usersService = {
                 data: {
                     email: input.email,
                     isActive: input.isActive,
+                    jobTitle: input.jobTitle ?? null,
                     name: input.name,
                 },
                 where: {

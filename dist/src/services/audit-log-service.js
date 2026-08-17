@@ -125,7 +125,8 @@ export const auditLogService = {
             if (!query.action) {
                 return true;
             }
-            return deriveAuditAction(auditLog.oldValues, auditLog.newValues) === query.action;
+            return (deriveAuditAction(auditLog.oldValues, auditLog.newValues) ===
+                query.action);
         });
         const total = filteredAuditLogs.length;
         const startIndex = (query.page - 1) * query.perPage;

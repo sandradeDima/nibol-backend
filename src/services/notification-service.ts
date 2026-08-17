@@ -56,7 +56,10 @@ const notificationTypeMap: Record<NotificationType, PrismaNotificationType> = {
   warning: PrismaNotificationType.WARNING,
 };
 
-const notificationPriorityMap: Record<NotificationPriority, PrismaNotificationPriority> = {
+const notificationPriorityMap: Record<
+  NotificationPriority,
+  PrismaNotificationPriority
+> = {
   CRITICAL: PrismaNotificationPriority.CRITICAL,
   HIGH: PrismaNotificationPriority.HIGH,
   LOW: PrismaNotificationPriority.LOW,
@@ -83,13 +86,14 @@ const mapNotificationRecord = (notification: NotificationRecord) => ({
   readAt: notification.readAt?.toISOString() ?? null,
   targetUrl: notification.targetUrl,
   title: notification.title,
-  type: notification.type === PrismaNotificationType.ERROR
-    ? "error"
-    : notification.type === PrismaNotificationType.SUCCESS
-      ? "success"
-      : notification.type === PrismaNotificationType.WARNING
-        ? "warning"
-        : "info",
+  type:
+    notification.type === PrismaNotificationType.ERROR
+      ? "error"
+      : notification.type === PrismaNotificationType.SUCCESS
+        ? "success"
+        : notification.type === PrismaNotificationType.WARNING
+          ? "warning"
+          : "info",
 });
 
 const buildWhereClause = (
@@ -141,14 +145,15 @@ const getNotificationForUser = async (
   userId: string,
   notificationId: string,
   db: NotificationWriter = prisma,
-) => db.notification.findFirst({
-  select: notificationSelect,
-  where: {
-    deletedAt: null,
-    id: notificationId,
-    userId,
-  },
-});
+) =>
+  db.notification.findFirst({
+    select: notificationSelect,
+    where: {
+      deletedAt: null,
+      id: notificationId,
+      userId,
+    },
+  });
 
 export const notificationService = {
   async create(
@@ -158,13 +163,21 @@ export const notificationService = {
     const db = options?.db ?? prisma;
     const notification = await db.notification.create({
       data: {
-        ...(input.dedupeKey !== undefined ? { dedupeKey: input.dedupeKey } : {}),
+        ...(input.dedupeKey !== undefined
+          ? { dedupeKey: input.dedupeKey }
+          : {}),
         ...(input.entityId !== undefined ? { entityId: input.entityId } : {}),
-        ...(input.entityType !== undefined ? { entityType: input.entityType } : {}),
-        ...(input.eventType !== undefined ? { eventType: input.eventType } : {}),
+        ...(input.entityType !== undefined
+          ? { entityType: input.entityType }
+          : {}),
+        ...(input.eventType !== undefined
+          ? { eventType: input.eventType }
+          : {}),
         message: input.message.trim(),
         priority: toPrismaNotificationPriority(input.priority),
-        ...(input.targetUrl !== undefined ? { targetUrl: input.targetUrl } : {}),
+        ...(input.targetUrl !== undefined
+          ? { targetUrl: input.targetUrl }
+          : {}),
         title: input.title.trim(),
         type: toPrismaNotificationType(input.type),
         user: { connect: { id: input.userId } },
@@ -200,7 +213,10 @@ export const notificationService = {
   },
 
   async delete(notificationId: string, userId: string) {
-    const existingNotification = await getNotificationForUser(userId, notificationId);
+    const existingNotification = await getNotificationForUser(
+      userId,
+      notificationId,
+    );
 
     if (!existingNotification) {
       throw new AppError("Notification not found.", 404);
@@ -226,7 +242,9 @@ export const notificationService = {
     ]);
 
     return {
-      data: notifications.map((notification) => mapNotificationRecord(notification)),
+      data: notifications.map((notification) =>
+        mapNotificationRecord(notification),
+      ),
       pagination: { page: query.page, perPage: query.perPage, total },
     };
   },
@@ -247,7 +265,11 @@ export const notificationService = {
     options?: { db?: NotificationWriter },
   ) {
     const db = options?.db ?? prisma;
-    const existingNotification = await getNotificationForUser(userId, notificationId, db);
+    const existingNotification = await getNotificationForUser(
+      userId,
+      notificationId,
+      db,
+    );
 
     if (!existingNotification) {
       throw new AppError("Notification not found.", 404);

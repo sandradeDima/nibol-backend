@@ -39,6 +39,7 @@ export const listUsersQuerySchema = z.object({
 export const createUserSchema = z.object({
     email: z.email(),
     isActive: z.boolean().default(true),
+    jobTitle: z.string().trim().max(191).nullable().optional(),
     name: z.string().trim().min(2).max(191),
     password: passwordSchema,
     roleIds: roleIdsSchema,
@@ -46,6 +47,7 @@ export const createUserSchema = z.object({
 export const updateUserSchema = z.object({
     email: z.email(),
     isActive: z.boolean(),
+    jobTitle: z.string().trim().max(191).nullable().optional(),
     name: z.string().trim().min(2).max(191),
     roleIds: roleIdsSchema,
 });
@@ -62,6 +64,10 @@ export const changePasswordSchema = z.object({
 export const avatarUploadSchema = z.object({
     mimetype: z.enum(["image/jpeg", "image/png", "image/webp"]),
     originalName: z.string().min(1),
-    size: z.number().int().positive().max(5 * 1024 * 1024),
+    size: z
+        .number()
+        .int()
+        .positive()
+        .max(5 * 1024 * 1024),
 });
 //# sourceMappingURL=users-validator.js.map

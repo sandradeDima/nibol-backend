@@ -10,8 +10,10 @@ observationsRouter.get("/observations/options", requireAnyPermission([
     OBSERVATIONS_PERMISSIONS.edit,
 ]), asyncHandler(observationsController.options));
 observationsRouter.get("/observations", requirePermission(OBSERVATIONS_PERMISSIONS.view), asyncHandler(observationsController.list));
+observationsRouter.get("/observations/:id/action-items", requirePermission(OBSERVATIONS_PERMISSIONS.view), asyncHandler(observationsController.getActionItems));
 observationsRouter.get("/observations/:id", requirePermission(OBSERVATIONS_PERMISSIONS.view), asyncHandler(observationsController.getById));
 observationsRouter.post("/observations", requirePermission(OBSERVATIONS_PERMISSIONS.create), asyncHandler(observationsController.create));
 observationsRouter.patch("/observations/:id", requirePermission(OBSERVATIONS_PERMISSIONS.edit), asyncHandler(observationsController.update));
+observationsRouter.post("/observations/:id/close", requirePermission(OBSERVATIONS_PERMISSIONS.close), asyncHandler(observationsController.close));
 observationsRouter.delete("/observations/:id", requirePermission(OBSERVATIONS_PERMISSIONS.delete), asyncHandler(observationsController.remove));
 //# sourceMappingURL=observations.routes.js.map

@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import { app } from "./app.js";
 import { env } from "./utils/env.js";
 import { logger } from "./utils/logger.js";
+import { workflowTimerScheduler } from "./jobs/workflow-timer-scheduler.js";
 
 const server = createServer(app);
 
@@ -21,7 +22,14 @@ const shutdown = (signal: NodeJS.Signals): void => {
 
 server.listen(env.PORT, () => {
   logger.info(`API server listening on http://localhost:${env.PORT}`);
+  workflowTimerScheduler.start();
 });
 
-process.on("SIGINT", () => shutdown("SIGINT"));
-process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => {
+  workflowTimerScheduler.stop();
+  shutdown("SIGINT");
+});
+process.on("SIGTERM", () => {
+  workflowTimerScheduler.stop();
+  shutdown("SIGTERM");
+});

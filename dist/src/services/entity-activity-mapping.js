@@ -11,17 +11,17 @@ export const getRemediationActivityType = (entityType, action) => {
         if (action.endsWith("approve"))
             return "PLAN_APPROVED";
     }
-    if (entityType === "commitment") {
+    if (entityType === "actionPlan") {
         if (action.endsWith("create"))
-            return "COMMITMENT_CREATED";
+            return "ACTION_PLAN_CREATED";
         if (action.endsWith("update"))
-            return "COMMITMENT_UPDATED";
+            return "ACTION_PLAN_UPDATED";
         if (action.endsWith("send-to-audit"))
-            return "COMMITMENT_PROGRESS_CHANGED";
+            return "ACTION_PLAN_PROGRESS_CHANGED";
         if (action.endsWith("mark-complete"))
-            return "COMMITMENT_COMPLETED";
+            return "ACTION_PLAN_COMPLETED";
     }
-    return "COMMITMENT_UPDATED";
+    return "ACTION_PLAN_UPDATED";
 };
 export const getProgressActivityType = (entityType, action) => {
     if (entityType === "evidence_file") {
@@ -50,10 +50,11 @@ export const getProgressActivityType = (entityType, action) => {
         return "PROGRESS_SENT";
     if (action.endsWith("create"))
         return "PROGRESS_CREATED";
-    return "PROGRESS_UPDATED";
+    return "PROGRESS_EVALUATIOND";
 };
 export const getExtensionActivityType = (action, status) => {
-    if (action.endsWith("create-for-observation") || action.endsWith("create-for-commitment"))
+    if (action.endsWith("create-for-observation") ||
+        action.endsWith("create-for-actionPlan"))
         return "EXTENSION_CREATED";
     if (action.endsWith("send-to-manager"))
         return "EXTENSION_SENT_TO_MANAGER";

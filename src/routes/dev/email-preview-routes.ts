@@ -13,7 +13,9 @@ import { sendSuccess } from "../../utils/response.js";
 
 const previewFormatSchema = z.enum(["html", "json"]).default("html");
 
-const getPreviewOverrides = (query: Record<string, unknown>): Record<string, string> => {
+const getPreviewOverrides = (
+  query: Record<string, unknown>,
+): Record<string, string> => {
   const overrides: Record<string, string> = {};
 
   for (const [key, value] of Object.entries(query)) {
@@ -61,7 +63,8 @@ emailPreviewRouter.get(
     }
 
     const format = previewFormatSchema.parse(request.query.format);
-    const sampleVariables = emailTemplateDefinitions[templateName].sampleVariables;
+    const sampleVariables =
+      emailTemplateDefinitions[templateName].sampleVariables;
     const overrides = getPreviewOverrides(
       request.query as Record<string, unknown>,
     ) as typeof sampleVariables;

@@ -23,7 +23,9 @@ const singularizeWord = (value) => {
     return value;
 };
 const toPascalCase = (words) => {
-    return words.map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join("");
+    return words
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join("");
 };
 export const buildModuleNames = (value) => {
     const words = toWords(value);

@@ -1,5 +1,5 @@
 import { renderBaseEmailLayout } from "../layouts/BaseEmailLayout.js";
-import { escapeHtml, greeting, joinTextBlocks, toParagraphHtml } from "../utils.js";
+import { escapeHtml, greeting, joinTextBlocks, toParagraphHtml, } from "../utils.js";
 export const genericNotificationEmailTemplate = {
     name: "genericNotification",
     render: ({ brand, variables }) => {

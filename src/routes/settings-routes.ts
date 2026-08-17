@@ -66,10 +66,13 @@ settingsRouter.put(
       size: file.size,
     });
 
-    const settings = await settingsService.uploadLogo({
-      buffer: file.buffer,
-      originalName: metadata.originalName,
-    }, getRequestLogActorContext(request));
+    const settings = await settingsService.uploadLogo(
+      {
+        buffer: file.buffer,
+        originalName: metadata.originalName,
+      },
+      getRequestLogActorContext(request),
+    );
 
     sendSuccess(response, settings);
   }),

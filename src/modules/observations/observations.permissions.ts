@@ -2,6 +2,7 @@ import { OBSERVATIONS_PERMISSION_RESOURCE } from "./observations.constants.js";
 
 export const OBSERVATIONS_PERMISSIONS = {
   create: `${OBSERVATIONS_PERMISSION_RESOURCE}.create`,
+  close: `${OBSERVATIONS_PERMISSION_RESOURCE}.close`,
   delete: `${OBSERVATIONS_PERMISSION_RESOURCE}.delete`,
   edit: `${OBSERVATIONS_PERMISSION_RESOURCE}.edit`,
   view: `${OBSERVATIONS_PERMISSION_RESOURCE}.view`,

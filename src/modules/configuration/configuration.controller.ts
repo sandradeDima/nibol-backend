@@ -51,7 +51,9 @@ const getRequiredRecordId = (value: string | string[] | undefined): string => {
   return recordIdParamSchema.parse({ id }).id;
 };
 
-const getRequiredAuthorizationSummary = (request: Request): AuthorizationSummary => {
+const getRequiredAuthorizationSummary = (
+  request: Request,
+): AuthorizationSummary => {
   if (!request.authorizationSummary) {
     throw new AppError("Authorization required.", 401);
   }

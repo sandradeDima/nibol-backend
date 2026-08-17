@@ -31,9 +31,7 @@ const getQueryValue = (value: unknown): string | undefined => {
   return undefined;
 };
 
-const getRequiredProductId = (
-  value: string | string[] | undefined,
-): string => {
+const getRequiredProductId = (value: string | string[] | undefined): string => {
   const productId = Array.isArray(value) ? value[0] : value;
 
   if (!productId) {

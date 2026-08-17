@@ -1,4 +1,7 @@
-import type { EmailTemplateDefinition, EmailTemplateName } from "../types/email-types.js";
+import type {
+  EmailTemplateDefinition,
+  EmailTemplateName,
+} from "../types/email-types.js";
 import { automationNotificationEmailTemplate } from "./automation-notification-email.js";
 import { emailVerificationEmailTemplate } from "./email-verification-email.js";
 import { genericNotificationEmailTemplate } from "./generic-notification-email.js";
@@ -21,6 +24,8 @@ export const emailTemplateNames = Object.keys(
   emailTemplateDefinitions,
 ) as EmailTemplateName[];
 
-export const isEmailTemplateName = (value: string): value is EmailTemplateName => {
+export const isEmailTemplateName = (
+  value: string,
+): value is EmailTemplateName => {
   return value in emailTemplateDefinitions;
 };

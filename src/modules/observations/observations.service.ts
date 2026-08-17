@@ -3,13 +3,8 @@ import type { Prisma } from "../../../generated/prisma/client.js";
 import type { AuthorizationSummary } from "../../services/authorization-service.js";
 import { AppError } from "../../utils/app-error.js";
 import { prisma } from "../../utils/prisma.js";
-import { buildDateRangeFilter } from "../../services/logging-utils.js";
-import { configurationService } from "../configuration/configuration.service.js";
-import {
-  OBSERVATION_OVERDUE_STATUS_KEY,
-  OBSERVATION_TERMINAL_STATUS_KEYS,
-} from "./observations.constants.js";
-import { OBSERVATIONS_PERMISSIONS } from "./observations.permissions.js";
+import { observationAggregationService } from "./observation-aggregation.service.js";
+import { observationDeadlineService } from "./observation-deadline.service.js";
 import type {
   CreateObservationInput,
   ListObservationsQuery,
@@ -19,724 +14,285 @@ import type {
   UpdateObservationInput,
 } from "./observations.types.js";
 
-const SYSTEM_WIDE_ROLE_NAMES = new Set([
-  "admin",
-  "sistema",
-  "sistemas",
-  "system",
-  "systems",
-]);
-
-const terminalStatusKeys = new Set<string>(OBSERVATION_TERMINAL_STATUS_KEYS);
-
 const userSummarySelect = {
   email: true,
   id: true,
+  jobTitle: true,
   name: true,
 } as const;
 
-const areaSummarySelect = {
-  id: true,
-  name: true,
-} as const;
-
-const areaOptionSelect = {
-  code: true,
-  id: true,
-  managerUser: {
-    select: userSummarySelect,
+const observationInclude = {
+  actionPlans: {
+    select: { progressPercent: true, status: true },
+    where: { deletedAt: null },
   },
-  name: true,
-} as const;
-
-const riskLevelSelect = {
-  colorToken: true,
-  defaultDeadlineDays: true,
-  id: true,
-  key: true,
-  name: true,
-  severityOrder: true,
-} as const;
-
-const statusSelect = {
-  countsAsOverdue: true,
-  id: true,
-  isFinal: true,
-  isInitial: true,
-  key: true,
-  name: true,
-  sortOrder: true,
-} as const;
-
-const observationListSelect = {
-  area: {
-    select: areaSummarySelect,
+  areaAssignments: {
+    include: {
+      actionPlans: {
+        select: { progressPercent: true, status: true },
+        where: { deletedAt: null },
+      },
+      area: { select: { id: true, name: true } },
+      areaResponsible: { select: userSummarySelect },
+      processOwner: { select: userSummarySelect },
+    },
+    orderBy: { area: { name: "asc" } },
   },
-  code: true,
-  createdAt: true,
-  currentStage: true,
-  detectedAt: true,
-  dueDate: true,
-  id: true,
-  progressPercent: true,
-  responsibleUser: {
-    select: userSummarySelect,
+  auditReport: {
+    select: { id: true, reportDate: true, reportNumber: true, title: true },
   },
+  auditorUser: { select: userSummarySelect },
+  mainObservation: { select: { id: true, name: true } },
   riskLevel: {
-    select: riskLevelSelect,
-  },
-  status: {
-    select: statusSelect,
-  },
-  title: true,
-  updatedAt: true,
-} as const;
-
-const observationDetailSelect = {
-  ...observationListSelect,
-  areaAssignments: {
-    orderBy: {
-      area: {
-        name: "asc",
-      },
-    },
     select: {
-      area: {
-        select: areaSummarySelect,
-      },
+      colorToken: true,
+      defaultDeadlineDays: true,
       id: true,
-      responsibleUser: {
-        select: userSummarySelect,
-      },
-      roleInFinding: true,
+      key: true,
+      name: true,
     },
   },
-  auditRecommendation: true,
-  auditorUser: {
-    select: userSummarySelect,
+  risks: {
+    orderBy: { risk: { name: "asc" } },
+    select: { risk: { select: { id: true, name: true } } },
   },
-  category: true,
-  description: true,
-  observationType: true,
-  process: true,
-  source: true,
+  status: { select: { id: true, isFinal: true, key: true, name: true } },
+} satisfies Prisma.ObservationInclude;
+
+type ObservationRecord = Prisma.ObservationGetPayload<{
+  include: typeof observationInclude;
+}>;
+
+const businessStatusLabel = {
+  CONCLUIDO: "Concluido",
+  CON_AVANCE: "Con avance",
+  INICIADO: "Iniciado",
+  NO_INICIADO: "No iniciado",
 } as const;
 
-const observationMutationSelect = {
-  areaAssignments: {
-    select: {
-      areaId: true,
-    },
-  },
-  areaId: true,
-  auditRecommendation: true,
-  category: true,
-  code: true,
-  currentStage: true,
-  description: true,
-  detectedAt: true,
-  dueDate: true,
-  id: true,
-  observationType: true,
-  process: true,
-  progressPercent: true,
-  responsibleUserId: true,
-  riskLevelId: true,
-  source: true,
-  statusId: true,
-  title: true,
-} as const;
-
-const configurationPrisma = prisma as typeof prisma & {
-  catalog: any;
-};
-
-type ObservationUserRow = {
-  email: string;
-  id: string;
-  name: string;
-};
-
-type ObservationAreaRow = {
-  id: string;
-  name: string;
-};
-
-type ObservationRiskLevelRow = {
-  colorToken: string | null;
-  defaultDeadlineDays: number | null;
-  id: string;
-  key: string;
-  name: string;
-  severityOrder: number;
-};
-
-type ObservationStatusRow = {
-  countsAsOverdue: boolean;
-  id: string;
-  isFinal: boolean;
-  isInitial: boolean;
-  key: string;
-  name: string;
-  sortOrder: number;
-};
-
-type ObservationListRecord = {
-  area: ObservationAreaRow;
-  code: string;
-  createdAt: Date;
-  currentStage: string | null;
-  detectedAt: Date;
-  dueDate: Date;
-  id: string;
-  progressPercent: number;
-  responsibleUser: ObservationUserRow | null;
-  riskLevel: ObservationRiskLevelRow;
-  status: ObservationStatusRow;
-  title: string;
-  updatedAt: Date;
-};
-
-type ObservationDetailRecord = ObservationListRecord & {
-  areaAssignments: Array<{
-    area: ObservationAreaRow;
-    id: string;
-    responsibleUser: ObservationUserRow | null;
-    roleInFinding: string | null;
-  }>;
-  auditRecommendation: string;
-  auditorUser: ObservationUserRow;
-  category: string | null;
-  description: string;
-  observationType: string | null;
-  process: string | null;
-  source: string | null;
-};
-
-type ObservationMutationRecord = {
-  areaAssignments: Array<{
-    areaId: string;
-  }>;
-  areaId: string;
-  auditRecommendation: string;
-  category: string | null;
-  code: string;
-  currentStage: string | null;
-  description: string;
-  detectedAt: Date;
-  dueDate: Date;
-  id: string;
-  observationType: string | null;
-  process: string | null;
-  progressPercent: number;
-  responsibleUserId: string | null;
-  riskLevelId: string;
-  source: string | null;
-  statusId: string;
-  title: string;
-};
-
-const normalizeRoleName = (value: string): string => {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim()
-    .toLowerCase();
-};
-
-const hasGlobalObservationAccess = (access: AuthorizationSummary): boolean => {
-  if (access.isAdmin) {
-    return true;
-  }
-
-  if (
-    access.permissions.includes(OBSERVATIONS_PERMISSIONS.create) ||
-    access.permissions.includes(OBSERVATIONS_PERMISSIONS.edit) ||
-    access.permissions.includes(OBSERVATIONS_PERMISSIONS.delete)
-  ) {
-    return true;
-  }
-
-  return access.roles.some((role) => SYSTEM_WIDE_ROLE_NAMES.has(normalizeRoleName(role)));
-};
-
-const isObservationOverdue = (dueDate: Date, statusKey: string): boolean => {
-  if (statusKey === OBSERVATION_OVERDUE_STATUS_KEY) {
-    return true;
-  }
-
-  if (terminalStatusKeys.has(statusKey)) {
-    return false;
-  }
-
-  return dueDate.getTime() < Date.now();
-};
-
-const buildEffectiveStatus = (status: ObservationListRecord["status"], dueDate: Date) => {
-  if (isObservationOverdue(dueDate, status.key)) {
-    return {
-      key: OBSERVATION_OVERDUE_STATUS_KEY,
-      name: "Vencida",
-    };
-  }
-
-  return {
-    key: status.key,
-    name: status.name,
-  };
-};
-
-const mapObservationListItem = (
-  observation: ObservationListRecord,
-): ObservationListItem => {
-  const isOverdue = isObservationOverdue(observation.dueDate, observation.status.key);
-
-  return {
-    area: observation.area,
-    code: observation.code,
-    createdAt: observation.createdAt.toISOString(),
-    currentStage: observation.currentStage,
-    detectedAt: observation.detectedAt.toISOString(),
-    dueDate: observation.dueDate.toISOString(),
-    effectiveStatus: buildEffectiveStatus(observation.status, observation.dueDate),
-    id: observation.id,
-    isOverdue,
-    progressPercent: observation.progressPercent,
-    responsibleUser: observation.responsibleUser,
-    riskLevel: observation.riskLevel,
-    status: observation.status,
-    title: observation.title,
-    updatedAt: observation.updatedAt.toISOString(),
-  };
-};
-
-const mapObservationDetail = (
-  observation: ObservationDetailRecord,
-): ObservationDetail => {
-  const listItem = mapObservationListItem(observation);
-
-  return {
-    ...listItem,
-    additionalAreas: observation.areaAssignments.map((assignment) => ({
-      area: assignment.area,
-      id: assignment.id,
-      responsibleUser: assignment.responsibleUser,
-      roleInFinding: assignment.roleInFinding,
-    })),
-    auditRecommendation: observation.auditRecommendation,
-    auditorUser: observation.auditorUser,
-    category: observation.category,
-    description: observation.description,
-    observationType: observation.observationType,
-    process: observation.process,
-    source: observation.source,
-  };
-};
-
-const sanitizeAdditionalAreaIds = (
-  areaId: string,
-  additionalAreaIds?: string[],
-): string[] => {
-  return Array.from(new Set(additionalAreaIds ?? [])).filter(
-    (value) => value !== areaId,
+const hasGlobalAccess = (access: AuthorizationSummary): boolean =>
+  access.isAdmin ||
+  access.roles.some((role) =>
+    ["auditoria", "sistema", "sistemas"].includes(
+      role
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase(),
+    ),
   );
-};
 
-const buildAssignmentCreateInput = (
-  areaId: string,
-  responsibleUserId?: string | null,
-) => {
-  return {
-    area: {
-      connect: {
-        id: areaId,
-      },
-    },
-    ...(responsibleUserId
-      ? {
-          responsibleUser: {
-            connect: {
-              id: responsibleUserId,
-            },
-          },
-        }
-      : {}),
-  };
-};
-
-const buildVisibilityCondition = (
+export const buildObservationAccessWhere = (
   access: AuthorizationSummary,
-): Prisma.ObservationWhereInput | undefined => {
-  if (hasGlobalObservationAccess(access)) {
-    return undefined;
-  }
+): Prisma.ObservationWhereInput => {
+  if (hasGlobalAccess(access)) return {};
 
   return {
     OR: [
-      {
-        responsibleUserId: access.userId,
-      },
-      {
-        auditorUserId: access.userId,
-      },
-      {
-        area: {
-          active: true,
-          deletedAt: null,
-          managerUserId: access.userId,
-        },
-      },
+      { auditorUserId: access.userId },
       {
         areaAssignments: {
           some: {
             OR: [
-              {
-                responsibleUserId: access.userId,
-              },
-              {
-                area: {
-                  active: true,
-                  deletedAt: null,
-                  managerUserId: access.userId,
-                },
-              },
+              { areaResponsibleUserId: access.userId },
+              { processOwnerUserId: access.userId },
+              { area: { managerUserId: access.userId } },
             ],
           },
+        },
+      },
+      {
+        actionPlans: {
+          some: { deletedAt: null, responsibleUserId: access.userId },
         },
       },
     ],
   };
 };
 
-const buildOrderBy = (
-  sortBy: ListObservationsQuery["sortBy"],
-  sortDirection: ListObservationsQuery["sortDirection"],
-): Prisma.ObservationOrderByWithRelationInput => {
-  switch (sortBy) {
-    case "code":
-      return {
-        code: sortDirection,
-      };
-    case "detectedAt":
-      return {
-        detectedAt: sortDirection,
-      };
-    case "dueDate":
-      return {
-        dueDate: sortDirection,
-      };
-    case "progressPercent":
-      return {
-        progressPercent: sortDirection,
-      };
-    case "title":
-      return {
-        title: sortDirection,
-      };
-    case "updatedAt":
-      return {
-        updatedAt: sortDirection,
-      };
-  }
-};
-
-const buildWhereClause = (
-  query: ListObservationsQuery,
-  access: AuthorizationSummary,
-): Prisma.ObservationWhereInput => {
-  const dueDate = buildDateRangeFilter(query.dueDateFrom, query.dueDateTo);
-  const visibilityCondition = buildVisibilityCondition(access);
-  const conditions: Prisma.ObservationWhereInput[] = [
-    {
-      deletedAt: null,
-    },
-  ];
-
-  if (visibilityCondition) {
-    conditions.push(visibilityCondition);
-  }
-
-  if (query.search.length > 0) {
-    conditions.push({
-      OR: [
-        {
-          code: {
-            contains: query.search,
-          },
-        },
-        {
-          title: {
-            contains: query.search,
-          },
-        },
-      ],
-    });
-  }
-
-  if (query.statusId) {
-    conditions.push({
-      statusId: query.statusId,
-    });
-  }
-
-  if (query.riskLevelId) {
-    conditions.push({
-      riskLevelId: query.riskLevelId,
-    });
-  }
-
-  if (query.areaId) {
-    conditions.push({
-      OR: [
-        {
-          areaId: query.areaId,
-        },
-        {
-          areaAssignments: {
-            some: {
-              areaId: query.areaId,
-            },
-          },
-        },
-      ],
-    });
-  }
-
-  if (query.responsibleUserId) {
-    conditions.push({
-      responsibleUserId: query.responsibleUserId,
-    });
-  }
-
-  if (dueDate) {
-    conditions.push({
-      dueDate,
-    });
-  }
-
-  if (query.overdue) {
-    conditions.push({
-      OR: [
-        {
-          status: {
-            key: OBSERVATION_OVERDUE_STATUS_KEY,
-          },
-        },
-        {
-          dueDate: {
-            lt: new Date(),
-          },
-          status: {
-            key: {
-              notIn: [...terminalStatusKeys, OBSERVATION_OVERDUE_STATUS_KEY],
-            },
-          },
-        },
-      ],
-    });
-  }
+const formatObservation = (record: ObservationRecord): ObservationDetail => {
+  const progressPercent = observationAggregationService.calculateProgress(
+    record.actionPlans,
+  );
+  const businessStatus = observationAggregationService.calculateStatus(
+    record.actionPlans,
+    record.status.isFinal,
+  );
+  const now = new Date();
 
   return {
-    AND: conditions,
+    actionPlanCount: record.actionPlans.length,
+    areas: record.areaAssignments.map((assignment) => ({
+      area: assignment.area,
+      areaResponsible: assignment.areaResponsible,
+      id: assignment.id,
+      processOwner: assignment.processOwner,
+      progressPercent: observationAggregationService.calculateProgress(
+        assignment.actionPlans,
+      ),
+    })),
+    auditRecommendation: record.auditRecommendation,
+    auditReport: {
+      ...record.auditReport,
+      reportDate: record.auditReport.reportDate.toISOString(),
+    },
+    auditorUser: record.auditorUser,
+    category: record.category,
+    currentDueDate: record.currentDueDate.toISOString(),
+    currentStage: record.currentStage,
+    description: record.description,
+    displayCode: `${record.auditReport.reportNumber} / OBS-${String(record.observationNumber).padStart(3, "0")}`,
+    id: record.id,
+    isOverdue:
+      !record.status.isFinal && record.currentDueDate.getTime() < now.getTime(),
+    mainObservation: record.mainObservation,
+    observationNumber: record.observationNumber,
+    originalDueDate: record.originalDueDate.toISOString(),
+    process: record.process,
+    progressPercent,
+    risks: record.risks.map(({ risk }) => risk),
+    riskLevel: record.riskLevel,
+    source: record.source,
+    status: {
+      id: record.status.id,
+      isFinal: record.status.isFinal,
+      key: businessStatus,
+      name: businessStatusLabel[businessStatus],
+    },
+    title: record.title,
+    updatedAt: record.updatedAt.toISOString(),
   };
 };
 
-const assertCodeAvailable = async (
-  code: string,
-  observationId?: string,
-): Promise<void> => {
-  const existingObservation = await prisma.observation.findFirst({
-    select: {
-      id: true,
-    },
-    where: {
-      code,
-      deletedAt: null,
-      ...(observationId
-        ? {
-            id: {
-              not: observationId,
-            },
-          }
-        : {}),
-    },
-  });
+const toListItem = (record: ObservationRecord): ObservationListItem =>
+  formatObservation(record);
 
-  if (existingObservation) {
-    throw new AppError("An observation with this code already exists.", 400);
-  }
-};
-
-const assertReferencesExist = async (input: {
-  additionalAreaIds: string[];
-  areaId: string;
-  category?: string | null;
-  observationType?: string | null;
-  process?: string | null;
-  responsibleUserId?: string | null;
+const requireEntities = async (input: {
+  areaAssignments: CreateObservationInput["areaAssignments"];
+  auditReportId: string;
+  auditorUserId: string;
+  mainObservationId: string;
+  riskIds: string[];
   riskLevelId: string;
-  source?: string | null;
-  statusId: string;
-}): Promise<void> => {
-  const areaIds = Array.from(new Set([input.areaId, ...input.additionalAreaIds]));
-
-  const [
-    riskLevelCount,
-    statusCount,
-    areaCount,
-    responsibleUserCount,
-    processCatalogCount,
-    typeCatalogCount,
-    sourceCatalogCount,
-    categoryCatalogCount,
-  ] = await Promise.all([
-    prisma.riskLevel.count({
-      where: {
-        active: true,
-        deletedAt: null,
-        id: input.riskLevelId,
-      },
-    }),
-    prisma.observationStatus.count({
-      where: {
-        active: true,
-        deletedAt: null,
-        id: input.statusId,
-      },
-    }),
-    prisma.area.count({
-      where: {
-        active: true,
-        deletedAt: null,
-        id: {
-          in: areaIds,
-        },
-      },
-    }),
-    input.responsibleUserId
-      ? prisma.user.count({
-          where: {
-            deletedAt: null,
-            id: input.responsibleUserId,
-          },
-        })
-      : Promise.resolve(1),
-    input.process
-      ? configurationPrisma.catalog.count({
-          where: {
-            active: true,
-            deletedAt: null,
-            name: input.process,
-            type: "proceso_auditado",
-          },
-        })
-      : Promise.resolve(1),
-    input.observationType
-      ? configurationPrisma.catalog.count({
-          where: {
-            active: true,
-            deletedAt: null,
-            name: input.observationType,
-            type: "tipo_observacion",
-          },
-        })
-      : Promise.resolve(1),
-    input.source
-      ? configurationPrisma.catalog.count({
-          where: {
-            active: true,
-            deletedAt: null,
-            name: input.source,
-            type: "fuente_hallazgo",
-          },
-        })
-      : Promise.resolve(1),
-    input.category
-      ? configurationPrisma.catalog.count({
-          where: {
-            active: true,
-            deletedAt: null,
-            name: input.category,
-            type: "categoria_hallazgo",
-          },
-        })
-      : Promise.resolve(1),
-  ]);
-
-  if (riskLevelCount !== 1) {
-    throw new AppError("The selected risk level is invalid.", 400);
-  }
-
-  if (statusCount !== 1) {
-    throw new AppError("The selected observation status is invalid.", 400);
-  }
-
-  if (areaCount !== areaIds.length) {
-    throw new AppError("One or more selected areas are invalid.", 400);
-  }
-
-  if (responsibleUserCount !== 1) {
-    throw new AppError("The selected responsible user is invalid.", 400);
-  }
-
-  if (processCatalogCount !== 1) {
-    throw new AppError("The selected audited process is invalid.", 400);
-  }
-
-  if (typeCatalogCount !== 1) {
-    throw new AppError("The selected observation type is invalid.", 400);
-  }
-
-  if (sourceCatalogCount !== 1) {
-    throw new AppError("The selected finding source is invalid.", 400);
-  }
-
-  if (categoryCatalogCount !== 1) {
-    throw new AppError("The selected finding category is invalid.", 400);
-  }
-};
-
-const findObservationDetailById = async (
-  observationId: string,
-  access: AuthorizationSummary,
-): Promise<ObservationDetailRecord> => {
-  const visibilityCondition = buildVisibilityCondition(access);
-  const observation = await prisma.observation.findFirst({
-    select: observationDetailSelect,
-    where: {
-      AND: [
-        {
+}) => {
+  const uniqueUserIds = Array.from(
+    new Set([
+      input.auditorUserId,
+      ...input.areaAssignments.flatMap((row) => [
+        row.processOwnerUserId,
+        row.areaResponsibleUserId,
+      ]),
+    ]),
+  );
+  const [auditReport, mainObservation, riskLevel, risks, areas, users] =
+    await Promise.all([
+      prisma.auditReport.findFirst({
+        select: { id: true, reportDate: true },
+        where: { deletedAt: null, id: input.auditReportId },
+      }),
+      prisma.observationDictionary.findFirst({
+        select: { id: true },
+        where: { id: input.mainObservationId, isActive: true },
+      }),
+      prisma.riskLevel.findFirst({
+        select: { id: true, key: true },
+        where: { active: true, deletedAt: null, id: input.riskLevelId },
+      }),
+      prisma.risk.count({
+        where: { id: { in: input.riskIds }, isActive: true },
+      }),
+      prisma.area.count({
+        where: {
+          active: true,
           deletedAt: null,
-          id: observationId,
+          id: { in: input.areaAssignments.map((row) => row.areaId) },
         },
-        ...(visibilityCondition ? [visibilityCondition] : []),
-      ],
-    },
-  });
+      }),
+      prisma.user.count({
+        where: { deletedAt: null, id: { in: uniqueUserIds }, isActive: true },
+      }),
+    ]);
 
-  if (!observation) {
-    throw new AppError("Observation not found.", 404);
-  }
+  if (!auditReport) throw new AppError("Audit report not found.", 400);
+  if (!mainObservation)
+    throw new AppError("Main observation is not active.", 400);
+  if (!riskLevel) throw new AppError("Risk level is not active.", 400);
+  observationDeadlineService.getDays(riskLevel.key);
+  if (risks !== input.riskIds.length)
+    throw new AppError(
+      "One or more associated risks are invalid or inactive.",
+      400,
+    );
+  if (areas !== input.areaAssignments.length)
+    throw new AppError(
+      "One or more involved areas are invalid or inactive.",
+      400,
+    );
+  if (users !== uniqueUserIds.length)
+    throw new AppError(
+      "One or more assigned users are invalid or inactive.",
+      400,
+    );
 
-  return observation;
+  return { auditReport, riskLevel };
 };
 
-const findObservationForMutation = async (
-  observationId: string,
-): Promise<ObservationMutationRecord> => {
-  const observation = await prisma.observation.findFirst({
-    select: observationMutationSelect,
+const findRecord = async (
+  id: string,
+  access?: AuthorizationSummary,
+): Promise<ObservationRecord> => {
+  const record = await prisma.observation.findFirst({
+    include: observationInclude,
     where: {
       deletedAt: null,
-      id: observationId,
+      id,
+      ...(access ? buildObservationAccessWhere(access) : {}),
     },
   });
+  if (!record) throw new AppError("Observation not found.", 404);
+  return record;
+};
 
-  if (!observation) {
-    throw new AppError("Observation not found.", 404);
+const buildBusinessStatusWhere = (
+  status: NonNullable<ListObservationsQuery["observationStatus"]>,
+): Prisma.ObservationWhereInput => {
+  switch (status) {
+    case "NO_INICIADO":
+      return {
+        OR: [
+          { actionPlans: { none: { deletedAt: null } } },
+          {
+            actionPlans: {
+              every: {
+                OR: [{ deletedAt: { not: null } }, { status: "NOT_STARTED" }],
+              },
+            },
+          },
+        ],
+      };
+    case "INICIADO":
+      return {
+        actionPlans: {
+          none: { deletedAt: null, progressPercent: { gt: 0 } },
+          some: { deletedAt: null, status: "STARTED" },
+        },
+        status: { isFinal: false },
+      };
+    case "CON_AVANCE":
+      return {
+        actionPlans: {
+          some: {
+            deletedAt: null,
+            OR: [
+              { progressPercent: { gt: 0 } },
+              { status: { in: ["WITH_PROGRESS", "CONCLUDED"] } },
+            ],
+          },
+        },
+        status: { isFinal: false },
+      };
+    case "CONCLUIDO":
+      return { status: { isFinal: true } };
   }
-
-  return observation;
 };
 
 export const observationsService = {
@@ -744,328 +300,517 @@ export const observationsService = {
     input: CreateObservationInput,
     access: AuthorizationSummary,
   ): Promise<ObservationDetail> {
-    if (!access.userId) {
-      throw new AppError("Authentication required.", 401);
-    }
-
-    const progressPercent = input.progressPercent ?? 0;
-    const additionalAreaIds = sanitizeAdditionalAreaIds(
-      input.areaId,
-      input.additionalAreaIds,
+    const { auditReport, riskLevel } = await requireEntities(input);
+    const initialStatus = await prisma.observationStatus.findFirst({
+      select: { id: true },
+      where: { active: true, deletedAt: null, isInitial: true },
+    });
+    if (!initialStatus)
+      throw new AppError("Initial observation status is not configured.", 500);
+    const deadline = observationDeadlineService.calculate(
+      auditReport.reportDate,
+      riskLevel.key,
     );
 
-    await assertCodeAvailable(input.code);
-    await assertReferencesExist({
-      additionalAreaIds,
-      areaId: input.areaId,
-      category: input.category ?? null,
-      observationType: input.observationType ?? null,
-      process: input.process ?? null,
-      responsibleUserId: input.responsibleUserId ?? null,
-      riskLevelId: input.riskLevelId,
-      source: input.source ?? null,
-      statusId: input.statusId,
-    });
-
-    const createData = {
-      area: {
-        connect: {
-          id: input.areaId,
-        },
-      },
-      auditRecommendation: input.auditRecommendation,
-      auditorUser: {
-        connect: {
-          id: access.userId,
-        },
-      },
-      category: input.category,
-      code: input.code,
-      currentStage: input.currentStage,
-      description: input.description,
-      detectedAt: input.detectedAt,
-      dueDate: input.dueDate,
-      observationType: input.observationType,
-      process: input.process,
-      progressPercent,
-      riskLevel: {
-        connect: {
-          id: input.riskLevelId,
-        },
-      },
-      source: input.source,
-      status: {
-        connect: {
-          id: input.statusId,
-        },
-      },
-      title: input.title,
-      ...(additionalAreaIds.length > 0
-        ? {
+    try {
+      const created = await prisma.$transaction(async (tx) =>
+        tx.observation.create({
+          data: {
+            auditRecommendation: input.auditRecommendation,
+            auditReportId: input.auditReportId,
+            auditorUserId: input.auditorUserId,
+            category: input.category,
+            currentDueDate: deadline,
+            currentStage: input.currentStage,
+            description: input.description,
+            mainObservationId: input.mainObservationId,
+            observationNumber: input.observationNumber,
+            originalDueDate: deadline,
+            process: input.process,
+            riskLevelId: input.riskLevelId,
+            source: input.source,
+            statusId: initialStatus.id,
+            title: input.title,
             areaAssignments: {
-              create: additionalAreaIds.map((areaId) =>
-                buildAssignmentCreateInput(areaId, input.responsibleUserId),
-              ),
+              create: input.areaAssignments.map((row) => ({
+                areaId: row.areaId,
+                areaResponsibleUserId: row.areaResponsibleUserId,
+                processOwnerUserId: row.processOwnerUserId,
+              })),
             },
-          }
-        : {}),
-      ...(input.responsibleUserId
-        ? {
-            responsibleUser: {
-              connect: {
-                id: input.responsibleUserId,
-              },
+            risks: {
+              create: input.riskIds.map((riskId) => ({ riskId })),
             },
-          }
-        : {}),
-    };
-
-    const observation = await prisma.observation.create({
-      data: createData,
-      select: {
-        id: true,
-      },
-    });
-
-    const detail = await prisma.observation.findFirst({
-      select: observationDetailSelect,
-      where: {
-        deletedAt: null,
-        id: observation.id,
-      },
-    });
-
-    if (!detail) {
-      throw new AppError("Observation not found after creation.", 500);
+          },
+          select: { id: true },
+        }),
+      );
+      return formatObservation(await findRecord(created.id, access));
+    } catch (error) {
+      if ((error as { code?: string }).code === "P2002") {
+        throw new AppError(
+          "That observation number already exists in the selected audit report.",
+          409,
+        );
+      }
+      throw error;
     }
-
-    return mapObservationDetail(detail);
   },
 
-  async deleteObservation(observationId: string): Promise<ObservationDetail> {
-    const previousObservation = await prisma.observation.findFirst({
-      select: observationDetailSelect,
+  async closeObservation(
+    id: string,
+    access: AuthorizationSummary,
+  ): Promise<{ current: ObservationDetail; previous: ObservationDetail }> {
+    const existing = await findRecord(id, access);
+    if (existing.status.isFinal) {
+      throw new AppError("The observation is already concluded.", 409);
+    }
+    if (existing.actionPlans.length === 0) {
+      throw new AppError(
+        "At least one action plan is required before closure.",
+        409,
+      );
+    }
+    if (existing.actionPlans.some((plan) => plan.status !== "CONCLUDED")) {
+      throw new AppError(
+        "All action plans must be concluded before closing the observation.",
+        409,
+      );
+    }
+    const pendingEvaluations = await prisma.progressEvaluation.count({
       where: {
+        actionPlan: { observationId: id },
         deletedAt: null,
-        id: observationId,
+        reviewStatus: { in: ["SENT_TO_AUDIT", "RETURNED"] },
       },
     });
-
-    if (!previousObservation) {
-      throw new AppError("Observation not found.", 404);
+    if (pendingEvaluations > 0) {
+      throw new AppError(
+        "Pending progress evaluations must be resolved before closure.",
+        409,
+      );
     }
-
+    const concludedStatus = await prisma.observationStatus.findFirst({
+      select: { id: true },
+      where: { active: true, deletedAt: null, key: "CONCLUIDO" },
+    });
+    if (!concludedStatus) {
+      throw new AppError(
+        "The CONCLUIDO observation status is not configured.",
+        500,
+      );
+    }
     await prisma.observation.update({
       data: {
-        deletedAt: new Date(),
+        currentStage: "Cierre aprobado por Auditoría",
+        progressPercent: 100,
+        statusId: concludedStatus.id,
       },
-      where: {
-        id: observationId,
-      },
+      where: { id },
     });
+    return {
+      current: formatObservation(await findRecord(id, access)),
+      previous: formatObservation(existing),
+    };
+  },
 
-    return mapObservationDetail(previousObservation);
+  async deleteObservation(
+    id: string,
+    access: AuthorizationSummary,
+  ): Promise<ObservationDetail> {
+    const previous = formatObservation(await findRecord(id, access));
+    await prisma.observation.update({
+      data: { deletedAt: new Date() },
+      where: { id },
+    });
+    return previous;
   },
 
   async getObservationById(
-    observationId: string,
+    id: string,
     access: AuthorizationSummary,
   ): Promise<ObservationDetail> {
-    const observation = await findObservationDetailById(observationId, access);
-    return mapObservationDetail(observation);
+    return formatObservation(await findRecord(id, access));
+  },
+
+  async getObservationForActionItems(id: string, access: AuthorizationSummary) {
+    const record = await findRecord(id, access);
+    return {
+      areaAssignments: record.areaAssignments.map((row) => ({
+        areaId: row.areaId,
+        areaName: row.area.name,
+        areaResponsibleUserId: row.areaResponsibleUserId,
+        processOwnerUserId: row.processOwnerUserId,
+      })),
+      currentDueDate: record.currentDueDate,
+      id: record.id,
+      progressPercent: observationAggregationService.calculateProgress(
+        record.actionPlans,
+      ),
+      riskCount: record.risks.length,
+      status: record.status,
+    };
   },
 
   async getObservationFormOptions(
     access: AuthorizationSummary,
   ): Promise<ObservationFormOptions> {
-    return configurationService.getBootstrap(access);
+    void access;
+    const [areas, auditReports, mainObservations, risks, riskLevels, users] =
+      await Promise.all([
+        prisma.area.findMany({
+          orderBy: { name: "asc" },
+          select: {
+            code: true,
+            id: true,
+            managerUser: { select: userSummarySelect },
+            name: true,
+          },
+          where: { active: true, deletedAt: null },
+        }),
+        prisma.auditReport.findMany({
+          orderBy: [{ reportDate: "desc" }, { reportNumber: "asc" }],
+          select: {
+            id: true,
+            reportDate: true,
+            reportNumber: true,
+            title: true,
+          },
+          where: { deletedAt: null },
+        }),
+        prisma.observationDictionary.findMany({
+          orderBy: { name: "asc" },
+          select: { description: true, id: true, name: true },
+          where: { isActive: true },
+        }),
+        prisma.risk.findMany({
+          orderBy: { name: "asc" },
+          select: { description: true, id: true, name: true },
+          where: { isActive: true },
+        }),
+        prisma.riskLevel.findMany({
+          orderBy: { severityOrder: "asc" },
+          select: {
+            colorToken: true,
+            defaultDeadlineDays: true,
+            id: true,
+            key: true,
+            name: true,
+          },
+          where: {
+            active: true,
+            deletedAt: null,
+            key: { in: ["ALTO", "MEDIO", "BAJO"] },
+          },
+        }),
+        prisma.user.findMany({
+          orderBy: { name: "asc" },
+          select: userSummarySelect,
+          where: { deletedAt: null, isActive: true },
+        }),
+      ]);
+
+    return {
+      areas,
+      auditReports: auditReports.map((report) => ({
+        ...report,
+        reportDate: report.reportDate.toISOString(),
+      })),
+      mainObservations,
+      risks,
+      riskLevels,
+      users,
+    };
   },
 
   async listObservations(
     query: ListObservationsQuery,
     access: AuthorizationSummary,
-  ): Promise<{
-    data: ObservationListItem[];
-    pagination: {
-      page: number;
-      perPage: number;
-      total: number;
+  ) {
+    const now = new Date();
+    const numericSearch = /^\d+$/.test(query.search)
+      ? Number(query.search)
+      : null;
+    const where: Prisma.ObservationWhereInput = {
+      AND: [
+        buildObservationAccessWhere(access),
+        ...(query.observationStatus
+          ? [buildBusinessStatusWhere(query.observationStatus)]
+          : []),
+      ],
+      deletedAt: null,
+      ...(query.actionPlanResponsibleUserId
+        ? {
+            actionPlans: {
+              some: {
+                deletedAt: null,
+                responsibleUserId: query.actionPlanResponsibleUserId,
+              },
+            },
+          }
+        : {}),
+      ...(query.areaId ||
+      query.areaResponsibleUserId ||
+      query.processOwnerUserId
+        ? {
+            areaAssignments: {
+              some: {
+                ...(query.areaId ? { areaId: query.areaId } : {}),
+                ...(query.areaResponsibleUserId
+                  ? { areaResponsibleUserId: query.areaResponsibleUserId }
+                  : {}),
+                ...(query.processOwnerUserId
+                  ? { processOwnerUserId: query.processOwnerUserId }
+                  : {}),
+              },
+            },
+          }
+        : {}),
+      ...(query.auditReportId ? { auditReportId: query.auditReportId } : {}),
+      ...(query.currentDueDateFrom || query.currentDueDateTo
+        ? {
+            currentDueDate: {
+              ...(query.currentDueDateFrom
+                ? { gte: query.currentDueDateFrom }
+                : {}),
+              ...(query.currentDueDateTo
+                ? { lte: query.currentDueDateTo }
+                : {}),
+            },
+          }
+        : {}),
+      ...(query.mainObservationId
+        ? { mainObservationId: query.mainObservationId }
+        : {}),
+      ...(query.overdue !== undefined
+        ? query.overdue
+          ? { currentDueDate: { lt: now }, status: { isFinal: false } }
+          : {
+              OR: [
+                { currentDueDate: { gte: now } },
+                { status: { isFinal: true } },
+              ],
+            }
+        : {}),
+      ...(query.riskId ? { risks: { some: { riskId: query.riskId } } } : {}),
+      ...(query.riskLevelId ? { riskLevelId: query.riskLevelId } : {}),
+      ...(query.search
+        ? {
+            OR: [
+              ...(numericSearch ? [{ observationNumber: numericSearch }] : []),
+              { title: { contains: query.search } },
+              { auditReport: { reportNumber: { contains: query.search } } },
+              { auditReport: { title: { contains: query.search } } },
+              { mainObservation: { name: { contains: query.search } } },
+              {
+                risks: { some: { risk: { name: { contains: query.search } } } },
+              },
+              {
+                areaAssignments: {
+                  some: { area: { name: { contains: query.search } } },
+                },
+              },
+              {
+                areaAssignments: {
+                  some: {
+                    OR: [
+                      { processOwner: { name: { contains: query.search } } },
+                      { processOwner: { email: { contains: query.search } } },
+                      { areaResponsible: { name: { contains: query.search } } },
+                      {
+                        areaResponsible: { email: { contains: query.search } },
+                      },
+                    ],
+                  },
+                },
+              },
+              {
+                actionPlans: {
+                  some: {
+                    responsibleUser: {
+                      OR: [
+                        { name: { contains: query.search } },
+                        { email: { contains: query.search } },
+                      ],
+                    },
+                  },
+                },
+              },
+            ],
+          }
+        : {}),
     };
-  }> {
-    const where = buildWhereClause(query, access);
-    const [total, observations] = await prisma.$transaction([
-      prisma.observation.count({
-        where,
-      }),
+
+    const orderBy: Prisma.ObservationOrderByWithRelationInput =
+      query.sortBy === "reportDate"
+        ? { auditReport: { reportDate: query.sortDirection } }
+        : { [query.sortBy]: query.sortDirection };
+    const [records, total] = await Promise.all([
       prisma.observation.findMany({
-        orderBy: buildOrderBy(query.sortBy, query.sortDirection),
-        select: observationListSelect,
+        include: observationInclude,
+        orderBy: [orderBy, { id: "asc" }],
         skip: (query.page - 1) * query.perPage,
         take: query.perPage,
         where,
       }),
+      prisma.observation.count({ where }),
     ]);
 
     return {
-      data: observations.map((observation) => mapObservationListItem(observation)),
+      data: records.map(toListItem),
       pagination: {
         page: query.page,
         perPage: query.perPage,
         total,
+        totalPages: Math.ceil(total / query.perPage),
       },
     };
   },
 
   async updateObservation(
-    observationId: string,
+    id: string,
     input: UpdateObservationInput,
-  ): Promise<{
-    current: ObservationDetail;
-    previous: ObservationDetail;
-  }> {
-    const existingObservation = await findObservationForMutation(observationId);
-    const previousObservation = await prisma.observation.findFirst({
-      select: observationDetailSelect,
-      where: {
-        deletedAt: null,
-        id: observationId,
-      },
+    access: AuthorizationSummary,
+  ): Promise<{ current: ObservationDetail; previous: ObservationDetail }> {
+    const existing = await findRecord(id, access);
+    if (
+      input.areaAssignments !== undefined &&
+      !access.isAdmin &&
+      !access.permissions.includes("observation_areas.manage")
+    ) {
+      throw new AppError(
+        "You cannot change observation area assignments.",
+        403,
+      );
+    }
+    const merged = {
+      areaAssignments:
+        input.areaAssignments ??
+        existing.areaAssignments.map((row) => ({
+          areaId: row.areaId,
+          areaResponsibleUserId: row.areaResponsibleUserId,
+          processOwnerUserId: row.processOwnerUserId,
+        })),
+      auditReportId: input.auditReportId ?? existing.auditReportId,
+      auditorUserId: input.auditorUserId ?? existing.auditorUserId,
+      mainObservationId: input.mainObservationId ?? existing.mainObservationId,
+      riskIds: input.riskIds ?? existing.risks.map(({ risk }) => risk.id),
+      riskLevelId: input.riskLevelId ?? existing.riskLevelId,
+    };
+    const { auditReport, riskLevel } = await requireEntities(merged);
+    const extensionCount = await prisma.deadlineExtensionRequest.count({
+      where: { deletedAt: null, observationId: id },
     });
+    const shouldRecalculateDeadline =
+      existing.actionPlans.length === 0 &&
+      extensionCount === 0 &&
+      (merged.auditReportId !== existing.auditReportId ||
+        merged.riskLevelId !== existing.riskLevelId);
+    const deadline = shouldRecalculateDeadline
+      ? observationDeadlineService.calculate(
+          auditReport.reportDate,
+          riskLevel.key,
+        )
+      : null;
 
-    if (!previousObservation) {
-      throw new AppError("Observation not found.", 404);
+    const retainedAreaIds = new Set(
+      merged.areaAssignments.map((row) => row.areaId),
+    );
+    const blockedRemoval = existing.areaAssignments.find(
+      (row) => !retainedAreaIds.has(row.areaId) && row.actionPlans.length > 0,
+    );
+    if (blockedRemoval) {
+      throw new AppError(
+        `Area ${blockedRemoval.area.name} cannot be removed while it has action plans.`,
+        409,
+      );
     }
 
-    const nextValues = {
-      additionalAreaIds:
-        input.additionalAreaIds ??
-        existingObservation.areaAssignments.map((assignment) => assignment.areaId),
-      areaId: input.areaId ?? existingObservation.areaId,
-      auditRecommendation:
-        input.auditRecommendation ?? existingObservation.auditRecommendation,
-      category: input.category ?? existingObservation.category,
-      code: input.code ?? existingObservation.code,
-      currentStage: input.currentStage ?? existingObservation.currentStage,
-      description: input.description ?? existingObservation.description,
-      detectedAt: input.detectedAt ?? existingObservation.detectedAt,
-      dueDate: input.dueDate ?? existingObservation.dueDate,
-      observationType:
-        input.observationType === undefined
-          ? existingObservation.observationType
-          : input.observationType,
-      process: input.process ?? existingObservation.process,
-      progressPercent: input.progressPercent ?? existingObservation.progressPercent,
-      responsibleUserId:
-        input.responsibleUserId === undefined
-          ? existingObservation.responsibleUserId
-          : input.responsibleUserId,
-      riskLevelId: input.riskLevelId ?? existingObservation.riskLevelId,
-      source: input.source ?? existingObservation.source,
-      statusId: input.statusId ?? existingObservation.statusId,
-      title: input.title ?? existingObservation.title,
-    };
-
-    const additionalAreaIds = sanitizeAdditionalAreaIds(
-      nextValues.areaId,
-      nextValues.additionalAreaIds,
-    );
-
-    await assertCodeAvailable(nextValues.code, observationId);
-    await assertReferencesExist({
-      additionalAreaIds,
-      areaId: nextValues.areaId,
-      category: nextValues.category,
-      observationType: nextValues.observationType,
-      process: nextValues.process,
-      responsibleUserId: nextValues.responsibleUserId,
-      riskLevelId: nextValues.riskLevelId,
-      source: nextValues.source,
-      statusId: nextValues.statusId,
-    });
-
-    const shouldSyncAreaAssignments =
-      input.additionalAreaIds !== undefined ||
-      input.areaId !== undefined ||
-      input.responsibleUserId !== undefined;
-
-    const updateData = {
-      area: {
-        connect: {
-          id: nextValues.areaId,
-        },
-      },
-      auditRecommendation: nextValues.auditRecommendation,
-      category: nextValues.category,
-      code: nextValues.code,
-      currentStage: nextValues.currentStage,
-      description: nextValues.description,
-      detectedAt: nextValues.detectedAt,
-      dueDate: nextValues.dueDate,
-      observationType: nextValues.observationType,
-      process: nextValues.process,
-      progressPercent: nextValues.progressPercent,
-      responsibleUser: nextValues.responsibleUserId
-        ? {
-            connect: {
-              id: nextValues.responsibleUserId,
-            },
-          }
-        : {
-            disconnect: true,
+    try {
+      await prisma.$transaction(async (tx) => {
+        await tx.observation.update({
+          data: {
+            ...(input.auditRecommendation !== undefined
+              ? { auditRecommendation: input.auditRecommendation }
+              : {}),
+            ...(input.auditReportId !== undefined
+              ? { auditReportId: input.auditReportId }
+              : {}),
+            ...(input.auditorUserId !== undefined
+              ? { auditorUserId: input.auditorUserId }
+              : {}),
+            ...(input.category !== undefined
+              ? { category: input.category }
+              : {}),
+            ...(input.currentStage !== undefined
+              ? { currentStage: input.currentStage }
+              : {}),
+            ...(input.description !== undefined
+              ? { description: input.description }
+              : {}),
+            ...(input.mainObservationId !== undefined
+              ? { mainObservationId: input.mainObservationId }
+              : {}),
+            ...(input.observationNumber !== undefined
+              ? { observationNumber: input.observationNumber }
+              : {}),
+            ...(input.process !== undefined ? { process: input.process } : {}),
+            ...(input.riskLevelId !== undefined
+              ? { riskLevelId: input.riskLevelId }
+              : {}),
+            ...(input.source !== undefined ? { source: input.source } : {}),
+            ...(input.title !== undefined ? { title: input.title } : {}),
+            ...(deadline
+              ? { currentDueDate: deadline, originalDueDate: deadline }
+              : {}),
           },
-      riskLevel: {
-        connect: {
-          id: nextValues.riskLevelId,
-        },
-      },
-      source: nextValues.source,
-      status: {
-        connect: {
-          id: nextValues.statusId,
-        },
-      },
-      title: nextValues.title,
-      ...(shouldSyncAreaAssignments
-        ? {
-            areaAssignments: {
-              deleteMany: {},
-              ...(additionalAreaIds.length > 0
-                ? {
-                    create: additionalAreaIds.map((areaId) =>
-                      buildAssignmentCreateInput(
-                        areaId,
-                        nextValues.responsibleUserId,
-                      ),
-                    ),
-                  }
-                : {}),
+          where: { id },
+        });
+
+        if (input.riskIds) {
+          await tx.observationRisk.deleteMany({ where: { observationId: id } });
+          await tx.observationRisk.createMany({
+            data: input.riskIds.map((riskId) => ({
+              observationId: id,
+              riskId,
+            })),
+          });
+        }
+
+        if (input.areaAssignments) {
+          await tx.observationArea.deleteMany({
+            where: {
+              observationId: id,
+              areaId: { notIn: input.areaAssignments.map((row) => row.areaId) },
             },
+          });
+          for (const row of input.areaAssignments) {
+            await tx.observationArea.upsert({
+              create: { observationId: id, ...row },
+              update: {
+                areaResponsibleUserId: row.areaResponsibleUserId,
+                processOwnerUserId: row.processOwnerUserId,
+              },
+              where: {
+                observationId_areaId: { areaId: row.areaId, observationId: id },
+              },
+            });
           }
-        : {}),
-    };
-
-    await prisma.observation.update({
-      data: updateData,
-      where: {
-        id: observationId,
-      },
-    });
-
-    const currentObservation = await prisma.observation.findFirst({
-      select: observationDetailSelect,
-      where: {
-        deletedAt: null,
-        id: observationId,
-      },
-    });
-
-    if (!currentObservation) {
-      throw new AppError("Observation not found after update.", 500);
+        }
+      });
+    } catch (error) {
+      if ((error as { code?: string }).code === "P2002") {
+        throw new AppError(
+          "That observation number already exists in the selected audit report.",
+          409,
+        );
+      }
+      throw error;
     }
 
     return {
-      current: mapObservationDetail(currentObservation),
-      previous: mapObservationDetail(previousObservation),
+      current: formatObservation(await findRecord(id, access)),
+      previous: formatObservation(existing),
     };
   },
 };

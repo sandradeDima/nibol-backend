@@ -31,7 +31,9 @@ export const passwordResetEmailTemplate = {
                 previewText: `Restablezca su contrasena de ${appName}.`,
             }),
             subject: `Restablezca su contrasena de ${appName}`,
-            text: joinTextBlocks(greeting(variables.userName), `Recibimos una solicitud para restablecer la contrasena de su cuenta en ${appName}.`, "Si desea continuar, utilice el siguiente acceso seguro.", variables.expiresIn ? `Este enlace vence en ${variables.expiresIn}.` : undefined, variables.resetLink, "Si usted no solicito este cambio, puede ignorar este mensaje con tranquilidad."),
+            text: joinTextBlocks(greeting(variables.userName), `Recibimos una solicitud para restablecer la contrasena de su cuenta en ${appName}.`, "Si desea continuar, utilice el siguiente acceso seguro.", variables.expiresIn
+                ? `Este enlace vence en ${variables.expiresIn}.`
+                : undefined, variables.resetLink, "Si usted no solicito este cambio, puede ignorar este mensaje con tranquilidad."),
         };
     },
     sampleVariables: {

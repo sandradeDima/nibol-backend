@@ -1,6 +1,11 @@
 import { renderBaseEmailLayout } from "../layouts/BaseEmailLayout.js";
 import type { EmailTemplateDefinition } from "../types/email-types.js";
-import { escapeHtml, greeting, joinTextBlocks, toParagraphHtml } from "../utils.js";
+import {
+  escapeHtml,
+  greeting,
+  joinTextBlocks,
+  toParagraphHtml,
+} from "../utils.js";
 
 export const genericNotificationEmailTemplate: EmailTemplateDefinition<"genericNotification"> =
   {

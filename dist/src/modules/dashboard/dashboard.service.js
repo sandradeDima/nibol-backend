@@ -1,1609 +1,422 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import { AppError } from "../../utils/app-error.js";
 import { prisma } from "../../utils/prisma.js";
-import { ACTIVE_EXTENSION_REQUEST_STATUSES } from "../extension-requests/extension-requests.constants.js";
-import { AUDIT_ROLE_MARKERS, SYSTEM_WIDE_ROLE_NAMES, } from "../remediation/remediation.constants.js";
-const dashboardPrisma = prisma;
-const CRITICAL_RISK_KEYS = ["CRITICO", "ALTO"];
-const DEFAULT_REMINDER_DAYS_BEFORE_DUE = 7;
-const PENDING_EXTENSION_STATUSES = ["SENT_TO_MANAGER", "SENT_TO_AUDIT"];
-const PENDING_PROGRESS_STATUS = "SENT_TO_AUDIT";
-const RETURNED_PROGRESS_STATUS = "RETURNED";
-const userSummarySelect = {
-    email: true,
-    id: true,
-    name: true,
-};
-const areaSummarySelect = {
-    id: true,
-    name: true,
-};
-const observationRowSelect = {
-    area: {
-        select: areaSummarySelect,
-    },
-    code: true,
-    dueDate: true,
-    id: true,
-    progressPercent: true,
-    responsibleUser: {
-        select: userSummarySelect,
-    },
-    riskLevel: {
-        select: {
-            colorToken: true,
-            key: true,
-            name: true,
-            severityOrder: true,
-        },
-    },
-    status: {
-        select: {
-            isFinal: true,
-            key: true,
-            name: true,
-        },
-    },
-    title: true,
-    updatedAt: true,
-};
-const commitmentRowSelect = {
-    dueDate: true,
-    id: true,
-    progressPercent: true,
-    remediationPlan: {
-        select: {
-            area: {
-                select: areaSummarySelect,
-            },
-        },
-    },
-    responsibleUser: {
-        select: userSummarySelect,
-    },
-    status: true,
-    title: true,
-    updatedAt: true,
-    observation: {
-        select: {
-            code: true,
-            id: true,
-            title: true,
-        },
-    },
-    completedAt: true,
-};
-const progressReviewSelect = {
-    id: true,
-    progressPercent: true,
-    status: true,
-    type: true,
-    updatedAt: true,
-    submittedByUser: {
-        select: userSummarySelect,
-    },
-    observation: {
-        select: {
-            area: {
-                select: areaSummarySelect,
-            },
-            code: true,
-            id: true,
-            title: true,
-        },
-    },
-};
-const extensionReviewSelect = {
-    area: {
-        select: areaSummarySelect,
-    },
-    commitment: {
-        select: {
-            title: true,
-        },
-    },
-    id: true,
-    requestedByUser: {
-        select: userSummarySelect,
-    },
-    status: true,
-    updatedAt: true,
-    observation: {
-        select: {
-            code: true,
-            id: true,
-            title: true,
-        },
-    },
-};
-const latestObservationSelect = {
-    area: {
-        select: areaSummarySelect,
-    },
-    code: true,
-    id: true,
-    title: true,
-    updatedAt: true,
-};
-const latestProgressSelect = {
-    id: true,
-    status: true,
-    type: true,
-    updatedAt: true,
-    observation: {
-        select: {
-            code: true,
-            id: true,
-            title: true,
-        },
-    },
-};
-const latestExtensionSelect = {
-    id: true,
-    status: true,
-    updatedAt: true,
-    observation: {
-        select: {
-            code: true,
-            id: true,
-            title: true,
-        },
-    },
-};
-const normalizeRoleName = (value) => {
-    return value
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .trim()
-        .toLowerCase();
-};
-const hasSystemWideRole = (access) => {
-    if (access.isAdmin) {
-        return true;
-    }
-    return access.roles.some((role) => SYSTEM_WIDE_ROLE_NAMES.has(normalizeRoleName(role)));
-};
-const hasAuditRole = (access) => {
-    return access.roles.some((role) => {
-        const normalizedRole = normalizeRoleName(role);
-        return AUDIT_ROLE_MARKERS.some((marker) => normalizedRole.includes(marker));
-    });
-};
-const hasManagementRole = (access) => {
-    return access.roles.some((role) => {
-        const normalizedRole = normalizeRoleName(role);
-        return (normalizedRole.includes("gerencia") ||
-            normalizedRole.includes("gerente") ||
-            normalizedRole.includes("manager") ||
-            normalizedRole.includes("responsable de area") ||
-            normalizedRole.includes("responsable area"));
-    });
-};
-const hasExecutorRole = (access) => {
-    return access.roles.some((role) => {
-        const normalizedRole = normalizeRoleName(role);
-        return normalizedRole.includes("ejecutor") || normalizedRole.includes("executor");
-    });
-};
-const hasAuditDashboardAccess = (access) => {
-    return access.isAdmin || hasSystemWideRole(access) || hasAuditRole(access);
-};
-const resolveViewerProfile = (access) => {
-    if (access.isAdmin) {
+import { buildObservationAccessWhere } from "../observations/observations.service.js";
+const DAY = 86_400_000;
+const userSelect = { email: true, id: true, name: true };
+const viewerProfile = (access) => {
+    const roles = access.roles.join(" ").toLowerCase();
+    if (access.isAdmin)
         return "ADMIN";
-    }
-    if (hasSystemWideRole(access)) {
+    if (/sistema|system/.test(roles))
         return "SYSTEMS";
-    }
-    if (hasAuditRole(access)) {
+    if (/audit/.test(roles))
         return "AUDIT";
-    }
-    if (hasManagementRole(access)) {
+    if (/geren|manager|jef/.test(roles))
         return "MANAGEMENT";
-    }
-    if (hasExecutorRole(access)) {
+    if (/responsable|ejecutor/.test(roles))
         return "EXECUTOR";
-    }
     return "GENERAL";
 };
-const buildSubtitle = (scope, profile) => {
-    if (scope === "auditoria") {
-        switch (profile) {
-            case "ADMIN":
-                return "Vista global para control administrativo y seguimiento integral de observaciones.";
-            case "SYSTEMS":
-                return "Vista global para monitoreo operativo, soporte y trazabilidad corporativa.";
-            case "AUDIT":
-                return "Vista global de Auditoría para revisión de observaciones, avances y ampliaciones.";
-            default:
-                return "Vista global consolidada del seguimiento corporativo.";
-        }
-    }
-    switch (profile) {
-        case "MANAGEMENT":
-            return "Vista acotada a su área y observaciones bajo responsabilidad gerencial.";
-        case "EXECUTOR":
-            return "Vista personal con observaciones, compromisos y avances asignados a su usuario.";
-        default:
-            return "Vista acotada a sus áreas y responsabilidades operativas.";
-    }
+const canViewAudit = (access) => {
+    const profile = viewerProfile(access);
+    return (["ADMIN", "SYSTEMS", "AUDIT"].includes(profile) ||
+        access.permissions.includes("reports.view"));
 };
-const startOfDay = (value) => {
-    return new Date(value.getFullYear(), value.getMonth(), value.getDate());
-};
-const addDays = (value, days) => {
-    const next = new Date(value);
-    next.setDate(next.getDate() + days);
-    return next;
-};
-const getMonthStart = (value) => {
-    return new Date(value.getFullYear(), value.getMonth(), 1);
-};
-const getMonthKey = (value) => {
-    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}`;
-};
-const getMonthLabel = (value) => {
-    return new Intl.DateTimeFormat("es-BO", {
-        month: "short",
-    }).format(value);
-};
-const formatPercent = (value) => {
-    if (!Number.isFinite(value ?? NaN)) {
-        return 0;
-    }
-    return Math.round(Number(value));
-};
-const buildObservationVisibilityCondition = (access) => {
-    if (hasAuditDashboardAccess(access)) {
-        return undefined;
-    }
-    return {
-        OR: [
-            {
-                responsibleUserId: access.userId,
-            },
-            {
-                auditorUserId: access.userId,
-            },
-            {
-                area: {
-                    active: true,
-                    deletedAt: null,
-                    managerUserId: access.userId,
-                },
-            },
-            {
-                areaAssignments: {
-                    some: {
-                        OR: [
-                            {
-                                responsibleUserId: access.userId,
-                            },
-                            {
-                                area: {
-                                    active: true,
-                                    deletedAt: null,
-                                    managerUserId: access.userId,
-                                },
-                            },
-                        ],
-                    },
-                },
-            },
-            {
-                commitments: {
-                    some: {
-                        deletedAt: null,
-                        responsibleUserId: access.userId,
-                    },
-                },
-            },
-            {
-                remediationPlans: {
-                    some: {
-                        deletedAt: null,
-                        ownerUserId: access.userId,
-                    },
-                },
-            },
-        ],
-    };
-};
-const buildCommitmentVisibilityCondition = (access) => {
-    if (hasAuditDashboardAccess(access)) {
-        return undefined;
-    }
-    return {
-        OR: [
-            {
-                responsibleUserId: access.userId,
-            },
-            {
-                remediationPlan: {
-                    ownerUserId: access.userId,
-                },
-            },
-            {
-                remediationPlan: {
-                    area: {
-                        active: true,
-                        deletedAt: null,
-                        managerUserId: access.userId,
-                    },
-                },
-            },
-            {
-                remediationPlan: {
-                    observation: buildObservationVisibilityCondition(access) ?? {},
-                },
-            },
-        ],
-    };
-};
-const buildProgressVisibilityCondition = (access) => {
-    if (hasAuditDashboardAccess(access)) {
-        return undefined;
-    }
-    return {
-        OR: [
-            {
-                submittedByUserId: access.userId,
-            },
-            {
-                reviewedByUserId: access.userId,
-            },
-            {
-                commitment: {
-                    responsibleUserId: access.userId,
-                },
-            },
-            {
-                remediationPlan: {
-                    ownerUserId: access.userId,
-                },
-            },
-            {
-                observation: buildObservationVisibilityCondition(access) ?? {},
-            },
-        ],
-    };
-};
-const buildExtensionVisibilityCondition = (access) => {
-    if (hasAuditDashboardAccess(access)) {
-        return undefined;
-    }
-    return {
-        OR: [
-            {
-                requestedByUserId: access.userId,
-            },
-            {
-                area: {
-                    active: true,
-                    deletedAt: null,
-                    managerUserId: access.userId,
-                },
-            },
-            {
-                observation: buildObservationVisibilityCondition(access) ?? {},
-            },
-            {
-                commitment: {
-                    responsibleUserId: access.userId,
-                },
-            },
-            {
-                commitment: {
-                    remediationPlan: {
-                        ownerUserId: access.userId,
-                    },
-                },
-            },
-        ],
-    };
-};
-const buildObservationWhere = (access) => {
-    const visibilityCondition = buildObservationVisibilityCondition(access);
-    return {
-        AND: [
-            {
-                deletedAt: null,
-            },
-            ...(visibilityCondition ? [visibilityCondition] : []),
-        ],
-    };
-};
-const buildCommitmentWhere = (access) => {
-    const visibilityCondition = buildCommitmentVisibilityCondition(access);
-    return {
-        AND: [
-            {
-                deletedAt: null,
-            },
-            ...(visibilityCondition ? [visibilityCondition] : []),
-        ],
-    };
-};
-const buildProgressWhere = (access) => {
-    const visibilityCondition = buildProgressVisibilityCondition(access);
-    return {
-        AND: [
-            {
-                deletedAt: null,
-            },
-            ...(visibilityCondition ? [visibilityCondition] : []),
-        ],
-    };
-};
-const buildExtensionWhere = (access) => {
-    const visibilityCondition = buildExtensionVisibilityCondition(access);
-    return {
-        AND: [
-            {
-                deletedAt: null,
-            },
-            ...(visibilityCondition ? [visibilityCondition] : []),
-        ],
-    };
-};
-const isCommitmentCompleted = (commitment) => {
-    return (commitment.status === "COMPLETED" ||
-        commitment.completedAt !== null ||
-        commitment.progressPercent >= 100);
-};
-const isObservationOverdue = (dueDate, isFinalStatus, today) => {
-    return !isFinalStatus && dueDate.getTime() < today.getTime();
-};
-const isCommitmentOverdue = (commitment, today) => {
-    return !isCommitmentCompleted(commitment) && commitment.dueDate.getTime() < today.getTime();
-};
-const isCommitmentUpcoming = (commitment, today, dueThreshold) => {
-    return (!isCommitmentCompleted(commitment) &&
-        commitment.dueDate.getTime() >= today.getTime() &&
-        commitment.dueDate.getTime() <= dueThreshold.getTime());
-};
-const buildIncompleteCommitmentCondition = () => {
-    return {
-        NOT: {
-            OR: [
-                {
-                    status: "COMPLETED",
-                },
-                {
-                    completedAt: {
-                        not: null,
-                    },
-                },
-                {
-                    progressPercent: {
-                        gte: 100,
-                    },
-                },
-            ],
-        },
-    };
-};
-const getCommitmentStatusLabel = (status) => {
-    switch (status) {
-        case "PENDING":
-            return "Pendiente";
-        case "IN_PROGRESS":
-            return "En progreso";
-        case "SENT_TO_AUDIT":
-            return "Enviado a Auditoría";
-        case "APPROVED":
-            return "Aprobado";
-        case "RETURNED":
-            return "Devuelto";
-        case "COMPLETED":
-            return "Completado";
-        case "OVERDUE":
-            return "Vencido";
-        default:
-            return status;
-    }
-};
-const getProgressStatusLabel = (status) => {
-    switch (status) {
-        case "DRAFT":
-            return "Borrador";
-        case "SENT_TO_AUDIT":
-            return "Enviado a Auditoría";
-        case "APPROVED":
-            return "Aprobado";
-        case "RETURNED":
-            return "Devuelto";
-        case "REJECTED":
-            return "Rechazado";
-        default:
-            return status;
-    }
-};
-const getProgressTypeLabel = (type) => {
-    switch (type) {
-        case "ADVANCE":
-            return "Avance";
-        case "FINALIZATION":
-            return "Finalización";
-        case "CORRECTION":
-            return "Corrección";
-        default:
-            return type;
-    }
-};
-const getExtensionStatusLabel = (status) => {
-    switch (status) {
-        case "DRAFT":
-            return "Borrador";
-        case "SENT_TO_MANAGER":
-            return "En revisión de Gerencia";
-        case "MANAGER_APPROVED":
-            return "Aprobada por Gerencia";
-        case "MANAGER_REJECTED":
-            return "Rechazada por Gerencia";
-        case "SENT_TO_AUDIT":
-            return "En revisión de Auditoría";
-        case "AUDIT_APPROVED":
-            return "Aprobada";
-        case "AUDIT_REJECTED":
-            return "Rechazada por Auditoría";
-        case "CANCELLED":
-            return "Cancelada";
-        default:
-            return status;
-    }
-};
-const getReminderDaysBeforeDue = async () => {
-    const parameter = await dashboardPrisma.systemParameter.findFirst({
-        select: {
-            value: true,
-        },
-        where: {
-            active: true,
-            deletedAt: null,
-            key: "reminder_days_before_due",
-        },
+const displayCode = (record) => `${record.auditReport.reportNumber} / OBS-${String(record.observationNumber).padStart(3, "0")}`;
+const statusLabel = (value) => ({
+    NOT_STARTED: "No iniciado",
+    STARTED: "Iniciado",
+    WITH_PROGRESS: "Con avance",
+    CONCLUDED: "Concluido",
+    SENT_TO_AUDIT: "En revisión",
+    RETURNED: "Devuelto",
+    APPROVED: "Aprobado",
+    REJECTED: "Rechazado",
+})[value] ?? value.replaceAll("_", " ");
+const reminderDays = async () => {
+    const record = await prisma.systemParameter.findFirst({
+        select: { value: true },
+        where: { active: true, deletedAt: null, key: "reminder_days_before_due" },
     });
-    const parsedValue = Number(parameter?.value ?? "");
-    if (!Number.isFinite(parsedValue) || parsedValue < 0) {
-        return DEFAULT_REMINDER_DAYS_BEFORE_DUE;
-    }
-    return Math.round(parsedValue);
+    const value = Number(record?.value ?? 7);
+    return Number.isFinite(value) && value >= 0 ? Math.round(value) : 7;
 };
-const mapObservationRow = (observation, today) => {
-    return {
-        area: observation.area,
-        code: observation.code,
-        dueDate: observation.dueDate.toISOString(),
-        href: `/observaciones/${observation.id}`,
-        id: observation.id,
-        isOverdue: isObservationOverdue(observation.dueDate, observation.status.isFinal, today),
-        progressPercent: observation.progressPercent,
-        responsibleUser: observation.responsibleUser,
-        riskLevel: {
-            colorToken: observation.riskLevel.colorToken,
-            key: observation.riskLevel.key,
-            name: observation.riskLevel.name,
+const observationInclude = {
+    areaAssignments: {
+        include: {
+            area: { select: { id: true, name: true } },
+            areaResponsible: { select: userSelect },
+            processOwner: { select: userSelect },
         },
-        status: {
-            key: observation.status.key,
-            name: observation.status.name,
-        },
-        title: observation.title,
-        updatedAt: observation.updatedAt.toISOString(),
-    };
+    },
+    auditReport: { select: { reportNumber: true } },
+    riskLevel: { select: { colorToken: true, key: true, name: true } },
+    status: { select: { isFinal: true, key: true, name: true } },
 };
-const mapCommitmentRow = (commitment, today) => {
-    const overdue = isCommitmentOverdue(commitment, today);
-    const effectiveStatusKey = overdue ? "OVERDUE" : isCommitmentCompleted(commitment) ? "COMPLETED" : commitment.status;
+const actionPlanInclude = {
+    observation: {
+        select: {
+            auditReport: { select: { reportNumber: true } },
+            id: true,
+            observationNumber: true,
+            title: true,
+        },
+    },
+    observationArea: { select: { area: { select: { id: true, name: true } } } },
+    responsibleUser: { select: userSelect },
+};
+const observationRow = (record, now) => ({
+    area: record.areaAssignments[0]?.area ?? { id: "", name: "Sin área" },
+    code: displayCode(record),
+    dueDate: record.currentDueDate.toISOString(),
+    href: `/observaciones/${record.id}`,
+    id: record.id,
+    isOverdue: !record.status.isFinal && record.currentDueDate.getTime() < now.getTime(),
+    progressPercent: record.progressPercent,
+    responsibleUser: record.areaAssignments[0]?.areaResponsible ?? null,
+    riskLevel: record.riskLevel,
+    status: { key: record.status.key, name: record.status.name },
+    title: record.title,
+    updatedAt: record.updatedAt.toISOString(),
+});
+const actionPlanRow = (record, now) => {
+    const overdue = record.status !== "CONCLUDED" &&
+        record.currentDueDate.getTime() < now.getTime();
     return {
-        area: commitment.remediationPlan.area,
-        dueDate: commitment.dueDate.toISOString(),
-        href: `/observaciones/${commitment.observation.id}`,
-        id: commitment.id,
+        area: record.observationArea.area,
+        dueDate: record.currentDueDate.toISOString(),
+        href: `/planes-accion/${record.id}`,
+        id: record.id,
         isOverdue: overdue,
-        progressPercent: commitment.progressPercent,
-        responsibleUser: commitment.responsibleUser,
+        progressPercent: record.progressPercent,
+        responsibleUser: record.responsibleUser,
         status: {
-            key: effectiveStatusKey,
-            name: getCommitmentStatusLabel(effectiveStatusKey),
+            key: overdue ? "OVERDUE" : record.status,
+            name: overdue ? "Vencido" : statusLabel(record.status),
         },
-        title: commitment.title,
-        updatedAt: commitment.updatedAt.toISOString(),
+        title: record.title,
+        updatedAt: record.updatedAt.toISOString(),
         observation: {
-            code: commitment.observation.code,
-            id: commitment.observation.id,
-            title: commitment.observation.title,
+            code: displayCode(record.observation),
+            id: record.observation.id,
+            title: record.observation.title,
         },
     };
 };
-const buildCurrentVsOverdue = (openObservations, overdueObservations) => {
-    return [
-        {
-            colorToken: "primary",
-            key: "vigentes",
-            label: "Vigentes",
-            value: Math.max(0, openObservations - overdueObservations),
-        },
-        {
-            colorToken: "critical",
-            key: "vencidas",
-            label: "Vencidas",
-            value: overdueObservations,
-        },
-    ];
+const distribution = (records, getKey, getLabel) => {
+    const values = new Map();
+    for (const record of records) {
+        const key = getKey(record);
+        const current = values.get(key);
+        values.set(key, {
+            label: getLabel(record),
+            value: (current?.value ?? 0) + 1,
+        });
+    }
+    return [...values.entries()]
+        .map(([key, value]) => ({ key, ...value }))
+        .sort((a, b) => b.value - a.value);
 };
-const buildDistributionHrefs = (permission) => {
-    const canViewObservations = permission.includes("observations.view");
-    return {
-        area: (areaId) => canViewObservations ? `/observaciones?filter.areaId=${encodeURIComponent(areaId)}` : undefined,
-        risk: (riskLevelId) => canViewObservations
-            ? `/observaciones?filter.riskLevelId=${encodeURIComponent(riskLevelId)}`
-            : undefined,
-        status: (statusId) => canViewObservations
-            ? `/observaciones?filter.statusId=${encodeURIComponent(statusId)}`
-            : undefined,
+const load = async (access) => {
+    const now = new Date();
+    const days = await reminderDays();
+    const observationWhere = {
+        deletedAt: null,
+        ...buildObservationAccessWhere(access),
     };
-};
-const getObservationRiskDistribution = async (access) => {
-    const where = buildObservationWhere(access);
-    const hrefs = buildDistributionHrefs(access.permissions);
-    const grouped = await dashboardPrisma.observation.groupBy({
-        _count: {
-            _all: true,
-        },
-        by: ["riskLevelId"],
-        where,
-    });
-    if (grouped.length === 0) {
-        return [];
-    }
-    const riskLevels = await dashboardPrisma.riskLevel.findMany({
-        select: {
-            colorToken: true,
-            id: true,
-            key: true,
-            name: true,
-            severityOrder: true,
-        },
-        where: {
-            id: {
-                in: grouped.map((item) => item.riskLevelId),
-            },
-        },
-    });
-    const riskLevelMap = new Map(riskLevels.map((riskLevel) => [riskLevel.id, riskLevel]));
-    return grouped
-        .map((item) => {
-        const riskLevel = riskLevelMap.get(item.riskLevelId);
-        if (!riskLevel) {
-            return null;
-        }
-        return {
-            colorToken: riskLevel.colorToken,
-            href: hrefs.risk(riskLevel.id),
-            key: riskLevel.key,
-            label: riskLevel.name,
-            sortOrder: riskLevel.severityOrder,
-            value: item._count._all,
-        };
-    })
-        .filter(Boolean)
-        .sort((left, right) => left.sortOrder - right.sortOrder)
-        .map((item) => ({
-        colorToken: item.colorToken,
-        href: item.href,
-        key: item.key,
-        label: item.label,
-        value: item.value,
-    }));
-};
-const getObservationStatusDistribution = async (access) => {
-    const where = buildObservationWhere(access);
-    const hrefs = buildDistributionHrefs(access.permissions);
-    const grouped = await dashboardPrisma.observation.groupBy({
-        _count: {
-            _all: true,
-        },
-        by: ["statusId"],
-        where,
-    });
-    if (grouped.length === 0) {
-        return [];
-    }
-    const statuses = await dashboardPrisma.observationStatus.findMany({
-        select: {
-            id: true,
-            isFinal: true,
-            key: true,
-            name: true,
-            sortOrder: true,
-        },
-        where: {
-            id: {
-                in: grouped.map((item) => item.statusId),
-            },
-        },
-    });
-    const statusMap = new Map(statuses.map((status) => [status.id, status]));
-    return grouped
-        .map((item) => {
-        const status = statusMap.get(item.statusId);
-        if (!status) {
-            return null;
-        }
-        return {
-            href: hrefs.status(status.id),
-            isFinal: status.isFinal,
-            key: status.key,
-            label: status.name,
-            sortOrder: status.sortOrder,
-            value: item._count._all,
-        };
-    })
-        .filter(Boolean)
-        .sort((left, right) => left.sortOrder - right.sortOrder)
-        .map((item) => ({
-        href: item.href,
-        isFinal: item.isFinal,
-        key: item.key,
-        label: item.label,
-        value: item.value,
-    }));
-};
-const getObservationAreaDistribution = async (access) => {
-    const where = buildObservationWhere(access);
-    const hrefs = buildDistributionHrefs(access.permissions);
-    const grouped = await dashboardPrisma.observation.groupBy({
-        _count: {
-            _all: true,
-        },
-        by: ["areaId"],
-        where,
-    });
-    if (grouped.length === 0) {
-        return [];
-    }
-    const areas = await dashboardPrisma.area.findMany({
-        select: {
-            id: true,
-            name: true,
-        },
-        where: {
-            id: {
-                in: grouped.map((item) => item.areaId),
-            },
-        },
-    });
-    const areaMap = new Map(areas.map((area) => [area.id, area]));
-    return grouped
-        .map((item) => {
-        const area = areaMap.get(item.areaId);
-        if (!area) {
-            return null;
-        }
-        return {
-            href: hrefs.area(area.id),
-            key: area.id,
-            label: area.name,
-            value: item._count._all,
-        };
-    })
-        .filter(Boolean)
-        .sort((left, right) => right.value - left.value)
-        .map((item) => ({
-        href: item.href,
-        key: item.key,
-        label: item.label,
-        value: item.value,
-    }));
-};
-const getMonthlyTrend = async (access) => {
-    const observationWhere = buildObservationWhere(access);
-    const currentMonth = getMonthStart(new Date());
-    const rangeStart = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 5, 1);
-    // The schema does not store a dedicated closedAt value, so the final-state updatedAt is
-    // used as the closest persisted signal for closure timing.
-    const [createdRows, closedRows] = await Promise.all([
-        dashboardPrisma.observation.findMany({
-            select: {
-                createdAt: true,
-            },
-            where: {
-                AND: [
-                    observationWhere,
-                    {
-                        createdAt: {
-                            gte: rangeStart,
+    const [observations, actionPlans, evaluations, extensions] = await Promise.all([
+        prisma.observation.findMany({
+            include: observationInclude,
+            orderBy: { updatedAt: "desc" },
+            where: observationWhere,
+        }),
+        prisma.actionPlan.findMany({
+            include: actionPlanInclude,
+            orderBy: { currentDueDate: "asc" },
+            where: { deletedAt: null, observation: observationWhere },
+        }),
+        prisma.progressEvaluation.findMany({
+            include: {
+                actionPlan: {
+                    include: {
+                        observation: {
+                            select: {
+                                auditReport: { select: { reportNumber: true } },
+                                id: true,
+                                observationNumber: true,
+                                title: true,
+                            },
                         },
+                        observationArea: { select: { area: { select: { name: true } } } },
+                        responsibleUser: { select: userSelect },
                     },
-                ],
+                },
+                submittedByUser: { select: userSelect },
+            },
+            orderBy: { updatedAt: "desc" },
+            where: {
+                actionPlan: { observation: observationWhere },
+                deletedAt: null,
             },
         }),
-        dashboardPrisma.observation.findMany({
-            select: {
-                updatedAt: true,
-            },
-            where: {
-                AND: [
-                    observationWhere,
-                    {
-                        status: {
-                            isFinal: true,
-                        },
-                        updatedAt: {
-                            gte: rangeStart,
+        prisma.deadlineExtensionRequest.findMany({
+            include: {
+                actionPlan: {
+                    include: {
+                        observation: {
+                            select: {
+                                auditReport: { select: { reportNumber: true } },
+                                id: true,
+                                observationNumber: true,
+                                title: true,
+                            },
                         },
                     },
+                },
+                observation: {
+                    select: {
+                        auditReport: { select: { reportNumber: true } },
+                        id: true,
+                        observationNumber: true,
+                        title: true,
+                    },
+                },
+                observationArea: { select: { area: { select: { name: true } } } },
+                requestedByUser: { select: userSelect },
+            },
+            orderBy: { updatedAt: "desc" },
+            where: {
+                deletedAt: null,
+                OR: [
+                    { observation: observationWhere },
+                    { actionPlan: { observation: observationWhere } },
                 ],
             },
         }),
     ]);
-    const createdCounts = new Map();
-    const closedCounts = new Map();
-    createdRows.forEach((row) => {
-        const key = getMonthKey(getMonthStart(row.createdAt));
-        createdCounts.set(key, (createdCounts.get(key) ?? 0) + 1);
-    });
-    closedRows.forEach((row) => {
-        const key = getMonthKey(getMonthStart(row.updatedAt));
-        closedCounts.set(key, (closedCounts.get(key) ?? 0) + 1);
-    });
-    return Array.from({ length: 6 }, (_, index) => {
-        const month = new Date(rangeStart.getFullYear(), rangeStart.getMonth() + index, 1);
-        const key = getMonthKey(month);
-        return {
-            closed: closedCounts.get(key) ?? 0,
-            created: createdCounts.get(key) ?? 0,
-            monthKey: key,
-            monthLabel: getMonthLabel(month),
-        };
-    });
+    return { actionPlans, days, evaluations, extensions, now, observations };
 };
-const getTopResponsibles = async (access) => {
-    const where = buildObservationWhere(access);
-    const grouped = await dashboardPrisma.observation.groupBy({
-        _count: {
-            _all: true,
-        },
-        by: ["responsibleUserId"],
-        where: {
-            AND: [
-                where,
-                {
-                    responsibleUserId: {
-                        not: null,
-                    },
-                    status: {
-                        isFinal: false,
-                    },
-                },
-            ],
-        },
-    });
-    const sorted = grouped
-        .filter((item) => Boolean(item.responsibleUserId))
-        .sort((left, right) => right._count._all - left._count._all)
-        .slice(0, 5);
-    if (sorted.length === 0) {
-        return [];
-    }
-    const users = await dashboardPrisma.user.findMany({
-        select: {
-            id: true,
-            name: true,
-        },
-        where: {
-            id: {
-                in: sorted.map((item) => item.responsibleUserId),
-            },
-        },
-    });
-    const userMap = new Map(users.map((user) => [user.id, user]));
-    return sorted.map((item) => {
-        const user = userMap.get(item.responsibleUserId);
-        return {
-            href: access.permissions.includes("observations.view")
-                ? `/observaciones?filter.responsibleUserId=${encodeURIComponent(item.responsibleUserId)}`
-                : undefined,
-            id: item.responsibleUserId,
-            label: user?.name ?? "Sin responsable",
-            value: item._count._all,
-        };
-    });
-};
-const getTopOverdueAreas = async (access, today) => {
-    const where = buildObservationWhere(access);
-    const grouped = await dashboardPrisma.observation.groupBy({
-        _count: {
-            _all: true,
-        },
-        by: ["areaId"],
-        where: {
-            AND: [
-                where,
-                {
-                    dueDate: {
-                        lt: today,
-                    },
-                    status: {
-                        isFinal: false,
-                    },
-                },
-            ],
-        },
-    });
-    const sorted = grouped
-        .sort((left, right) => right._count._all - left._count._all)
-        .slice(0, 5);
-    if (sorted.length === 0) {
-        return [];
-    }
-    const areas = await dashboardPrisma.area.findMany({
-        select: {
-            id: true,
-            name: true,
-        },
-        where: {
-            id: {
-                in: sorted.map((item) => item.areaId),
-            },
-        },
-    });
-    const areaMap = new Map(areas.map((area) => [area.id, area]));
-    return sorted.map((item) => {
-        const area = areaMap.get(item.areaId);
-        return {
-            href: access.permissions.includes("observations.view")
-                ? `/observaciones?filter.areaId=${encodeURIComponent(item.areaId)}&filter.overdue=true`
-                : undefined,
-            id: item.areaId,
-            label: area?.name ?? "Área sin nombre",
-            value: item._count._all,
-        };
-    });
-};
-const getCriticalObservations = async (access, today) => {
-    const where = buildObservationWhere(access);
-    const rows = await dashboardPrisma.observation.findMany({
-        orderBy: [
-            {
-                dueDate: "asc",
-            },
-            {
-                riskLevel: {
-                    severityOrder: "asc",
-                },
-            },
-        ],
-        select: observationRowSelect,
-        take: 12,
-        where: {
-            AND: [
-                where,
-                {
-                    status: {
-                        isFinal: false,
-                    },
-                    OR: [
-                        {
-                            dueDate: {
-                                lt: today,
-                            },
-                        },
-                        {
-                            riskLevel: {
-                                key: {
-                                    in: [...CRITICAL_RISK_KEYS],
-                                },
-                            },
-                        },
-                    ],
-                },
-            ],
-        },
-    });
-    return rows
-        .map((row) => mapObservationRow(row, today))
-        .sort((left, right) => {
-        if (left.isOverdue !== right.isOverdue) {
-            return left.isOverdue ? -1 : 1;
-        }
-        return new Date(left.dueDate).getTime() - new Date(right.dueDate).getTime();
-    })
-        .slice(0, 8);
-};
-const getUpcomingCommitments = async (access, today, dueThreshold) => {
-    const where = buildCommitmentWhere(access);
-    const rows = await dashboardPrisma.commitment.findMany({
-        orderBy: [
-            {
-                dueDate: "asc",
-            },
-            {
-                updatedAt: "desc",
-            },
-        ],
-        select: commitmentRowSelect,
-        take: 8,
-        where: {
-            AND: [
-                where,
-                {
-                    dueDate: {
-                        gte: today,
-                        lte: dueThreshold,
-                    },
-                },
-            ],
-        },
-    });
-    return rows
-        .filter((row) => isCommitmentUpcoming(row, today, dueThreshold))
-        .map((row) => mapCommitmentRow(row, today));
-};
-const getPendingReviewRows = async (access) => {
-    const [progressRows, extensionRows] = await Promise.all([
-        dashboardPrisma.progressUpdate.findMany({
-            orderBy: {
-                updatedAt: "desc",
-            },
-            select: progressReviewSelect,
-            take: 8,
-            where: {
-                AND: [
-                    buildProgressWhere(access),
-                    {
-                        status: PENDING_PROGRESS_STATUS,
-                    },
-                ],
-            },
-        }),
-        dashboardPrisma.deadlineExtensionRequest.findMany({
-            orderBy: {
-                updatedAt: "desc",
-            },
-            select: extensionReviewSelect,
-            take: 8,
-            where: {
-                AND: [
-                    buildExtensionWhere(access),
-                    {
-                        status: {
-                            in: [...PENDING_EXTENSION_STATUSES],
-                        },
-                    },
-                ],
-            },
-        }),
-    ]);
-    return [
-        ...progressRows.map((row) => ({
-            areaName: row.observation.area.name,
-            href: `/observaciones/${row.observation.id}`,
-            id: row.id,
-            kind: "PROGRESS",
-            responsibleName: row.submittedByUser?.name ?? null,
-            sortDate: row.updatedAt.getTime(),
-            status: {
-                key: row.status,
-                name: getProgressStatusLabel(row.status),
-            },
-            subtitle: `${row.observation.code} · ${getProgressTypeLabel(row.type)} · ${row.progressPercent ?? 0}%`,
-            title: row.observation.title,
-            updatedAt: row.updatedAt.toISOString(),
-        })),
-        ...extensionRows.map((row) => ({
-            areaName: row.area.name,
-            href: `/ampliaciones-plazo/${row.id}`,
-            id: row.id,
-            kind: "EXTENSION",
-            responsibleName: row.requestedByUser?.name ?? null,
-            sortDate: row.updatedAt.getTime(),
-            status: {
-                key: row.status,
-                name: getExtensionStatusLabel(row.status),
-            },
-            subtitle: row.commitment?.title
-                ? `${row.observation.code} · ${row.commitment.title}`
-                : `${row.observation.code} · Solicitud de observación`,
-            title: row.observation.title,
-            updatedAt: row.updatedAt.toISOString(),
-        })),
-    ]
-        .sort((left, right) => right.sortDate - left.sortDate)
-        .slice(0, 8)
+const buildReviewRows = (data) => [
+    ...data.evaluations
+        .filter((item) => item.reviewStatus === "SENT_TO_AUDIT")
         .map((item) => ({
-        areaName: item.areaName,
-        href: item.href,
+        areaName: item.actionPlan.observationArea.area.name,
+        href: `/observaciones/${item.actionPlan.observation.id}#colaboracion`,
         id: item.id,
-        kind: item.kind,
-        responsibleName: item.responsibleName,
-        status: item.status,
-        subtitle: item.subtitle,
-        title: item.title,
-        updatedAt: item.updatedAt,
-    }));
-};
-const getAreaReviewQueueRows = async (access) => {
-    const [progressRows, extensionRows] = await Promise.all([
-        dashboardPrisma.progressUpdate.findMany({
-            orderBy: {
-                updatedAt: "desc",
-            },
-            select: progressReviewSelect,
-            take: 8,
-            where: {
-                AND: [
-                    buildProgressWhere(access),
-                    {
-                        status: RETURNED_PROGRESS_STATUS,
-                    },
-                ],
-            },
-        }),
-        dashboardPrisma.deadlineExtensionRequest.findMany({
-            orderBy: {
-                updatedAt: "desc",
-            },
-            select: extensionReviewSelect,
-            take: 8,
-            where: {
-                AND: [
-                    buildExtensionWhere(access),
-                    {
-                        status: {
-                            in: [...ACTIVE_EXTENSION_REQUEST_STATUSES],
-                        },
-                    },
-                ],
-            },
-        }),
-    ]);
-    return [
-        ...progressRows.map((row) => ({
-            areaName: row.observation.area.name,
-            href: `/observaciones/${row.observation.id}`,
-            id: row.id,
-            kind: "PROGRESS",
-            responsibleName: row.submittedByUser?.name ?? null,
-            sortDate: row.updatedAt.getTime(),
-            status: {
-                key: row.status,
-                name: getProgressStatusLabel(row.status),
-            },
-            subtitle: `${row.observation.code} · ${getProgressTypeLabel(row.type)}`,
-            title: row.observation.title,
-            updatedAt: row.updatedAt.toISOString(),
-        })),
-        ...extensionRows.map((row) => ({
-            areaName: row.area.name,
-            href: `/ampliaciones-plazo/${row.id}`,
-            id: row.id,
+        kind: "PROGRESS",
+        responsibleName: item.submittedByUser.name,
+        status: { key: item.reviewStatus, name: "Pendiente de Auditoría" },
+        subtitle: `${displayCode(item.actionPlan.observation)} · ${item.progressPercent}%`,
+        title: item.actionPlan.title,
+        updatedAt: item.updatedAt.toISOString(),
+    })),
+    ...data.extensions
+        .filter((item) => ["SENT_TO_MANAGER", "SENT_TO_AUDIT"].includes(item.status))
+        .map((item) => {
+        const observation = item.observation ?? item.actionPlan.observation;
+        return {
+            areaName: item.observationArea?.area.name ?? "Varias áreas",
+            href: `/ampliaciones-plazo/${item.id}`,
+            id: item.id,
             kind: "EXTENSION",
-            responsibleName: row.requestedByUser?.name ?? null,
-            sortDate: row.updatedAt.getTime(),
+            responsibleName: item.requestedByUser.name,
             status: {
-                key: row.status,
-                name: getExtensionStatusLabel(row.status),
+                key: item.status,
+                name: item.status === "SENT_TO_MANAGER"
+                    ? "Pendiente de Gerencia"
+                    : "Pendiente de Auditoría",
             },
-            subtitle: row.commitment?.title
-                ? `${row.observation.code} · ${row.commitment.title}`
-                : `${row.observation.code} · Solicitud activa`,
-            title: row.observation.title,
-            updatedAt: row.updatedAt.toISOString(),
-        })),
-    ]
-        .sort((left, right) => right.sortDate - left.sortDate)
-        .slice(0, 8)
-        .map((item) => ({
-        areaName: item.areaName,
-        href: item.href,
+            subtitle: `${displayCode(observation)} · +${Math.round((item.proposedDueDate.getTime() - item.previousDueDate.getTime()) / DAY)} días`,
+            title: item.actionPlan?.title ?? observation.title,
+            updatedAt: item.updatedAt.toISOString(),
+        };
+    }),
+]
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .slice(0, 12);
+const latestRows = (data) => [
+    ...data.observations.slice(0, 6).map((item) => ({
+        description: `Observación ${item.status.name.toLowerCase()} con ${item.progressPercent}% de avance.`,
+        href: `/observaciones/${item.id}`,
         id: item.id,
-        kind: item.kind,
-        responsibleName: item.responsibleName,
-        status: item.status,
-        subtitle: item.subtitle,
-        title: item.title,
-        updatedAt: item.updatedAt,
-    }));
-};
-const getLatestUpdates = async (access) => {
-    const [observationRows, progressRows, extensionRows] = await Promise.all([
-        dashboardPrisma.observation.findMany({
-            orderBy: {
-                updatedAt: "desc",
-            },
-            select: latestObservationSelect,
-            take: 6,
-            where: buildObservationWhere(access),
-        }),
-        dashboardPrisma.progressUpdate.findMany({
-            orderBy: {
-                updatedAt: "desc",
-            },
-            select: latestProgressSelect,
-            take: 6,
-            where: buildProgressWhere(access),
-        }),
-        dashboardPrisma.deadlineExtensionRequest.findMany({
-            orderBy: {
-                updatedAt: "desc",
-            },
-            select: latestExtensionSelect,
-            take: 6,
-            where: buildExtensionWhere(access),
-        }),
-    ]);
-    return [
-        ...observationRows.map((row) => ({
-            description: `Observación ${row.code} actualizada en ${row.area.name}.`,
-            href: `/observaciones/${row.id}`,
-            id: row.id,
-            kind: "OBSERVATION",
-            sortDate: row.updatedAt.getTime(),
-            timestamp: row.updatedAt.toISOString(),
-            title: row.title,
-        })),
-        ...progressRows.map((row) => ({
-            description: `${getProgressTypeLabel(row.type)} ${getProgressStatusLabel(row.status).toLowerCase()} para ${row.observation.code}.`,
-            href: `/observaciones/${row.observation.id}`,
-            id: row.id,
-            kind: "PROGRESS",
-            sortDate: row.updatedAt.getTime(),
-            timestamp: row.updatedAt.toISOString(),
-            title: row.observation.title,
-        })),
-        ...extensionRows.map((row) => ({
-            description: `Ampliación ${getExtensionStatusLabel(row.status).toLowerCase()} para ${row.observation.code}.`,
-            href: `/ampliaciones-plazo/${row.id}`,
-            id: row.id,
-            kind: "EXTENSION",
-            sortDate: row.updatedAt.getTime(),
-            timestamp: row.updatedAt.toISOString(),
-            title: row.observation.title,
-        })),
-    ]
-        .sort((left, right) => right.sortDate - left.sortDate)
-        .slice(0, 8)
-        .map((item) => ({
-        description: item.description,
-        href: item.href,
+        kind: "OBSERVATION",
+        timestamp: item.updatedAt.toISOString(),
+        title: displayCode(item),
+    })),
+    ...data.evaluations.slice(0, 6).map((item) => ({
+        description: `Evaluación ${statusLabel(item.reviewStatus).toLowerCase()} para ${item.actionPlan.title}.`,
+        href: `/observaciones/${item.actionPlan.observation.id}#colaboracion`,
         id: item.id,
-        kind: item.kind,
-        timestamp: item.timestamp,
-        title: item.title,
-    }));
-};
-const getAssignedObservationCount = async (access) => {
-    return dashboardPrisma.observation.count({
-        where: {
-            AND: [
-                {
-                    deletedAt: null,
-                },
-                {
-                    OR: [
-                        {
-                            responsibleUserId: access.userId,
-                        },
-                        {
-                            areaAssignments: {
-                                some: {
-                                    responsibleUserId: access.userId,
-                                },
-                            },
-                        },
-                        {
-                            commitments: {
-                                some: {
-                                    deletedAt: null,
-                                    responsibleUserId: access.userId,
-                                },
-                            },
-                        },
-                        {
-                            remediationPlans: {
-                                some: {
-                                    deletedAt: null,
-                                    ownerUserId: access.userId,
-                                },
-                            },
-                        },
-                    ],
-                },
-            ],
-        },
-    });
-};
-const buildDashboardSummary = (preferredDashboard, viewerProfile) => {
+        kind: "PROGRESS",
+        timestamp: item.updatedAt.toISOString(),
+        title: `${displayCode(item.actionPlan.observation)} · ${item.progressPercent}%`,
+    })),
+]
+    .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+    .slice(0, 10);
+const common = async (access) => {
+    const data = await load(access);
+    const dueThreshold = new Date(data.now.getTime() + data.days * DAY);
+    const open = data.observations.filter((item) => !item.status.isFinal);
+    const overdue = open.filter((item) => item.currentDueDate < data.now);
+    const upcomingObservations = open.filter((item) => item.currentDueDate >= data.now && item.currentDueDate <= dueThreshold);
+    const openPlans = data.actionPlans.filter((item) => item.status !== "CONCLUDED");
+    const upcomingPlans = openPlans.filter((item) => item.currentDueDate >= data.now && item.currentDueDate <= dueThreshold);
+    const overduePlans = openPlans.filter((item) => item.currentDueDate < data.now);
+    const averageProgress = data.observations.length
+        ? Math.round(data.observations.reduce((sum, item) => sum + item.progressPercent, 0) /
+            data.observations.length)
+        : 0;
+    const byArea = distribution(data.observations.flatMap((item) => item.areaAssignments.map((area) => ({ area }))), (item) => item.area.area.id, (item) => item.area.area.name);
+    const byRisk = distribution(data.observations, (item) => item.riskLevel.key, (item) => item.riskLevel.name);
+    const byStatus = distribution(data.observations, (item) => item.status.key, (item) => item.status.name);
+    const critical = data.observations
+        .filter((item) => item.riskLevel.key === "ALTO" && !item.status.isFinal)
+        .sort((a, b) => a.currentDueDate.getTime() - b.currentDueDate.getTime())
+        .slice(0, 10)
+        .map((item) => observationRow(item, data.now));
+    const planRows = upcomingPlans
+        .slice(0, 10)
+        .map((item) => actionPlanRow(item, data.now));
     return {
-        canViewAreaDashboard: true,
-        canViewAuditDashboard: preferredDashboard === "auditoria",
-        defaultRoute: preferredDashboard === "auditoria" ? "/dashboard/auditoria" : "/dashboard/area",
-        preferredDashboard,
-        subtitle: buildSubtitle(preferredDashboard, viewerProfile),
-        viewerProfile,
+        averageProgress,
+        byArea,
+        byRisk,
+        byStatus,
+        critical,
+        data,
+        open,
+        overdue,
+        overduePlans,
+        planRows,
+        upcomingObservations,
+        upcomingPlans,
     };
 };
 export const dashboardService = {
+    async getMySummary(access) {
+        const profile = viewerProfile(access);
+        const audit = canViewAudit(access);
+        return {
+            canViewAreaDashboard: true,
+            canViewAuditDashboard: audit,
+            defaultRoute: audit ? "/dashboard/auditoria" : "/dashboard/area",
+            preferredDashboard: audit ? "auditoria" : "area",
+            subtitle: audit
+                ? "Visión corporativa del ciclo de hallazgos."
+                : "Seguimiento de sus áreas y planes asignados.",
+            viewerProfile: profile,
+        };
+    },
     async getAuditDashboard(access) {
-        if (!hasAuditDashboardAccess(access)) {
-            throw new AppError("No tiene acceso al dashboard global de Auditoría.", 403);
+        const value = await common(access);
+        const closed = value.data.observations.filter((item) => item.status.isFinal).length;
+        const reviews = buildReviewRows(value.data);
+        const topResponsibles = distribution(value.data.actionPlans, (item) => item.responsibleUser.id, (item) => item.responsibleUser.name)
+            .slice(0, 8)
+            .map((item) => ({ id: item.key, label: item.label, value: item.value }));
+        const months = new Map();
+        for (let offset = 5; offset >= 0; offset -= 1) {
+            const date = new Date();
+            date.setUTCMonth(date.getUTCMonth() - offset);
+            months.set(date.toISOString().slice(0, 7), { closed: 0, created: 0 });
         }
-        const viewerProfile = resolveViewerProfile(access);
-        const reminderDaysBeforeDue = await getReminderDaysBeforeDue();
-        const today = startOfDay(new Date());
-        const dueThreshold = addDays(today, reminderDaysBeforeDue);
-        const observationWhere = buildObservationWhere(access);
-        const progressWhere = buildProgressWhere(access);
-        const extensionWhere = buildExtensionWhere(access);
-        const [totalObservations, closedObservations, overdueObservations, upcomingObservations, averageProgress, pendingProgressReviews, pendingExtensions, observationsByRisk, observationsByStatus, observationsByArea, monthlyTrend, topResponsibles, topOverdueAreas, criticalObservations, upcomingCommitments, pendingReviews, latestUpdates,] = await Promise.all([
-            dashboardPrisma.observation.count({
-                where: observationWhere,
-            }),
-            dashboardPrisma.observation.count({
-                where: {
-                    AND: [
-                        observationWhere,
-                        {
-                            status: {
-                                isFinal: true,
-                            },
-                        },
-                    ],
-                },
-            }),
-            dashboardPrisma.observation.count({
-                where: {
-                    AND: [
-                        observationWhere,
-                        {
-                            dueDate: {
-                                lt: today,
-                            },
-                            status: {
-                                isFinal: false,
-                            },
-                        },
-                    ],
-                },
-            }),
-            dashboardPrisma.observation.count({
-                where: {
-                    AND: [
-                        observationWhere,
-                        {
-                            dueDate: {
-                                gte: today,
-                                lte: dueThreshold,
-                            },
-                            status: {
-                                isFinal: false,
-                            },
-                        },
-                    ],
-                },
-            }),
-            dashboardPrisma.observation.aggregate({
-                _avg: {
-                    progressPercent: true,
-                },
-                where: observationWhere,
-            }),
-            dashboardPrisma.progressUpdate.count({
-                where: {
-                    AND: [
-                        progressWhere,
-                        {
-                            status: PENDING_PROGRESS_STATUS,
-                        },
-                    ],
-                },
-            }),
-            dashboardPrisma.deadlineExtensionRequest.count({
-                where: {
-                    AND: [
-                        extensionWhere,
-                        {
-                            status: {
-                                in: [...PENDING_EXTENSION_STATUSES],
-                            },
-                        },
-                    ],
-                },
-            }),
-            getObservationRiskDistribution(access),
-            getObservationStatusDistribution(access),
-            getObservationAreaDistribution(access),
-            getMonthlyTrend(access),
-            getTopResponsibles(access),
-            getTopOverdueAreas(access, today),
-            getCriticalObservations(access, today),
-            getUpcomingCommitments(access, today, dueThreshold),
-            getPendingReviewRows(access),
-            getLatestUpdates(access),
-        ]);
-        const openObservations = Math.max(0, totalObservations - closedObservations);
+        for (const item of value.data.observations) {
+            const key = item.createdAt.toISOString().slice(0, 7);
+            const month = months.get(key);
+            if (month) {
+                month.created += 1;
+                if (item.status.isFinal)
+                    month.closed += 1;
+            }
+        }
         return {
             charts: {
-                currentVsOverdue: buildCurrentVsOverdue(openObservations, overdueObservations),
-                monthlyTrend,
-                observationsByArea,
-                observationsByRisk,
-                observationsByStatus,
-                topOverdueAreas,
+                currentVsOverdue: [
+                    {
+                        key: "current",
+                        label: "Vigentes",
+                        value: value.open.length - value.overdue.length,
+                    },
+                    { key: "overdue", label: "Vencidas", value: value.overdue.length },
+                ],
+                monthlyTrend: [...months.entries()].map(([monthKey, item]) => ({
+                    ...item,
+                    monthKey,
+                    monthLabel: monthKey,
+                })),
+                observationsByArea: value.byArea,
+                observationsByRisk: value.byRisk,
+                observationsByStatus: value.byStatus,
+                topOverdueAreas: value.byArea.slice(0, 8).map((item) => ({
+                    id: item.key,
+                    label: item.label,
+                    value: item.value,
+                })),
                 topResponsibles,
             },
             generatedAt: new Date().toISOString(),
-            reminderDaysBeforeDue,
+            reminderDaysBeforeDue: value.data.days,
             scope: "auditoria",
-            subtitle: buildSubtitle("auditoria", viewerProfile),
+            subtitle: "Panorama corporativo normalizado por informe, observación, área y plan.",
             summary: {
-                averageProgress: formatPercent(averageProgress._avg.progressPercent),
-                closedObservations,
-                openObservations,
-                overdueObservations,
-                pendingExtensions,
-                pendingProgressReviews,
-                pendingReviews: pendingProgressReviews + pendingExtensions,
-                totalObservations,
-                upcomingObservations,
+                averageProgress: value.averageProgress,
+                closedObservations: closed,
+                openObservations: value.open.length,
+                overdueObservations: value.overdue.length,
+                pendingExtensions: value.data.extensions.filter((item) => ["SENT_TO_MANAGER", "SENT_TO_AUDIT"].includes(item.status)).length,
+                pendingProgressReviews: value.data.evaluations.filter((item) => item.reviewStatus === "SENT_TO_AUDIT").length,
+                pendingReviews: reviews.length,
+                totalObservations: value.data.observations.length,
+                upcomingObservations: value.upcomingObservations.length,
             },
             tables: {
-                criticalObservations,
-                latestUpdates,
-                pendingReviews,
-                upcomingCommitments,
+                criticalObservations: value.critical,
+                latestUpdates: latestRows(value.data),
+                pendingReviews: reviews,
+                upcomingActionPlans: value.planRows,
             },
-            viewerProfile,
+            viewerProfile: viewerProfile(access),
         };
     },
     async getAreaDashboard(access) {
-        const viewerProfile = resolveViewerProfile(access);
-        const reminderDaysBeforeDue = await getReminderDaysBeforeDue();
-        const today = startOfDay(new Date());
-        const dueThreshold = addDays(today, reminderDaysBeforeDue);
-        const observationWhere = buildObservationWhere(access);
-        const commitmentWhere = buildCommitmentWhere(access);
-        const progressWhere = buildProgressWhere(access);
-        const extensionWhere = buildExtensionWhere(access);
-        const [assignedObservations, areaObservations, openAreaObservations, pendingCommitments, overdueCommitments, upcomingCommitmentsCount, averageProgress, returnedProgressUpdates, extensionsInProcess, observationsByRisk, observationsByStatus, observationsByArea, criticalObservations, upcomingCommitments, reviewQueue, latestUpdates, overdueObservations,] = await Promise.all([
-            getAssignedObservationCount(access),
-            dashboardPrisma.observation.count({
-                where: observationWhere,
-            }),
-            dashboardPrisma.observation.count({
-                where: {
-                    AND: [
-                        observationWhere,
-                        {
-                            status: {
-                                isFinal: false,
-                            },
-                        },
-                    ],
-                },
-            }),
-            dashboardPrisma.commitment.count({
-                where: {
-                    AND: [
-                        commitmentWhere,
-                        buildIncompleteCommitmentCondition(),
-                    ],
-                },
-            }),
-            dashboardPrisma.commitment.count({
-                where: {
-                    AND: [
-                        commitmentWhere,
-                        buildIncompleteCommitmentCondition(),
-                        {
-                            dueDate: {
-                                lt: today,
-                            },
-                        },
-                    ],
-                },
-            }),
-            dashboardPrisma.commitment.count({
-                where: {
-                    AND: [
-                        commitmentWhere,
-                        buildIncompleteCommitmentCondition(),
-                        {
-                            dueDate: {
-                                gte: today,
-                                lte: dueThreshold,
-                            },
-                        },
-                    ],
-                },
-            }),
-            dashboardPrisma.observation.aggregate({
-                _avg: {
-                    progressPercent: true,
-                },
-                where: observationWhere,
-            }),
-            dashboardPrisma.progressUpdate.count({
-                where: {
-                    AND: [
-                        progressWhere,
-                        {
-                            status: RETURNED_PROGRESS_STATUS,
-                        },
-                    ],
-                },
-            }),
-            dashboardPrisma.deadlineExtensionRequest.count({
-                where: {
-                    AND: [
-                        extensionWhere,
-                        {
-                            status: {
-                                in: [...ACTIVE_EXTENSION_REQUEST_STATUSES],
-                            },
-                        },
-                    ],
-                },
-            }),
-            getObservationRiskDistribution(access),
-            getObservationStatusDistribution(access),
-            getObservationAreaDistribution(access),
-            getCriticalObservations(access, today),
-            getUpcomingCommitments(access, today, dueThreshold),
-            getAreaReviewQueueRows(access),
-            getLatestUpdates(access),
-            dashboardPrisma.observation.count({
-                where: {
-                    AND: [
-                        observationWhere,
-                        {
-                            dueDate: {
-                                lt: today,
-                            },
-                            status: {
-                                isFinal: false,
-                            },
-                        },
-                    ],
-                },
-            }),
-        ]);
+        const value = await common(access);
+        const reviews = buildReviewRows(value.data);
         return {
             charts: {
-                currentVsOverdue: buildCurrentVsOverdue(openAreaObservations, overdueObservations),
-                observationsByArea,
-                observationsByRisk,
-                observationsByStatus,
+                currentVsOverdue: [
+                    {
+                        key: "current",
+                        label: "Vigentes",
+                        value: value.open.length - value.overdue.length,
+                    },
+                    { key: "overdue", label: "Vencidas", value: value.overdue.length },
+                ],
+                observationsByArea: value.byArea,
+                observationsByRisk: value.byRisk,
+                observationsByStatus: value.byStatus,
             },
             generatedAt: new Date().toISOString(),
-            reminderDaysBeforeDue,
+            reminderDaysBeforeDue: value.data.days,
             scope: "area",
-            subtitle: buildSubtitle("area", viewerProfile),
+            subtitle: "Hallazgos y planes bajo su responsabilidad.",
             summary: {
-                areaObservations,
-                assignedObservations,
-                averageProgress: formatPercent(averageProgress._avg.progressPercent),
-                extensionsInProcess,
-                overdueCommitments,
-                pendingCommitments,
-                returnedProgressUpdates,
-                upcomingCommitments: upcomingCommitmentsCount,
+                areaObservations: value.data.observations.length,
+                assignedObservations: value.data.observations.length,
+                averageProgress: value.averageProgress,
+                extensionsInProcess: value.data.extensions.filter((item) => ["SENT_TO_MANAGER", "SENT_TO_AUDIT"].includes(item.status)).length,
+                overdueActionPlans: value.overduePlans.length,
+                pendingActionPlans: value.data.actionPlans.filter((item) => item.status === "NOT_STARTED").length,
+                returnedProgressEvaluations: value.data.evaluations.filter((item) => item.reviewStatus === "RETURNED").length,
+                upcomingActionPlans: value.upcomingPlans.length,
             },
             tables: {
-                criticalObservations,
-                latestUpdates,
-                reviewQueue,
-                upcomingCommitments,
+                criticalObservations: value.critical,
+                latestUpdates: latestRows(value.data),
+                reviewQueue: reviews,
+                upcomingActionPlans: value.planRows,
             },
-            viewerProfile,
+            viewerProfile: viewerProfile(access),
         };
-    },
-    async getMySummary(access) {
-        const viewerProfile = resolveViewerProfile(access);
-        return buildDashboardSummary(hasAuditDashboardAccess(access) ? "auditoria" : "area", viewerProfile);
     },
 };
 //# sourceMappingURL=dashboard.service.js.map

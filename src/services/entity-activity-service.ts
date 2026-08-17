@@ -6,13 +6,13 @@ import { AppError } from "../utils/app-error.js";
 
 export const ACTIVITY_ENTITY_TYPES = {
   comment: "COMMENT",
-  commitment: "COMMITMENT",
+  actionPlan: "ACTION_PLAN",
   evidence: "EVIDENCE",
   extensionRequest: "EXTENSION_REQUEST",
   notification: "NOTIFICATION",
   observation: "OBSERVATION",
   plan: "REMEDIATION_PLAN",
-  progressUpdate: "PROGRESS_UPDATE",
+  progressEvaluation: "PROGRESS_EVALUATION",
   system: "SYSTEM",
 } as const;
 
@@ -63,17 +63,29 @@ export type EntityActivityQuery = {
   search: string;
 };
 
-const REDACTED_KEY = /password|token|secret|credential|authorization|cookie|header|private|storedname|relativepath|filepath|ipaddress|useragent/i;
+const REDACTED_KEY =
+  /password|token|secret|credential|authorization|cookie|header|private|storedname|relativepath|filepath|ipaddress|useragent/i;
 
-const safeValue = (value: unknown, key?: string): Prisma.InputJsonValue | null => {
+const safeValue = (
+  value: unknown,
+  key?: string,
+): Prisma.InputJsonValue | null => {
   if (key && (REDACTED_KEY.test(key) || key === "id" || key.endsWith("Id"))) {
     return null;
   }
   if (value === null || value === undefined) return null;
   if (value instanceof Date) return value.toISOString();
   if (typeof value === "bigint") return value.toString();
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
-  if (Array.isArray(value)) return value.map((item) => safeValue(item)).filter((item) => item !== null) as Prisma.InputJsonArray;
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  )
+    return value;
+  if (Array.isArray(value))
+    return value
+      .map((item) => safeValue(item))
+      .filter((item) => item !== null) as Prisma.InputJsonArray;
   if (typeof value === "object") {
     const result: Record<string, Prisma.InputJsonValue> = {};
     for (const [entryKey, entryValue] of Object.entries(value)) {
@@ -85,15 +97,20 @@ const safeValue = (value: unknown, key?: string): Prisma.InputJsonValue | null =
   return String(value);
 };
 
-export const sanitizeActivityData = (value: unknown): Prisma.InputJsonValue | null =>
-  safeValue(value);
+export const sanitizeActivityData = (
+  value: unknown,
+): Prisma.InputJsonValue | null => safeValue(value);
 
-const asJson = (value: unknown): Prisma.InputJsonValue | typeof Prisma.JsonNull =>
+const asJson = (
+  value: unknown,
+): Prisma.InputJsonValue | typeof Prisma.JsonNull =>
   safeValue(value) ?? Prisma.JsonNull;
 
 const isSystemOperator = (access: AuthorizationSummary): boolean => {
   if (access.isAdmin) return true;
-  return access.roles.some((role) => /^(sistemas?|systems?)$/i.test(role.trim()));
+  return access.roles.some((role) =>
+    /^(sistemas?|systems?)$/i.test(role.trim()),
+  );
 };
 
 const isAuditRole = (access: AuthorizationSummary): boolean =>
@@ -102,35 +119,62 @@ const isAuditRole = (access: AuthorizationSummary): boolean =>
 const isManagerRole = (access: AuthorizationSummary): boolean =>
   access.roles.some((role) => /gerencia|manager|jefatura/i.test(role));
 
-const activityScope = (access: AuthorizationSummary): Prisma.EntityActivityWhereInput => {
+const activityScope = (
+  access: AuthorizationSummary,
+): Prisma.EntityActivityWhereInput => {
   if (isSystemOperator(access)) return {};
 
   const observationScope: Prisma.ObservationWhereInput = {
     OR: [
-      { responsibleUserId: access.userId },
       { auditorUserId: access.userId },
-      { area: { managerUserId: access.userId } },
-      { commitments: { some: { responsibleUserId: access.userId } } },
+      {
+        areaAssignments: {
+          some: {
+            OR: [
+              { areaResponsibleUserId: access.userId },
+              { processOwnerUserId: access.userId },
+              { area: { managerUserId: access.userId } },
+            ],
+          },
+        },
+      },
+      { actionPlans: { some: { responsibleUserId: access.userId } } },
       { remediationPlans: { some: { ownerUserId: access.userId } } },
     ],
   };
 
   if (isAuditRole(access)) {
     return {
-      visibility: { in: [ACTIVITY_VISIBILITIES.allAuthorized, ACTIVITY_VISIBILITIES.areaVisible, ACTIVITY_VISIBILITIES.auditOnly] },
+      visibility: {
+        in: [
+          ACTIVITY_VISIBILITIES.allAuthorized,
+          ACTIVITY_VISIBILITIES.areaVisible,
+          ACTIVITY_VISIBILITIES.auditOnly,
+        ],
+      },
       OR: [{ observationId: null }, { observation: observationScope }],
     };
   }
 
   return {
-    visibility: { in: [ACTIVITY_VISIBILITIES.allAuthorized, ACTIVITY_VISIBILITIES.areaVisible] },
+    visibility: {
+      in: [
+        ACTIVITY_VISIBILITIES.allAuthorized,
+        ACTIVITY_VISIBILITIES.areaVisible,
+      ],
+    },
     observation: isManagerRole(access)
-      ? { area: { managerUserId: access.userId } }
+      ? {
+          areaAssignments: { some: { area: { managerUserId: access.userId } } },
+        }
       : observationScope,
   };
 };
 
-const dateFilter = (dateFrom?: string, dateTo?: string): Prisma.DateTimeFilter => {
+const dateFilter = (
+  dateFrom?: string,
+  dateTo?: string,
+): Prisma.DateTimeFilter => {
   const filter: Prisma.DateTimeFilter = {};
   if (dateFrom) filter.gte = new Date(`${dateFrom}T00:00:00.000Z`);
   if (dateTo) {
@@ -147,23 +191,40 @@ const buildWhere = (
 ): Prisma.EntityActivityWhereInput => {
   const observationFilters: Prisma.EntityActivityWhereInput[] = [];
 
-  if (query.areaId) observationFilters.push({ observation: { areaId: query.areaId } });
-  if (query.observationCode) observationFilters.push({ observation: { code: { contains: query.observationCode } } });
+  if (query.areaId)
+    observationFilters.push({
+      observation: { areaAssignments: { some: { areaId: query.areaId } } },
+    });
+  if (query.observationCode)
+    observationFilters.push({
+      observation: {
+        auditReport: { reportNumber: { contains: query.observationCode } },
+      },
+    });
 
   return {
     ...activityScope(access),
     ...(query.activityType ? { activityType: query.activityType } : {}),
     ...(query.actorUserId ? { actorUserId: query.actorUserId } : {}),
-    ...(query.dateFrom || query.dateTo ? { createdAt: dateFilter(query.dateFrom, query.dateTo) } : {}),
+    ...(query.dateFrom || query.dateTo
+      ? { createdAt: dateFilter(query.dateFrom, query.dateTo) }
+      : {}),
     ...(query.entityType ? { entityType: query.entityType } : {}),
     ...(query.entityId ? { entityId: query.entityId } : {}),
     ...(query.observationId ? { observationId: query.observationId } : {}),
     ...(query.origin
-      ? { actorType: query.origin === "SYSTEM" ? { in: ["SYSTEM", "CRON"] } : "USER" }
+      ? {
+          actorType:
+            query.origin === "SYSTEM" ? { in: ["SYSTEM", "CRON"] } : "USER",
+        }
       : {}),
     ...(observationFilters.length ? { AND: observationFilters } : {}),
     ...(query.role
-      ? { actorUser: { userRoles: { some: { role: { name: { contains: query.role } } } } } }
+      ? {
+          actorUser: {
+            userRoles: { some: { role: { name: { contains: query.role } } } },
+          },
+        }
       : {}),
     ...(query.search
       ? {
@@ -171,7 +232,11 @@ const buildWhere = (
             { title: { contains: query.search } },
             { description: { contains: query.search } },
             { action: { contains: query.search } },
-            { observation: { code: { contains: query.search } } },
+            {
+              observation: {
+                auditReport: { reportNumber: { contains: query.search } },
+              },
+            },
             { actorUser: { name: { contains: query.search } } },
           ],
         }
@@ -198,7 +263,17 @@ const activitySelect = {
   id: true,
   metadataJson: true,
   newDataJson: true,
-  observation: { select: { area: { select: { id: true, name: true } }, code: true, title: true } },
+  observation: {
+    select: {
+      areaAssignments: {
+        select: { area: { select: { id: true, name: true } } },
+        take: 1,
+      },
+      auditReport: { select: { reportNumber: true } },
+      observationNumber: true,
+      title: true,
+    },
+  },
   previousDataJson: true,
   relatedAuditLogId: true,
   targetUrl: true,
@@ -213,29 +288,76 @@ const resolveObservationId = async (
   const normalized = entityType.toUpperCase();
   if (normalized === "OBSERVATION") return entityId;
   if (normalized === "REMEDIATION_PLAN") {
-    return (await prisma.remediationPlan.findUnique({ where: { id: entityId }, select: { observationId: true } }))?.observationId ?? null;
+    return (
+      (
+        await prisma.remediationPlan.findUnique({
+          where: { id: entityId },
+          select: { observationId: true },
+        })
+      )?.observationId ?? null
+    );
   }
-  if (normalized === "COMMITMENT") {
-    return (await prisma.commitment.findUnique({ where: { id: entityId }, select: { observationId: true } }))?.observationId ?? null;
+  if (normalized === "ACTION_PLAN") {
+    return (
+      (
+        await prisma.actionPlan.findUnique({
+          where: { id: entityId },
+          select: { observationId: true },
+        })
+      )?.observationId ?? null
+    );
   }
-  if (normalized === "PROGRESS_UPDATE") {
-    return (await prisma.progressUpdate.findUnique({ where: { id: entityId }, select: { observationId: true } }))?.observationId ?? null;
+  if (normalized === "PROGRESS_EVALUATION") {
+    return (
+      (
+        await prisma.progressEvaluation.findUnique({
+          where: { id: entityId },
+          select: { actionPlan: { select: { observationId: true } } },
+        })
+      )?.actionPlan.observationId ?? null
+    );
   }
   if (normalized === "EVIDENCE") {
-    return (await prisma.evidenceFile.findUnique({ where: { id: entityId }, select: { observationId: true } }))?.observationId ?? null;
+    return (
+      (
+        await prisma.evidenceFile.findUnique({
+          where: { id: entityId },
+          select: { observationId: true },
+        })
+      )?.observationId ?? null
+    );
   }
   if (normalized === "COMMENT") {
-    return (await prisma.observationComment.findUnique({ where: { id: entityId }, select: { observationId: true } }))?.observationId ?? null;
+    return (
+      (
+        await prisma.observationComment.findUnique({
+          where: { id: entityId },
+          select: { observationId: true },
+        })
+      )?.observationId ?? null
+    );
   }
   if (normalized === "EXTENSION_REQUEST") {
-    return (await prisma.deadlineExtensionRequest.findUnique({ where: { id: entityId }, select: { observationId: true } }))?.observationId ?? null;
+    return (
+      (
+        await prisma.deadlineExtensionRequest.findUnique({
+          where: { id: entityId },
+          select: { observationId: true },
+        })
+      )?.observationId ?? null
+    );
   }
   return null;
 };
 
-type ActivityRecord = Prisma.EntityActivityGetPayload<{ select: typeof activitySelect }>;
+type ActivityRecord = Prisma.EntityActivityGetPayload<{
+  select: typeof activitySelect;
+}>;
 
-const mapActivity = (activity: ActivityRecord, includeTechnicalDetails: boolean) => ({
+const mapActivity = (
+  activity: ActivityRecord,
+  includeTechnicalDetails: boolean,
+) => ({
   action: activity.action,
   activityType: activity.activityType,
   actor: activity.actorUser
@@ -247,7 +369,7 @@ const mapActivity = (activity: ActivityRecord, includeTechnicalDetails: boolean)
       }
     : null,
   actorType: activity.actorType,
-  area: activity.observation?.area ?? null,
+  area: activity.observation?.areaAssignments[0]?.area ?? null,
   createdAt: activity.createdAt.toISOString(),
   description: activity.description,
   entityId: includeTechnicalDetails ? activity.entityId : null,
@@ -256,49 +378,90 @@ const mapActivity = (activity: ActivityRecord, includeTechnicalDetails: boolean)
   metadata: activity.metadataJson,
   newData: activity.newDataJson,
   observation: activity.observation
-    ? { code: activity.observation.code, title: activity.observation.title }
+    ? {
+        code: `${activity.observation.auditReport.reportNumber} / OBS-${String(activity.observation.observationNumber).padStart(3, "0")}`,
+        title: activity.observation.title,
+      }
     : null,
   previousData: activity.previousDataJson,
-  relatedAuditLogId: includeTechnicalDetails ? activity.relatedAuditLogId : null,
+  relatedAuditLogId: includeTechnicalDetails
+    ? activity.relatedAuditLogId
+    : null,
   targetUrl: activity.targetUrl,
   title: activity.title,
   visibility: activity.visibility,
 });
 
 export const entityActivityService = {
-  async create(input: EntityActivityInput, options?: { db?: typeof prisma }): Promise<void> {
+  async create(
+    input: EntityActivityInput,
+    options?: { db?: typeof prisma },
+  ): Promise<void> {
     const db = options?.db ?? prisma;
-    const observationId = input.observationId ?? (await resolveObservationId(input.entityType, input.entityId));
+    const observationId =
+      input.observationId ??
+      (await resolveObservationId(input.entityType, input.entityId));
     const data = {
       action: input.action,
       activityType: input.activityType,
       actorType: input.actorType ?? (input.actorUserId ? "USER" : "SYSTEM"),
-      ...(input.actorUserId ? { actorUser: { connect: { id: input.actorUserId } } } : {}),
-      ...(input.description !== undefined ? { description: input.description } : {}),
+      ...(input.actorUserId
+        ? { actorUser: { connect: { id: input.actorUserId } } }
+        : {}),
+      ...(input.description !== undefined
+        ? { description: input.description }
+        : {}),
       ...(input.dedupeKey !== undefined ? { dedupeKey: input.dedupeKey } : {}),
       entityId: input.entityId,
       entityType: input.entityType,
-      ...(input.metadata !== undefined ? { metadataJson: asJson(input.metadata) } : {}),
-      ...(input.newData !== undefined ? { newDataJson: asJson(input.newData) } : {}),
-      ...(observationId ? { observation: { connect: { id: observationId } } } : {}),
-      ...(input.previousData !== undefined ? { previousDataJson: asJson(input.previousData) } : {}),
-      ...(input.relatedAuditLogId ? { relatedAuditLogId: input.relatedAuditLogId } : {}),
+      ...(input.metadata !== undefined
+        ? { metadataJson: asJson(input.metadata) }
+        : {}),
+      ...(input.newData !== undefined
+        ? { newDataJson: asJson(input.newData) }
+        : {}),
+      ...(observationId
+        ? { observation: { connect: { id: observationId } } }
+        : {}),
+      ...(input.previousData !== undefined
+        ? { previousDataJson: asJson(input.previousData) }
+        : {}),
+      ...(input.relatedAuditLogId
+        ? { relatedAuditLogId: input.relatedAuditLogId }
+        : {}),
       ...(input.targetUrl !== undefined ? { targetUrl: input.targetUrl } : {}),
       title: input.title,
       visibility: input.visibility ?? ACTIVITY_VISIBILITIES.allAuthorized,
     };
     try {
-      await db.entityActivity.create({ data: data as Prisma.EntityActivityCreateInput });
+      await db.entityActivity.create({
+        data: data as Prisma.EntityActivityCreateInput,
+      });
     } catch (error) {
-      if ((error as { code?: string }).code === "P2002" && input.dedupeKey) return;
+      if ((error as { code?: string }).code === "P2002" && input.dedupeKey)
+        return;
       throw error;
     }
   },
 
-  async recordEntityChange(input: Omit<EntityActivityInput, "metadata" | "newData" | "previousData"> & { metadata?: unknown; newData?: unknown; previousData?: unknown }) {
+  async recordEntityChange(
+    input: Omit<
+      EntityActivityInput,
+      "metadata" | "newData" | "previousData"
+    > & { metadata?: unknown; newData?: unknown; previousData?: unknown },
+  ) {
     return this.create({
       ...input,
-      metadata: input.metadata ?? { fieldLabels: { statusId: "Estado", riskLevelId: "Nivel de riesgo", dueDate: "Fecha de vencimiento", responsibleUserId: "Responsable", areaId: "Área", progressPercent: "Porcentaje de avance" } },
+      metadata: input.metadata ?? {
+        fieldLabels: {
+          statusId: "Estado",
+          riskLevelId: "Nivel de riesgo",
+          dueDate: "Fecha de vencimiento",
+          responsibleUserId: "Responsable",
+          areaId: "Área",
+          progressPercent: "Porcentaje de avance",
+        },
+      },
       newData: input.newData,
       previousData: input.previousData,
     });
@@ -306,7 +469,9 @@ export const entityActivityService = {
 
   async list(query: EntityActivityQuery, access: AuthorizationSummary) {
     const where = buildWhere(query, access);
-    const includeTechnicalDetails = Boolean(query.includeTechnicalDetails && isSystemOperator(access));
+    const includeTechnicalDetails = Boolean(
+      query.includeTechnicalDetails && isSystemOperator(access),
+    );
     const [total, activities] = await prisma.$transaction([
       prisma.entityActivity.count({ where }),
       prisma.entityActivity.findMany({
@@ -318,33 +483,58 @@ export const entityActivityService = {
       }),
     ]);
     return {
-      data: activities.map((activity) => mapActivity(activity, includeTechnicalDetails)),
+      data: activities.map((activity) =>
+        mapActivity(activity, includeTechnicalDetails),
+      ),
       pagination: { page: query.page, perPage: query.pageSize, total },
     };
   },
 
-  async assertEntityExists(entityType: string, entityId: string, access: AuthorizationSummary) {
-    const result = await this.list({ entityType, entityId, page: 1, pageSize: 1, search: "" }, access);
-    if (result.pagination.total === 0) throw new AppError("No se encontró historial para la entidad.", 404);
+  async assertEntityExists(
+    entityType: string,
+    entityId: string,
+    access: AuthorizationSummary,
+  ) {
+    const result = await this.list(
+      { entityType, entityId, page: 1, pageSize: 1, search: "" },
+      access,
+    );
+    if (result.pagination.total === 0)
+      throw new AppError("No se encontró historial para la entidad.", 404);
     return result;
   },
 
-  async export(query: EntityActivityQuery, access: AuthorizationSummary): Promise<string> {
-    const result = await this.list({ ...query, page: 1, pageSize: 5000 }, access);
-    const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
-    const rows = result.data.map((item) => [
-      new Date(item.createdAt).toLocaleDateString("es-BO"),
-      new Date(item.createdAt).toLocaleTimeString("es-BO"),
-      item.observation?.code ?? "",
-      item.entityType,
-      item.activityType,
-      item.action,
-      item.description ?? item.title,
-      item.actor?.name ?? (item.actorType === "CRON" ? "Proceso automático" : "Sistema"),
-      item.actor?.roles?.join(", ") ?? "",
-      item.area?.name ?? "",
-      item.actorType,
-    ].map(escape).join(","));
-    return ["\uFEFFFecha,Hora,Código de observación,Entidad,Tipo de actividad,Acción,Descripción,Usuario,Rol,Área,Origen", ...rows].join("\n");
+  async export(
+    query: EntityActivityQuery,
+    access: AuthorizationSummary,
+  ): Promise<string> {
+    const result = await this.list(
+      { ...query, page: 1, pageSize: 5000 },
+      access,
+    );
+    const escape = (value: unknown) =>
+      `"${String(value ?? "").replaceAll('"', '""')}"`;
+    const rows = result.data.map((item) =>
+      [
+        new Date(item.createdAt).toLocaleDateString("es-BO"),
+        new Date(item.createdAt).toLocaleTimeString("es-BO"),
+        item.observation?.code ?? "",
+        item.entityType,
+        item.activityType,
+        item.action,
+        item.description ?? item.title,
+        item.actor?.name ??
+          (item.actorType === "CRON" ? "Proceso automático" : "Sistema"),
+        item.actor?.roles?.join(", ") ?? "",
+        item.area?.name ?? "",
+        item.actorType,
+      ]
+        .map(escape)
+        .join(","),
+    );
+    return [
+      "\uFEFFFecha,Hora,Código de observación,Entidad,Tipo de actividad,Acción,Descripción,Usuario,Rol,Área,Origen",
+      ...rows,
+    ].join("\n");
   },
 };

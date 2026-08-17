@@ -116,6 +116,20 @@ export const WORKFLOW_TRANSITION_TYPE_VALUES = [
   "NOTIFICATION",
 ] as const;
 
+export const WORKFLOW_TIMER_TYPES = [
+  "REMINDER",
+  "DUE",
+  "ESCALATION",
+  "ALTERNATE_ROUTE",
+] as const;
+
+export type WorkflowTimerType = (typeof WORKFLOW_TIMER_TYPES)[number];
+
+export const WORKFLOW_TIMER_MAX_ATTEMPTS = 3;
+export const WORKFLOW_TIMER_PROCESSOR_JOB_NAME = "workflow-timer-processor";
+export const WORKFLOW_DEFAULT_DUE_SOON_HOURS = 48;
+export const WORKFLOW_TIMER_PROCESSING_TIMEOUT_MS = 15 * 60 * 1000;
+
 export const WORKFLOW_GRAPH_LIMITS = {
   maxConditionsPerGroup: 50,
   maxNodes: 200,

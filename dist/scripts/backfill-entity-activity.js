@@ -3,7 +3,12 @@ import { prisma } from "../src/utils/prisma.js";
 const inferred = { inferred: true, source: "backfill" };
 const backfill = async () => {
     const observations = await prisma.observation.findMany({
-        select: { code: true, id: true, status: { select: { name: true } }, title: true },
+        select: {
+            code: true,
+            id: true,
+            status: { select: { name: true } },
+            title: true,
+        },
         where: { deletedAt: null },
     });
     for (const observation of observations) {
@@ -15,7 +20,11 @@ const backfill = async () => {
             description: `Registro histórico inferido para ${observation.code}. Estado actual: ${observation.status.name}.`,
             entityId: observation.id,
             entityType: "OBSERVATION",
-            metadata: { ...inferred, code: observation.code, currentStatus: observation.status.name },
+            metadata: {
+                ...inferred,
+                code: observation.code,
+                currentStatus: observation.status.name,
+            },
             observationId: observation.id,
             targetUrl: `/observaciones/${observation.id}`,
             title: "Observación existente incorporada al historial",
@@ -39,45 +48,57 @@ const backfill = async () => {
             title: "Plan existente incorporado al historial",
         });
     }
-    const commitments = await prisma.commitment.findMany({
+    const actionPlans = await prisma.actionPlan.findMany({
         select: { id: true, observationId: true, status: true, title: true },
         where: { deletedAt: null },
     });
-    for (const commitment of commitments) {
+    for (const actionPlan of actionPlans) {
         await entityActivityService.create({
-            action: "backfill.commitment",
-            activityType: "COMMITMENT_CREATED",
+            action: "backfill.actionPlan",
+            activityType: "ACTION_PLAN_CREATED",
             actorType: "SYSTEM",
-            dedupeKey: `backfill:COMMITMENT_CREATED:${commitment.id}`,
-            description: `Registro histórico inferido del compromiso “${commitment.title}” en estado ${commitment.status}.`,
-            entityId: commitment.id,
-            entityType: "COMMITMENT",
-            metadata: { ...inferred, currentStatus: commitment.status },
-            observationId: commitment.observationId,
-            title: "Compromiso existente incorporado al historial",
+            dedupeKey: `backfill:ACTION_PLAN_CREATED:${actionPlan.id}`,
+            description: `Registro histórico inferido del plan de acción “${actionPlan.title}” en estado ${actionPlan.status}.`,
+            entityId: actionPlan.id,
+            entityType: "ACTION_PLAN",
+            metadata: { ...inferred, currentStatus: actionPlan.status },
+            observationId: actionPlan.observationId,
+            title: "Plan de acción existente incorporado al historial",
         });
     }
-    const progressUpdates = await prisma.progressUpdate.findMany({
-        select: { id: true, observationId: true, status: true, submittedByUserId: true },
+    const progressEvaluations = await prisma.progressEvaluation.findMany({
+        select: {
+            id: true,
+            observationId: true,
+            status: true,
+            submittedByUserId: true,
+        },
         where: { deletedAt: null },
     });
-    for (const progress of progressUpdates) {
+    for (const progress of progressEvaluations) {
         await entityActivityService.create({
             action: "backfill.progress",
-            activityType: progress.status === "SENT_TO_AUDIT" ? "PROGRESS_SENT" : "PROGRESS_CREATED",
+            activityType: progress.status === "SENT_TO_AUDIT"
+                ? "PROGRESS_SENT"
+                : "PROGRESS_CREATED",
             actorType: "SYSTEM",
             actorUserId: progress.submittedByUserId,
             dedupeKey: `backfill:PROGRESS:${progress.id}`,
             description: `Registro histórico inferido del avance en estado ${progress.status}.`,
             entityId: progress.id,
-            entityType: "PROGRESS_UPDATE",
+            entityType: "PROGRESS_EVALUATION",
             metadata: { ...inferred, currentStatus: progress.status },
             observationId: progress.observationId,
             title: "Avance existente incorporado al historial",
         });
     }
     const extensions = await prisma.deadlineExtensionRequest.findMany({
-        select: { id: true, observationId: true, requestedByUserId: true, status: true },
+        select: {
+            id: true,
+            observationId: true,
+            requestedByUserId: true,
+            status: true,
+        },
         where: { deletedAt: null },
     });
     for (const extension of extensions) {
@@ -96,7 +117,12 @@ const backfill = async () => {
         });
     }
     const evidences = await prisma.evidenceFile.findMany({
-        select: { id: true, observationId: true, originalName: true, uploadedByUserId: true },
+        select: {
+            id: true,
+            observationId: true,
+            originalName: true,
+            uploadedByUserId: true,
+        },
     });
     for (const evidence of evidences) {
         await entityActivityService.create({

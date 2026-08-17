@@ -1,11 +1,11 @@
 import { z } from "zod";
-const notificationTypeValues = [
-    "info",
-    "success",
-    "warning",
-    "error",
+const notificationTypeValues = ["info", "success", "warning", "error"];
+const notificationPriorityValues = [
+    "LOW",
+    "NORMAL",
+    "HIGH",
+    "CRITICAL",
 ];
-const notificationPriorityValues = ["LOW", "NORMAL", "HIGH", "CRITICAL"];
 const booleanQuerySchema = z.enum(["true", "false"]).transform((value) => {
     return value === "true";
 });

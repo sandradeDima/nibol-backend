@@ -38,7 +38,11 @@ export const invitationEmailTemplate = {
                 previewText: `Tiene una invitacion pendiente en ${appName}.`,
             }),
             subject: `Invitacion de acceso a ${appName}`,
-            text: joinTextBlocks(greeting(variables.userName), `Ha recibido una invitacion para ingresar a ${appName}.`, "Complete el proceso para activar su cuenta y comenzar a operar dentro de la plataforma.", variables.roleName ? `Rol asignado: ${variables.roleName}.` : undefined, variables.invitedByName ? `Invitacion enviada por ${variables.invitedByName}.` : undefined, variables.expiresAt ? `Esta invitacion vence el ${variables.expiresAt}.` : undefined, variables.invitationLink),
+            text: joinTextBlocks(greeting(variables.userName), `Ha recibido una invitacion para ingresar a ${appName}.`, "Complete el proceso para activar su cuenta y comenzar a operar dentro de la plataforma.", variables.roleName ? `Rol asignado: ${variables.roleName}.` : undefined, variables.invitedByName
+                ? `Invitacion enviada por ${variables.invitedByName}.`
+                : undefined, variables.expiresAt
+                ? `Esta invitacion vence el ${variables.expiresAt}.`
+                : undefined, variables.invitationLink),
         };
     },
     sampleVariables: {

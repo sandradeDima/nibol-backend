@@ -2,79 +2,62 @@ import { Router } from "express";
 
 import { asyncHandler } from "../../middleware/async-handler.js";
 import { requirePermission } from "../../middleware/authorization-middleware.js";
-import { extensionRequestsController } from "./extension-requests.controller.js";
-import { EXTENSION_REQUESTS_PERMISSIONS } from "./extension-requests.constants.js";
+import { EXTENSION_REQUESTS_PERMISSIONS as permissions } from "./extension-requests.constants.js";
+import { extensionRequestsController as controller } from "./extension-requests.controller.js";
 
 export const extensionRequestsRouter = Router();
-
 extensionRequestsRouter.get(
   "/extension-requests",
-  requirePermission(EXTENSION_REQUESTS_PERMISSIONS.view),
-  asyncHandler(extensionRequestsController.list),
+  requirePermission(permissions.view),
+  asyncHandler(controller.list),
 );
-
 extensionRequestsRouter.get(
   "/extension-requests/:id",
-  requirePermission(EXTENSION_REQUESTS_PERMISSIONS.view),
-  asyncHandler(extensionRequestsController.getById),
+  requirePermission(permissions.view),
+  asyncHandler(controller.getById),
 );
-
 extensionRequestsRouter.post(
   "/observations/:id/extension-requests",
-  requirePermission(EXTENSION_REQUESTS_PERMISSIONS.create),
-  asyncHandler(extensionRequestsController.createForObservation),
+  requirePermission(permissions.create),
+  asyncHandler(controller.createForObservation),
 );
-
 extensionRequestsRouter.post(
-  "/commitments/:id/extension-requests",
-  requirePermission(EXTENSION_REQUESTS_PERMISSIONS.create),
-  asyncHandler(extensionRequestsController.createForCommitment),
+  "/action-plans/:id/extension-requests",
+  requirePermission(permissions.create),
+  asyncHandler(controller.createForActionPlan),
 );
-
 extensionRequestsRouter.patch(
   "/extension-requests/:id",
-  requirePermission(EXTENSION_REQUESTS_PERMISSIONS.edit),
-  asyncHandler(extensionRequestsController.update),
+  requirePermission(permissions.edit),
+  asyncHandler(controller.update),
 );
-
 extensionRequestsRouter.post(
-  "/extension-requests/:id/send-to-manager",
-  requirePermission(EXTENSION_REQUESTS_PERMISSIONS.edit),
-  asyncHandler(extensionRequestsController.sendToManager),
+  "/extension-requests/:id/submit",
+  requirePermission(permissions.edit),
+  asyncHandler(controller.sendToManager),
 );
-
 extensionRequestsRouter.post(
   "/extension-requests/:id/manager-approve",
-  requirePermission(EXTENSION_REQUESTS_PERMISSIONS.edit),
-  asyncHandler(extensionRequestsController.managerApprove),
+  requirePermission(permissions.edit),
+  asyncHandler(controller.managerApprove),
 );
-
 extensionRequestsRouter.post(
   "/extension-requests/:id/manager-reject",
-  requirePermission(EXTENSION_REQUESTS_PERMISSIONS.edit),
-  asyncHandler(extensionRequestsController.managerReject),
+  requirePermission(permissions.edit),
+  asyncHandler(controller.managerReject),
 );
-
-extensionRequestsRouter.post(
-  "/extension-requests/:id/send-to-audit",
-  requirePermission(EXTENSION_REQUESTS_PERMISSIONS.edit),
-  asyncHandler(extensionRequestsController.sendToAudit),
-);
-
 extensionRequestsRouter.post(
   "/extension-requests/:id/audit-approve",
-  requirePermission(EXTENSION_REQUESTS_PERMISSIONS.edit),
-  asyncHandler(extensionRequestsController.auditApprove),
+  requirePermission(permissions.edit),
+  asyncHandler(controller.auditApprove),
 );
-
 extensionRequestsRouter.post(
   "/extension-requests/:id/audit-reject",
-  requirePermission(EXTENSION_REQUESTS_PERMISSIONS.edit),
-  asyncHandler(extensionRequestsController.auditReject),
+  requirePermission(permissions.edit),
+  asyncHandler(controller.auditReject),
 );
-
 extensionRequestsRouter.post(
   "/extension-requests/:id/cancel",
-  requirePermission(EXTENSION_REQUESTS_PERMISSIONS.edit),
-  asyncHandler(extensionRequestsController.cancel),
+  requirePermission(permissions.edit),
+  asyncHandler(controller.cancel),
 );

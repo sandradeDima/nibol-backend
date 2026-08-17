@@ -30,7 +30,11 @@ export const automationNotificationEmailTemplate = {
       <p style="color: #617086; font-size: 12px; margin: 0;">Esta es una notificación automática de ${escapeHtml(appName)}. No adjuntamos archivos de evidencia.</p>
     `;
         return {
-            html: renderBaseEmailLayout({ brand, contentHtml, previewText: variables.title }),
+            html: renderBaseEmailLayout({
+                brand,
+                contentHtml,
+                previewText: variables.title,
+            }),
             subject: `${variables.title} · ${variables.code}`,
             text: joinTextBlocks(greeting(variables.userName), variables.title, variables.description, `Código: ${variables.code}`, `Área responsable: ${variables.areaName}`, `Fecha límite: ${variables.dueDate}`, `Estado actual: ${variables.currentStatus}`, `Acción requerida: ${variables.actionRequired}`, `Abrir en NIBOL: ${variables.targetUrl}`, `Esta es una notificación automática de ${appName}. No adjuntamos archivos de evidencia.`),
         };

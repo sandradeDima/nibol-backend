@@ -1,4 +1,7 @@
-export const getRemediationActivityType = (entityType: string, action: string): string => {
+export const getRemediationActivityType = (
+  entityType: string,
+  action: string,
+): string => {
   if (entityType === "remediation_plan") {
     if (action.endsWith("create")) return "PLAN_CREATED";
     if (action.endsWith("update")) return "PLAN_UPDATED";
@@ -6,16 +9,19 @@ export const getRemediationActivityType = (entityType: string, action: string): 
     if (action.endsWith("return")) return "PLAN_RETURNED";
     if (action.endsWith("approve")) return "PLAN_APPROVED";
   }
-  if (entityType === "commitment") {
-    if (action.endsWith("create")) return "COMMITMENT_CREATED";
-    if (action.endsWith("update")) return "COMMITMENT_UPDATED";
-    if (action.endsWith("send-to-audit")) return "COMMITMENT_PROGRESS_CHANGED";
-    if (action.endsWith("mark-complete")) return "COMMITMENT_COMPLETED";
+  if (entityType === "actionPlan") {
+    if (action.endsWith("create")) return "ACTION_PLAN_CREATED";
+    if (action.endsWith("update")) return "ACTION_PLAN_UPDATED";
+    if (action.endsWith("send-to-audit")) return "ACTION_PLAN_PROGRESS_CHANGED";
+    if (action.endsWith("mark-complete")) return "ACTION_PLAN_COMPLETED";
   }
-  return "COMMITMENT_UPDATED";
+  return "ACTION_PLAN_UPDATED";
 };
 
-export const getProgressActivityType = (entityType: string, action: string): string => {
+export const getProgressActivityType = (
+  entityType: string,
+  action: string,
+): string => {
   if (entityType === "evidence_file") {
     if (action.endsWith("upload")) return "EVIDENCE_UPLOADED";
     if (action.endsWith("download")) return "EVIDENCE_DOWNLOADED";
@@ -31,11 +37,18 @@ export const getProgressActivityType = (entityType: string, action: string): str
   if (action.endsWith("reject")) return "PROGRESS_REJECTED";
   if (action.endsWith("send-to-audit")) return "PROGRESS_SENT";
   if (action.endsWith("create")) return "PROGRESS_CREATED";
-  return "PROGRESS_UPDATED";
+  return "PROGRESS_EVALUATIOND";
 };
 
-export const getExtensionActivityType = (action: string, status?: string): string => {
-  if (action.endsWith("create-for-observation") || action.endsWith("create-for-commitment")) return "EXTENSION_CREATED";
+export const getExtensionActivityType = (
+  action: string,
+  status?: string,
+): string => {
+  if (
+    action.endsWith("create-for-observation") ||
+    action.endsWith("create-for-actionPlan")
+  )
+    return "EXTENSION_CREATED";
   if (action.endsWith("send-to-manager")) return "EXTENSION_SENT_TO_MANAGER";
   if (action.endsWith("manager-approve")) return "EXTENSION_MANAGER_APPROVED";
   if (action.endsWith("manager-reject")) return "EXTENSION_MANAGER_REJECTED";

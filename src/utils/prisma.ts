@@ -14,7 +14,8 @@ const loopbackHosts = new Set(["127.0.0.1", "::1", "localhost"]);
 const getMariaDbConnectionUrl = (databaseUrl: string): string => {
   try {
     const url = new URL(databaseUrl);
-    const isSupportedProtocol = url.protocol === "mariadb:" || url.protocol === "mysql:";
+    const isSupportedProtocol =
+      url.protocol === "mariadb:" || url.protocol === "mysql:";
     const isLoopbackHost = loopbackHosts.has(url.hostname);
     const hasExplicitRsaConfiguration =
       url.searchParams.has("allowPublicKeyRetrieval") ||

@@ -29,7 +29,9 @@ const singularizeWord = (value: string): string => {
 };
 
 const toPascalCase = (words: string[]): string => {
-  return words.map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join("");
+  return words
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join("");
 };
 
 export type ModuleNames = {
@@ -49,7 +51,9 @@ export const buildModuleNames = (value: string): ModuleNames => {
   const words = toWords(value);
 
   if (words.length === 0) {
-    throw new Error("Module name must contain at least one alphanumeric character.");
+    throw new Error(
+      "Module name must contain at least one alphanumeric character.",
+    );
   }
 
   const pluralWords = [...words];

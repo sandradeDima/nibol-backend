@@ -16,7 +16,9 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> => {
   return prototype === Object.prototype || prototype === null;
 };
 
-export const toLogJsonValue = (value: unknown): Prisma.InputJsonValue | null => {
+export const toLogJsonValue = (
+  value: unknown,
+): Prisma.InputJsonValue | null => {
   if (value === null) {
     return null;
   }
@@ -32,15 +34,18 @@ export const toLogJsonValue = (value: unknown): Prisma.InputJsonValue | null => 
   }
 
   if (isPlainObject(value)) {
-    return Object.entries(value).reduce<JsonObject>((result, [key, entryValue]) => {
-      const serializedValue = toLogJsonValue(entryValue);
+    return Object.entries(value).reduce<JsonObject>(
+      (result, [key, entryValue]) => {
+        const serializedValue = toLogJsonValue(entryValue);
 
-      if (serializedValue !== undefined) {
-        result[key] = serializedValue;
-      }
+        if (serializedValue !== undefined) {
+          result[key] = serializedValue;
+        }
 
-      return result;
-    }, {}) as Prisma.InputJsonObject;
+        return result;
+      },
+      {},
+    ) as Prisma.InputJsonObject;
   }
 
   if (typeof value === "bigint") {
@@ -60,7 +65,9 @@ export const toLogJsonValue = (value: unknown): Prisma.InputJsonValue | null => 
 
 export const normalizeStringArray = (values: string[]): string[] => {
   return Array.from(
-    new Set(values.map((value) => value.trim()).filter((value) => value.length > 0)),
+    new Set(
+      values.map((value) => value.trim()).filter((value) => value.length > 0),
+    ),
   ).sort((left, right) => left.localeCompare(right));
 };
 

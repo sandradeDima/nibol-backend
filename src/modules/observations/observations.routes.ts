@@ -27,6 +27,12 @@ observationsRouter.get(
 );
 
 observationsRouter.get(
+  "/observations/:id/action-items",
+  requirePermission(OBSERVATIONS_PERMISSIONS.view),
+  asyncHandler(observationsController.getActionItems),
+);
+
+observationsRouter.get(
   "/observations/:id",
   requirePermission(OBSERVATIONS_PERMISSIONS.view),
   asyncHandler(observationsController.getById),
@@ -42,6 +48,12 @@ observationsRouter.patch(
   "/observations/:id",
   requirePermission(OBSERVATIONS_PERMISSIONS.edit),
   asyncHandler(observationsController.update),
+);
+
+observationsRouter.post(
+  "/observations/:id/close",
+  requirePermission(OBSERVATIONS_PERMISSIONS.close),
+  asyncHandler(observationsController.close),
 );
 
 observationsRouter.delete(

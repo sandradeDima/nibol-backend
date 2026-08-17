@@ -29,7 +29,9 @@ export const ${names.constantPrefix}_ENTITY_LABEL_PLURAL = "${names.entityLabelP
 `;
 };
 
-export const renderBackendPermissionsTemplate = (names: ModuleNames): string => {
+export const renderBackendPermissionsTemplate = (
+  names: ModuleNames,
+): string => {
   return `import { ${names.constantPrefix}_PERMISSION_RESOURCE } from "./${names.fileStem}.constants.js";
 
 export const ${names.constantPrefix}_PERMISSIONS = {
@@ -1117,7 +1119,9 @@ export default function ${names.entityLabelPlural}ListPage({
 `;
 };
 
-export const renderFrontendCreatePageTemplate = (names: ModuleNames): string => {
+export const renderFrontendCreatePageTemplate = (
+  names: ModuleNames,
+): string => {
   const descriptions = buildDescriptions(names);
 
   return `import { PageHeader } from "@/components/ui/page-header";
@@ -1287,7 +1291,9 @@ export default function ${names.entityLabelSingular}ViewPage({
 `;
 };
 
-export const renderFrontendAppListPageTemplate = (names: ModuleNames): string => {
+export const renderFrontendAppListPageTemplate = (
+  names: ModuleNames,
+): string => {
   return `import { requirePermission } from "@/lib/server-auth";
 import ${names.entityLabelPlural}ListPage from "@/modules/${names.routeSegment}/pages/list";
 import { ${names.constantPrefix}_PERMISSIONS } from "@/modules/${names.routeSegment}/constants";
@@ -1304,7 +1310,9 @@ export default async function ${names.entityLabelPlural}RoutePage() {
 `;
 };
 
-export const renderFrontendAppCreatePageTemplate = (names: ModuleNames): string => {
+export const renderFrontendAppCreatePageTemplate = (
+  names: ModuleNames,
+): string => {
   return `import { requirePermission } from "@/lib/server-auth";
 import Create${names.entityLabelSingular}Page from "@/modules/${names.routeSegment}/pages/create";
 import { ${names.constantPrefix}_PERMISSIONS } from "@/modules/${names.routeSegment}/constants";
@@ -1317,7 +1325,9 @@ export default async function New${names.entityLabelSingular}RoutePage() {
 `;
 };
 
-export const renderFrontendAppEditPageTemplate = (names: ModuleNames): string => {
+export const renderFrontendAppEditPageTemplate = (
+  names: ModuleNames,
+): string => {
   return `import { requirePermission } from "@/lib/server-auth";
 import Edit${names.entityLabelSingular}Page from "@/modules/${names.routeSegment}/pages/edit";
 import { ${names.constantPrefix}_PERMISSIONS } from "@/modules/${names.routeSegment}/constants";
@@ -1340,7 +1350,9 @@ export default async function Edit${names.entityLabelSingular}RoutePage({
 `;
 };
 
-export const renderFrontendAppViewPageTemplate = (names: ModuleNames): string => {
+export const renderFrontendAppViewPageTemplate = (
+  names: ModuleNames,
+): string => {
   return `import { requirePermission } from "@/lib/server-auth";
 import ${names.entityLabelSingular}ViewPage from "@/modules/${names.routeSegment}/pages/view";
 import { ${names.constantPrefix}_PERMISSIONS } from "@/modules/${names.routeSegment}/constants";

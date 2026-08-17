@@ -43,7 +43,9 @@ const isTemplateRequest = (
 const getTemplateDefinition = <TTemplate extends EmailTemplateName>(
   templateName: TTemplate,
 ): EmailTemplateDefinition<TTemplate> => {
-  return emailTemplateDefinitions[templateName] as unknown as EmailTemplateDefinition<TTemplate>;
+  return emailTemplateDefinitions[
+    templateName
+  ] as unknown as EmailTemplateDefinition<TTemplate>;
 };
 
 /**
@@ -111,7 +113,10 @@ export class EmailService {
     request: EmailTemplateRequest<TTemplate>,
   ): Promise<EmailSendResult> {
     try {
-      const rendered = await this.renderTemplate(request.template, request.variables);
+      const rendered = await this.renderTemplate(
+        request.template,
+        request.variables,
+      );
 
       const emailRequest: EmailSendRequest = {
         html: rendered.html,
@@ -177,10 +182,14 @@ export class EmailService {
   /**
    * Sends multiple email requests without failing the entire operation on individual errors.
    */
-  public async sendBulk(requests: readonly BulkEmailRequest[]): Promise<EmailBulkSendResult> {
+  public async sendBulk(
+    requests: readonly BulkEmailRequest[],
+  ): Promise<EmailBulkSendResult> {
     const results = await Promise.all(
       requests.map((request) =>
-        isTemplateRequest(request) ? this.sendTemplate(request) : this.sendEmail(request),
+        isTemplateRequest(request)
+          ? this.sendTemplate(request)
+          : this.sendEmail(request),
       ),
     );
     const sentCount = results.filter((result) => result.success).length;
@@ -203,7 +212,9 @@ export class EmailService {
       return await emailProvider.verifyConnection();
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Unknown email connection error";
+        error instanceof Error
+          ? error.message
+          : "Unknown email connection error";
 
       logger.error("Email provider verification failed.", {
         message,
@@ -238,7 +249,9 @@ export class EmailService {
       return await settingsService.getEmailBrandingSettings();
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Unknown settings lookup error";
+        error instanceof Error
+          ? error.message
+          : "Unknown settings lookup error";
 
       logger.warn(
         "Settings lookup failed. Falling back to environment email configuration.",

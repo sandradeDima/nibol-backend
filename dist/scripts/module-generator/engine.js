@@ -41,7 +41,10 @@ const collectGeneratedModules = async (backendModulesRoot) => {
         const routesFilePath = path.join(backendModulesRoot, directory, `${directory}.routes.ts`);
         const permissionsFilePath = path.join(backendModulesRoot, directory, `${directory}.permissions.ts`);
         try {
-            await Promise.all([fs.access(routesFilePath), fs.access(permissionsFilePath)]);
+            await Promise.all([
+                fs.access(routesFilePath),
+                fs.access(permissionsFilePath),
+            ]);
             modules.push({
                 label: toDisplayLabel(directory),
                 permissionResource: directory.replace(/-/g, "_"),

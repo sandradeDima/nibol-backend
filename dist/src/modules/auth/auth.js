@@ -38,7 +38,9 @@ const getRequestEmail = (body) => {
         return null;
     }
     const email = body["email"];
-    return typeof email === "string" && email.trim().length > 0 ? email.trim() : null;
+    return typeof email === "string" && email.trim().length > 0
+        ? email.trim()
+        : null;
 };
 export const auth = betterAuth({
     basePath: "/api/auth",
@@ -164,7 +166,9 @@ export const auth = betterAuth({
                 }
                 return;
             }
-            if (ctx.path === "/sign-out" && !(response instanceof APIError) && ctx.context.session) {
+            if (ctx.path === "/sign-out" &&
+                !(response instanceof APIError) &&
+                ctx.context.session) {
                 await activityLogService.logUserAction({
                     action: "Logout success",
                     entityId: ctx.context.session.user.id,
@@ -178,7 +182,9 @@ export const auth = betterAuth({
                 });
                 return;
             }
-            if (ctx.path === "/sign-up/email" && !(response instanceof APIError) && ctx.context.newSession) {
+            if (ctx.path === "/sign-up/email" &&
+                !(response instanceof APIError) &&
+                ctx.context.newSession) {
                 await activityLogService.logUserAction({
                     action: "User created",
                     entityId: ctx.context.newSession.user.id,

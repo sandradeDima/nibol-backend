@@ -27,7 +27,7 @@ export const EXTENSION_REQUEST_ACTIVITY_ACTIONS = {
   auditApprove: "deadline-extension.audit-approve",
   auditReject: "deadline-extension.audit-reject",
   cancel: "deadline-extension.cancel",
-  createForCommitment: "deadline-extension.create-for-commitment",
+  createForActionPlan: "deadline-extension.create-for-actionPlan",
   createForObservation: "deadline-extension.create-for-observation",
   sendToAudit: "deadline-extension.send-to-audit",
   sendToManager: "deadline-extension.send-to-manager",
@@ -36,19 +36,19 @@ export const EXTENSION_REQUEST_ACTIVITY_ACTIONS = {
   update: "deadline-extension.update",
 } as const;
 
-export const EDITABLE_EXTENSION_REQUEST_STATUSES = new Set([
-  "DRAFT",
-  "MANAGER_REJECTED",
-  "AUDIT_REJECTED",
-] satisfies ReadonlyArray<(typeof EXTENSION_REQUEST_STATUS_VALUES)[number]>);
+export const EDITABLE_EXTENSION_REQUEST_STATUSES: ReadonlySet<string> = new Set(
+  ["DRAFT", "MANAGER_REJECTED", "AUDIT_REJECTED"] satisfies ReadonlyArray<
+    (typeof EXTENSION_REQUEST_STATUS_VALUES)[number]
+  >,
+);
 
-export const ACTIVE_EXTENSION_REQUEST_STATUSES = new Set([
+export const ACTIVE_EXTENSION_REQUEST_STATUSES: ReadonlySet<string> = new Set([
   "DRAFT",
   "SENT_TO_MANAGER",
   "SENT_TO_AUDIT",
 ] satisfies ReadonlyArray<(typeof EXTENSION_REQUEST_STATUS_VALUES)[number]>);
 
-export const FINAL_EXTENSION_REQUEST_STATUSES = new Set([
+export const FINAL_EXTENSION_REQUEST_STATUSES: ReadonlySet<string> = new Set([
   "MANAGER_APPROVED",
   "MANAGER_REJECTED",
   "AUDIT_APPROVED",

@@ -1,0 +1,35 @@
+import { AppError } from "../../utils/app-error.js";
+
+export const WORKFLOW_RUNTIME_ERROR_CODES = {
+  ACTION_NOT_ALLOWED: "WORKFLOW_ACTION_NOT_ALLOWED",
+  ASSIGNMENT_UNRESOLVED: "WORKFLOW_ASSIGNMENT_UNRESOLVED",
+  CONDITION_NO_ROUTE: "WORKFLOW_CONDITION_NO_ROUTE",
+  INSTANCE_NOT_ACTIONABLE: "WORKFLOW_INSTANCE_NOT_ACTIONABLE",
+  INTEGRATION_FAILED: "WORKFLOW_INTEGRATION_FAILED",
+  NO_ACTIVE_VERSION: "WORKFLOW_NO_ACTIVE_VERSION",
+  RUNTIME_CONFIGURATION: "WORKFLOW_RUNTIME_CONFIGURATION_ERROR",
+  RUNTIME_STEP_LIMIT: "WORKFLOW_RUNTIME_STEP_LIMIT",
+  START_NODE_MISSING: "WORKFLOW_START_NODE_MISSING",
+  TASK_ALREADY_COMPLETED: "WORKFLOW_TASK_ALREADY_COMPLETED",
+  TASK_UNAUTHORIZED: "WORKFLOW_TASK_UNAUTHORIZED",
+  TRANSITION_NOT_FOUND: "WORKFLOW_TRANSITION_NOT_FOUND",
+  VERSION_NOT_PUBLISHED: "WORKFLOW_VERSION_NOT_PUBLISHED",
+} as const;
+
+export type WorkflowRuntimeErrorCode =
+  (typeof WORKFLOW_RUNTIME_ERROR_CODES)[keyof typeof WORKFLOW_RUNTIME_ERROR_CODES];
+
+export class WorkflowRuntimeError extends AppError {
+  public readonly code: WorkflowRuntimeErrorCode;
+
+  constructor(
+    code: WorkflowRuntimeErrorCode,
+    message: string,
+    statusCode = 409,
+    metadata?: unknown,
+  ) {
+    super(message, statusCode, metadata);
+    this.name = "WorkflowRuntimeError";
+    this.code = code;
+  }
+}

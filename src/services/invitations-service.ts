@@ -172,7 +172,9 @@ const assertRoleExists = async (roleId: string): Promise<void> => {
   }
 };
 
-const assertEmailAvailableForInvitation = async (email: string): Promise<void> => {
+const assertEmailAvailableForInvitation = async (
+  email: string,
+): Promise<void> => {
   const existingUser = await prisma.user.findFirst({
     select: {
       id: true,
@@ -187,7 +189,9 @@ const assertEmailAvailableForInvitation = async (email: string): Promise<void> =
   }
 };
 
-const assertNoActiveInvitationForEmail = async (email: string): Promise<void> => {
+const assertNoActiveInvitationForEmail = async (
+  email: string,
+): Promise<void> => {
   const existingInvitation = await prisma.invitation.findFirst({
     select: {
       id: true,
@@ -261,12 +265,15 @@ const mapInvitationRecord = (
   };
 };
 
-const sendInvitationEmail = async (invitation: {
-  email: string;
-  expiresAt: Date;
-  roleName: string;
-  token: string;
-}, invitedByName: string): Promise<void> => {
+const sendInvitationEmail = async (
+  invitation: {
+    email: string;
+    expiresAt: Date;
+    roleName: string;
+    token: string;
+  },
+  invitedByName: string,
+): Promise<void> => {
   const result = await emailService.sendTemplate({
     template: "invitation",
     to: invitation.email,
@@ -316,7 +323,10 @@ const getValidInvitationForAcceptance = async (token: string) => {
   const invitation = await getInvitationForToken(token);
 
   if (!invitation) {
-    throw new AppError("This invitation is invalid or no longer available.", 400);
+    throw new AppError(
+      "This invitation is invalid or no longer available.",
+      400,
+    );
   }
 
   if (invitation.deletedAt) {
@@ -428,7 +438,10 @@ const getCreatedUserSnapshot = async (
 };
 
 export const invitationsService = {
-  async acceptInvitation(input: AcceptInvitationInput, context?: LogActorContext) {
+  async acceptInvitation(
+    input: AcceptInvitationInput,
+    context?: LogActorContext,
+  ) {
     const invitation = await getValidInvitationForAcceptance(input.token);
 
     await assertEmailAvailableForInvitation(invitation.email);
@@ -846,7 +859,10 @@ export const invitationsService = {
     const expiresAt = getExpiresAt();
 
     await prisma.$transaction(async (transaction) => {
-      const previousSnapshot = await getInvitationAuditSnapshot(transaction, invitation.id);
+      const previousSnapshot = await getInvitationAuditSnapshot(
+        transaction,
+        invitation.id,
+      );
 
       await transaction.invitation.update({
         data: {
@@ -858,7 +874,10 @@ export const invitationsService = {
         },
       });
 
-      const nextSnapshot = await getInvitationAuditSnapshot(transaction, invitation.id);
+      const nextSnapshot = await getInvitationAuditSnapshot(
+        transaction,
+        invitation.id,
+      );
 
       if (previousSnapshot && nextSnapshot) {
         await auditLogService.create(
@@ -945,7 +964,10 @@ export const invitationsService = {
     }
 
     await prisma.$transaction(async (transaction) => {
-      const previousSnapshot = await getInvitationAuditSnapshot(transaction, invitation.id);
+      const previousSnapshot = await getInvitationAuditSnapshot(
+        transaction,
+        invitation.id,
+      );
 
       await transaction.invitation.update({
         data: {
@@ -957,7 +979,10 @@ export const invitationsService = {
         },
       });
 
-      const nextSnapshot = await getInvitationAuditSnapshot(transaction, invitation.id);
+      const nextSnapshot = await getInvitationAuditSnapshot(
+        transaction,
+        invitation.id,
+      );
 
       if (previousSnapshot && nextSnapshot) {
         await auditLogService.create(

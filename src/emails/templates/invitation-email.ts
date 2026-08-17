@@ -46,8 +46,12 @@ export const invitationEmailTemplate: EmailTemplateDefinition<"invitation"> = {
         `Ha recibido una invitacion para ingresar a ${appName}.`,
         "Complete el proceso para activar su cuenta y comenzar a operar dentro de la plataforma.",
         variables.roleName ? `Rol asignado: ${variables.roleName}.` : undefined,
-        variables.invitedByName ? `Invitacion enviada por ${variables.invitedByName}.` : undefined,
-        variables.expiresAt ? `Esta invitacion vence el ${variables.expiresAt}.` : undefined,
+        variables.invitedByName
+          ? `Invitacion enviada por ${variables.invitedByName}.`
+          : undefined,
+        variables.expiresAt
+          ? `Esta invitacion vence el ${variables.expiresAt}.`
+          : undefined,
         variables.invitationLink,
       ),
     };

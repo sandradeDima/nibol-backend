@@ -10,7 +10,9 @@ const backendRoot = path.resolve(currentDir, "..");
 const moduleName = process.argv[2];
 
 if (!moduleName) {
-  console.error("Module name is required. Example: npm run create:module products");
+  console.error(
+    "Module name is required. Example: npm run create:module products",
+  );
   process.exit(1);
 }
 
@@ -24,7 +26,8 @@ generateModuleScaffold({
     console.log(`Frontend: ${result.frontendModuleDir}`);
   })
   .catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : "Module generation failed.";
+    const message =
+      error instanceof Error ? error.message : "Module generation failed.";
     console.error(message);
     process.exit(1);
   });

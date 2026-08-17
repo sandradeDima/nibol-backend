@@ -20,6 +20,10 @@ export const greeting = (userName: string): string => {
   return userName.trim() ? `Hola ${userName.trim()},` : "Hola,";
 };
 
-export const joinTextBlocks = (...blocks: Array<string | undefined>): string => {
-  return blocks.filter((block): block is string => Boolean(block?.trim())).join("\n\n");
+export const joinTextBlocks = (
+  ...blocks: Array<string | undefined>
+): string => {
+  return blocks
+    .filter((block): block is string => Boolean(block?.trim()))
+    .join("\n\n");
 };

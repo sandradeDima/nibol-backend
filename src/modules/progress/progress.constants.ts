@@ -1,10 +1,10 @@
-export const progressUpdateTypeValues = [
+export const progressEvaluationTypeValues = [
   "ADVANCE",
   "FINALIZATION",
   "CORRECTION",
 ] as const;
 
-export const progressUpdateStatusValues = [
+export const progressEvaluationStatusValues = [
   "DRAFT",
   "SENT_TO_AUDIT",
   "APPROVED",
@@ -28,28 +28,28 @@ export const progressReviewActionValues = [
 export const PROGRESS_ENTITY_TYPES = {
   comment: "observation_comment",
   evidence: "evidence_file",
-  progressUpdate: "progress_update",
+  progressEvaluation: "progress_evaluation",
 } as const;
 
 export const PROGRESS_ACTIVITY_ACTIONS = {
-  approveProgressUpdate: "progress-update.approve",
+  approveProgressEvaluation: "progress-evaluation.approve",
   createComment: "observation-comment.create",
   createEvidence: "evidence-file.upload",
-  createProgressUpdate: "progress-update.create",
+  createProgressEvaluation: "progress-evaluation.create",
   deleteComment: "observation-comment.delete",
   deleteEvidence: "evidence-file.delete",
   downloadEvidence: "evidence-file.download",
-  rejectProgressUpdate: "progress-update.reject",
-  returnProgressUpdate: "progress-update.return",
-  sendProgressUpdateToAudit: "progress-update.send-to-audit",
+  rejectProgressEvaluation: "progress-evaluation.reject",
+  returnProgressEvaluation: "progress-evaluation.return",
+  sendProgressEvaluationToAudit: "progress-evaluation.send-to-audit",
   updateComment: "observation-comment.update",
-  updateProgressUpdate: "progress-update.update",
+  updateProgressEvaluation: "progress-evaluation.update",
 } as const;
 
 export const EDITABLE_PROGRESS_STATUSES = new Set([
   "DRAFT",
   "RETURNED",
-] satisfies ReadonlyArray<(typeof progressUpdateStatusValues)[number]>);
+] satisfies ReadonlyArray<(typeof progressEvaluationStatusValues)[number]>);
 
 export const AUDIT_VISIBLE_COMMENT_VISIBILITIES = new Set([
   "INTERNAL_AUDIT",

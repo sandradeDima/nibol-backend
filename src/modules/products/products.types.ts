@@ -7,18 +7,10 @@ import type {
   updateProductSchema,
 } from "./products.validators.js";
 
-export type ProductRecord = z.infer<
-  typeof productRecordSchema
->;
+export type ProductRecord = z.infer<typeof productRecordSchema>;
 
-export type CreateProductInput = z.infer<
-  typeof createProductSchema
->;
+export type CreateProductInput = z.infer<typeof createProductSchema>;
 
-export type UpdateProductInput = z.infer<
-  typeof updateProductSchema
->;
+export type UpdateProductInput = z.infer<typeof updateProductSchema>;
 
-export type ListProductsQuery = z.infer<
-  typeof listProductsQuerySchema
->;
+export type ListProductsQuery = z.infer<typeof listProductsQuerySchema>;

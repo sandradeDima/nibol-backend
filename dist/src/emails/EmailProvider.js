@@ -34,7 +34,9 @@ const toNodemailerAddressLike = (address) => {
  * Wraps Nodemailer so the rest of the application only depends on this provider boundary.
  */
 export class EmailProvider {
-    providerMode = isSmtpConfigured ? "smtp" : "json";
+    providerMode = isSmtpConfigured
+        ? "smtp"
+        : "json";
     transport = isSmtpConfigured
         ? nodemailer.createTransport({
             auth: {

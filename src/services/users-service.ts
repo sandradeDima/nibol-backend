@@ -20,10 +20,7 @@ import type {
   UpdateUserInput,
 } from "../validators/users-validator.js";
 import { adminSafeguardService } from "./admin-safeguard-service.js";
-import {
-  areStringArraysEqual,
-  type LogActorContext,
-} from "./logging-utils.js";
+import { areStringArraysEqual, type LogActorContext } from "./logging-utils.js";
 import { notificationService } from "./notification-service.js";
 
 const credentialProviderId = "credential";
@@ -216,8 +213,11 @@ const getDeletedUserByEmail = async (email: string) => {
   });
 };
 
-const isUniqueConstraintError = (error: unknown): error is Prisma.PrismaClientKnownRequestError =>
-  error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+const isUniqueConstraintError = (
+  error: unknown,
+): error is Prisma.PrismaClientKnownRequestError =>
+  error instanceof Prisma.PrismaClientKnownRequestError &&
+  error.code === "P2002";
 
 const getUserDetailsRecord = async (userId: string) => {
   return prisma.user.findFirst({
@@ -228,6 +228,7 @@ const getUserDetailsRecord = async (userId: string) => {
       emailVerified: true,
       id: true,
       isActive: true,
+      jobTitle: true,
       lastLoginAt: true,
       name: true,
       updatedAt: true,
@@ -270,6 +271,7 @@ const mapUserDetails = (
     emailVerified: user.emailVerified,
     id: user.id,
     isActive: user.isActive,
+    jobTitle: user.jobTitle,
     lastLoginAt: user.lastLoginAt?.toISOString() ?? null,
     name: user.name,
     roleIds: user.userRoles.map(({ role }) => role.id),
@@ -412,7 +414,9 @@ export const usersService = {
     const deletedUsers = await prisma.$transaction(async (transaction) => {
       const snapshots = (
         await Promise.all(
-          existingUsers.map((user) => getUserAuditSnapshot(transaction, user.id)),
+          existingUsers.map((user) =>
+            getUserAuditSnapshot(transaction, user.id),
+          ),
         )
       ).filter((snapshot): snapshot is UserAuditSnapshot => snapshot !== null);
 
@@ -485,7 +489,10 @@ export const usersService = {
     });
 
     if (!user?.password) {
-      throw new AppError("Password credentials are not available for this account.", 400);
+      throw new AppError(
+        "Password credentials are not available for this account.",
+        400,
+      );
     }
 
     const passwordMatches = await bcrypt.compare(
@@ -548,7 +555,10 @@ export const usersService = {
     if (deletedUser) {
       try {
         await prisma.$transaction(async (transaction) => {
-          const previousSnapshot = await getUserAuditSnapshot(transaction, deletedUser.id);
+          const previousSnapshot = await getUserAuditSnapshot(
+            transaction,
+            deletedUser.id,
+          );
 
           await transaction.user.update({
             data: {
@@ -556,6 +566,7 @@ export const usersService = {
               deletedAt: null,
               emailVerified: false,
               isActive: input.isActive,
+              jobTitle: input.jobTitle ?? null,
               lastLoginAt: null,
               name: input.name,
               password: passwordHash,
@@ -615,7 +626,10 @@ export const usersService = {
             })),
           });
 
-          const nextSnapshot = await getUserAuditSnapshot(transaction, deletedUser.id);
+          const nextSnapshot = await getUserAuditSnapshot(
+            transaction,
+            deletedUser.id,
+          );
 
           if (previousSnapshot && nextSnapshot) {
             await auditLogService.create(
@@ -648,7 +662,12 @@ export const usersService = {
               },
             );
 
-            if (!areStringArraysEqual(previousSnapshot.roleNames, nextSnapshot.roleNames)) {
+            if (
+              !areStringArraysEqual(
+                previousSnapshot.roleNames,
+                nextSnapshot.roleNames,
+              )
+            ) {
               await activityLogService.logUserAction(
                 {
                   ...context,
@@ -690,6 +709,7 @@ export const usersService = {
             email: input.email,
             emailVerified: false,
             isActive: input.isActive,
+            jobTitle: input.jobTitle ?? null,
             name: input.name,
             password: passwordHash,
           },
@@ -714,7 +734,10 @@ export const usersService = {
           })),
         });
 
-        const createdSnapshot = await getUserAuditSnapshot(transaction, user.id);
+        const createdSnapshot = await getUserAuditSnapshot(
+          transaction,
+          user.id,
+        );
 
         if (createdSnapshot) {
           await auditLogService.create(
@@ -928,6 +951,7 @@ export const usersService = {
           emailVerified: true,
           id: true,
           isActive: true,
+          jobTitle: true,
           lastLoginAt: true,
           name: true,
           userRoles: {
@@ -963,6 +987,7 @@ export const usersService = {
         emailVerified: user.emailVerified,
         id: user.id,
         isActive: user.isActive,
+        jobTitle: user.jobTitle,
         lastLoginAt: user.lastLoginAt?.toISOString() ?? null,
         name: user.name,
         roles: user.userRoles.map(({ role }) => role.name),
@@ -988,17 +1013,22 @@ export const usersService = {
       select: {
         email: true,
         id: true,
+        jobTitle: true,
         name: true,
       },
       where: {
         deletedAt: null,
+        isActive: true,
       },
     });
 
     return users;
   },
 
-  async resendVerificationEmail(userId: string, context?: LogActorContext): Promise<void> {
+  async resendVerificationEmail(
+    userId: string,
+    context?: LogActorContext,
+  ): Promise<void> {
     const user = await prisma.user.findFirst({
       select: {
         email: true,
@@ -1204,7 +1234,10 @@ export const usersService = {
 
     await assertEmailAvailable(input.email, userId);
     await assertRolesExist(input.roleIds);
-    await adminSafeguardService.assertUserRoleUpdateAllowed(userId, input.roleIds);
+    await adminSafeguardService.assertUserRoleUpdateAllowed(
+      userId,
+      input.roleIds,
+    );
 
     if (!input.isActive && existingUser.isActive) {
       await assertUserCanLoseActiveAccess(userId);
@@ -1217,6 +1250,7 @@ export const usersService = {
         data: {
           email: input.email,
           isActive: input.isActive,
+          jobTitle: input.jobTitle ?? null,
           name: input.name,
         },
         where: {
@@ -1281,7 +1315,12 @@ export const usersService = {
           },
         );
 
-        if (!areStringArraysEqual(previousSnapshot.roleNames, nextSnapshot.roleNames)) {
+        if (
+          !areStringArraysEqual(
+            previousSnapshot.roleNames,
+            nextSnapshot.roleNames,
+          )
+        ) {
           await activityLogService.logUserAction(
             {
               ...context,

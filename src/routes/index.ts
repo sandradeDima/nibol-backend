@@ -15,6 +15,8 @@ import { sendSuccess } from "../utils/response.js";
 import { automaticJobsRouter } from "./automatic-jobs-routes.js";
 import { entityActivityRouter } from "./entity-activity-routes.js";
 import { workflowsRouter } from "../modules/workflows/workflows.routes.js";
+import { workflowRuntimeRouter } from "../modules/workflows/workflow-runtime.routes.js";
+import { reportsRouter } from "../modules/reports/reports.routes.js";
 
 export const apiRouter = Router();
 
@@ -23,6 +25,8 @@ apiRouter.use(auditLogsRouter);
 apiRouter.use(automaticJobsRouter);
 apiRouter.use(entityActivityRouter);
 apiRouter.use(workflowsRouter);
+apiRouter.use(workflowRuntimeRouter);
+apiRouter.use(reportsRouter);
 apiRouter.use(dashboardRouter);
 apiRouter.use(permissionsRouter);
 apiRouter.use(notificationsRouter);

@@ -53,9 +53,11 @@ const buildAuthorizationSummary = async (
     },
   });
 
-  const roles = userRoles.map(({ role }) => role.name).sort((left, right) => {
-    return left.localeCompare(right);
-  });
+  const roles = userRoles
+    .map(({ role }) => role.name)
+    .sort((left, right) => {
+      return left.localeCompare(right);
+    });
 
   const permissions = Array.from(
     new Set(
@@ -90,11 +92,12 @@ const setCachedSummary = (
   return summary;
 };
 
-export const createAuthorizationRequestCache = (): AuthorizationRequestCache => {
-  return {
-    summaryByUserId: new Map(),
+export const createAuthorizationRequestCache =
+  (): AuthorizationRequestCache => {
+    return {
+      summaryByUserId: new Map(),
+    };
   };
-};
 
 export const authorizationService = {
   async getUserAuthorizationSummary(
@@ -137,7 +140,9 @@ export const authorizationService = {
       return true;
     }
 
-    const userPermissions = new Set(await this.getUserPermissions(userId, options));
+    const userPermissions = new Set(
+      await this.getUserPermissions(userId, options),
+    );
     return permissions.some((permission) => userPermissions.has(permission));
   },
 
@@ -150,7 +155,9 @@ export const authorizationService = {
       return true;
     }
 
-    const userPermissions = new Set(await this.getUserPermissions(userId, options));
+    const userPermissions = new Set(
+      await this.getUserPermissions(userId, options),
+    );
     return permissions.every((permission) => userPermissions.has(permission));
   },
 };

@@ -4,7 +4,7 @@ import { auditLogService } from "./audit-log-service.js";
 import { AppError } from "../utils/app-error.js";
 import { prisma } from "../utils/prisma.js";
 import { adminSafeguardService } from "./admin-safeguard-service.js";
-import { areStringArraysEqual, } from "./logging-utils.js";
+import { areStringArraysEqual } from "./logging-utils.js";
 const MAX_ROLE_NAME_LENGTH = 191;
 const buildOrderBy = (sortBy, sortDirection) => {
     switch (sortBy) {

@@ -1,111 +1,80 @@
 import { z } from "zod";
-import { commentVisibilityValues, progressUpdateStatusValues, progressUpdateTypeValues, } from "./progress.constants.js";
-const booleanFilterSchema = z
-    .enum(["false", "true"])
-    .transform((value) => value === "true")
-    .optional();
-const dateFilterSchema = z
-    .string()
-    .trim()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .optional();
-const nullableTextSchema = z
+export const progressEvaluationIdParamSchema = z.object({ id: z.uuid() });
+export const actionPlanIdParamSchema = z.object({ id: z.uuid() });
+export const observationIdParamSchema = z.object({ id: z.uuid() });
+export const evidenceIdParamSchema = z.object({ id: z.uuid() });
+export const commentIdParamSchema = z.object({ id: z.uuid() });
+const nullableText = z
     .union([z.string(), z.null(), z.undefined()])
-    .transform((value) => {
-    if (value === null || value === undefined) {
-        return null;
-    }
-    const trimmed = value.trim();
-    return trimmed.length > 0 ? trimmed : null;
-});
-const nullableUuidSchema = z
-    .union([z.uuid(), z.null(), z.undefined()])
-    .transform((value) => value ?? null);
-const progressPercentSchema = z
-    .union([z.coerce.number().int().min(0).max(100), z.null(), z.undefined()])
-    .transform((value) => {
-    if (value === undefined) {
-        return null;
-    }
-    return value;
-});
-export const observationIdParamSchema = z.object({
-    id: z.uuid(),
-});
-export const progressUpdateIdParamSchema = z.object({
-    id: z.uuid(),
-});
-export const evidenceIdParamSchema = z.object({
-    id: z.uuid(),
-});
-export const commentIdParamSchema = z.object({
-    id: z.uuid(),
-});
-const progressUpdateMutationSchema = z.object({
+    .transform((value) => value?.trim() || null);
+const evaluationFields = {
+    actionPlanStatus: z.enum([
+        "NOT_STARTED",
+        "STARTED",
+        "WITH_PROGRESS",
+        "CONCLUDED",
+    ]),
     comment: z.string().trim().min(1).max(20_000),
-    commitmentId: nullableUuidSchema,
-    progressPercent: progressPercentSchema,
-    remediationPlanId: nullableUuidSchema,
-    type: z.enum(progressUpdateTypeValues),
-});
-const addFinalizationProgressIssue = (value, context) => {
-    if (value.type === "FINALIZATION" &&
-        value.progressPercent !== null &&
-        value.progressPercent !== undefined &&
-        value.progressPercent < 100) {
-        context.addIssue({
-            code: "custom",
-            message: "La finalizacion debe registrar 100% de avance.",
-            path: ["progressPercent"],
-        });
-    }
+    progressPercent: z.coerce.number().int().min(0).max(100),
+    type: z.enum(["ADVANCE", "FINALIZATION", "CORRECTION"]).default("ADVANCE"),
 };
-export const createProgressUpdateSchema = progressUpdateMutationSchema.superRefine(addFinalizationProgressIssue);
-export const updateProgressUpdateSchema = progressUpdateMutationSchema
-    .partial()
-    .superRefine((value, context) => {
-    if (Object.keys(value).length === 0) {
+const consistentEvaluation = (value, context) => {
+    if (value.actionPlanStatus === "NOT_STARTED" &&
+        (value.progressPercent ?? 0) > 0)
         context.addIssue({
             code: "custom",
-            message: "At least one progress field is required.",
+            message: "A plan with progress cannot be No iniciado.",
         });
-    }
-    addFinalizationProgressIssue(value, context);
+    if (value.actionPlanStatus === "CONCLUDED" && value.progressPercent !== 100)
+        context.addIssue({
+            code: "custom",
+            message: "A concluded plan must report 100% progress.",
+        });
+};
+export const createProgressEvaluationSchema = z
+    .object(evaluationFields)
+    .superRefine(consistentEvaluation);
+export const updateProgressEvaluationSchema = z
+    .object(evaluationFields)
+    .partial()
+    .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field is required.",
+})
+    .superRefine(consistentEvaluation);
+export const reviewProgressEvaluationSchema = z.object({
+    comment: nullableText,
 });
-export const reviewProgressUpdateSchema = z.object({
-    comment: nullableTextSchema,
-});
-export const uploadObservationEvidenceSchema = z.object({
-    description: nullableTextSchema,
+export const uploadEvidenceSchema = z.object({
+    context: z.enum(["FINDING", "ACTION_PLAN", "PROGRESS_EVALUATION", "CLOSURE"]),
+    description: nullableText,
 });
 export const createCommentSchema = z.object({
+    actionPlanId: z.uuid().nullable().optional(),
     body: z.string().trim().min(1).max(20_000),
-    progressUpdateId: nullableUuidSchema.optional(),
-    visibility: z.enum(commentVisibilityValues).optional(),
+    progressEvaluationId: z.uuid().nullable().optional(),
+    visibility: z
+        .enum(["INTERNAL_AUDIT", "AREA_VISIBLE", "SYSTEM"])
+        .default("AREA_VISIBLE"),
 });
 export const updateCommentSchema = z
     .object({
     body: z.string().trim().min(1).max(20_000).optional(),
-    visibility: z.enum(commentVisibilityValues).optional(),
+    visibility: z.enum(["INTERNAL_AUDIT", "AREA_VISIBLE", "SYSTEM"]).optional(),
 })
     .refine((value) => Object.keys(value).length > 0, {
-    message: "At least one comment field is required.",
+    message: "At least one field is required.",
 });
-export const listProgressUpdatesQuerySchema = z.object({
+export const listProgressEvaluationsQuerySchema = z.object({
+    actionPlanId: z.uuid().optional(),
     areaId: z.uuid().optional(),
-    dateFrom: dateFilterSchema,
-    dateTo: dateFilterSchema,
-    evidencePending: booleanFilterSchema,
-    page: z.coerce.number().int().min(1).default(1),
-    perPage: z.coerce.number().int().min(1).max(100).default(10),
-    responsibleUserId: z.uuid().optional(),
-    riskLevelId: z.uuid().optional(),
+    dateFrom: z.coerce.date().optional(),
+    dateTo: z.coerce.date().optional(),
+    observationId: z.uuid().optional(),
+    page: z.coerce.number().int().positive().default(1),
+    perPage: z.coerce.number().int().positive().max(100).default(20),
+    reviewStatus: z
+        .enum(["DRAFT", "SENT_TO_AUDIT", "APPROVED", "RETURNED", "REJECTED"])
+        .optional(),
     search: z.string().trim().default(""),
-    sortBy: z
-        .enum(["createdAt", "observationCode", "progressPercent", "status", "type"])
-        .default("createdAt"),
-    sortDirection: z.enum(["asc", "desc"]).default("desc"),
-    status: z.enum(progressUpdateStatusValues).optional(),
-    type: z.enum(progressUpdateTypeValues).optional(),
 });
 //# sourceMappingURL=progress.validators.js.map

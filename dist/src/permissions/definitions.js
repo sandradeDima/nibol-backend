@@ -35,13 +35,38 @@ export const WORKFLOW_PERMISSION_NAMES = [
     "workflows.view_instances",
     "workflow_tasks.view",
     "workflow_tasks.approve",
+    "workflow_tasks.complete",
     "workflow_tasks.reject",
     "workflow_tasks.observe",
     "workflow_tasks.request_correction",
     "workflow_tasks.reassign",
+    "workflow_instances.start",
     "workflow_instances.cancel",
     "workflow_instances.retry",
     "workflow_instances.view_audit",
+    "workflow_timers.view",
+    "workflow_timers.retry",
+];
+export const REPORT_PERMISSION_NAMES = [
+    "reports.view",
+    "reports.export",
+];
+export const AUDIT_REPORT_PERMISSION_NAMES = [
+    "audit_reports.view",
+    "audit_reports.create",
+    "audit_reports.edit",
+    "audit_reports.delete",
+];
+export const OBSERVATION_DOMAIN_PERMISSION_NAMES = [
+    "observations.close",
+    "observation_areas.manage",
+    "finding_evidence.upload",
+    "action_plans.assign",
+    "action_plans.complete",
+    "progress_evaluations.submit",
+    "progress_evaluations.review",
+    "progress_evaluations.approve",
+    "progress_evaluations.reject",
 ];
 export const AUDIT_WORKFLOW_PERMISSION_NAMES = [
     "workflows.view",
@@ -51,14 +76,18 @@ export const AUDIT_WORKFLOW_PERMISSION_NAMES = [
     "workflows.view_instances",
     "workflow_tasks.view",
     "workflow_tasks.approve",
+    "workflow_tasks.complete",
     "workflow_tasks.reject",
     "workflow_tasks.observe",
     "workflow_tasks.request_correction",
     "workflow_instances.view_audit",
+    "workflow_timers.view",
 ];
 export const ALL_PERMISSION_NAMES = [
     ...DEFAULT_PERMISSION_NAMES,
     ...WORKFLOW_PERMISSION_NAMES,
+    ...REPORT_PERMISSION_NAMES,
+    ...OBSERVATION_DOMAIN_PERMISSION_NAMES,
 ];
 export const CRITICAL_ADMIN_PERMISSIONS = [...ALL_PERMISSION_NAMES];
 //# sourceMappingURL=definitions.js.map

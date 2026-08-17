@@ -47,21 +47,18 @@ export const RemediationPlanStatus = {
     RETURNED: 'RETURNED',
     CLOSED: 'CLOSED'
 };
-export const CommitmentStatus = {
-    PENDING: 'PENDING',
-    IN_PROGRESS: 'IN_PROGRESS',
-    SENT_TO_AUDIT: 'SENT_TO_AUDIT',
-    APPROVED: 'APPROVED',
-    RETURNED: 'RETURNED',
-    COMPLETED: 'COMPLETED',
-    OVERDUE: 'OVERDUE'
+export const ActionPlanStatus = {
+    NOT_STARTED: 'NOT_STARTED',
+    STARTED: 'STARTED',
+    WITH_PROGRESS: 'WITH_PROGRESS',
+    CONCLUDED: 'CONCLUDED'
 };
-export const ProgressUpdateType = {
+export const ProgressEvaluationType = {
     ADVANCE: 'ADVANCE',
     FINALIZATION: 'FINALIZATION',
     CORRECTION: 'CORRECTION'
 };
-export const ProgressUpdateStatus = {
+export const ProgressEvaluationReviewStatus = {
     DRAFT: 'DRAFT',
     SENT_TO_AUDIT: 'SENT_TO_AUDIT',
     APPROVED: 'APPROVED',
@@ -88,6 +85,16 @@ export const DeadlineExtensionStatus = {
     AUDIT_APPROVED: 'AUDIT_APPROVED',
     AUDIT_REJECTED: 'AUDIT_REJECTED',
     CANCELLED: 'CANCELLED'
+};
+export const DeadlineExtensionTarget = {
+    OBSERVATION: 'OBSERVATION',
+    ACTION_PLAN: 'ACTION_PLAN'
+};
+export const EvidenceContext = {
+    FINDING: 'FINDING',
+    ACTION_PLAN: 'ACTION_PLAN',
+    PROGRESS_EVALUATION: 'PROGRESS_EVALUATION',
+    CLOSURE: 'CLOSURE'
 };
 export const WorkflowDefinitionStatus = {
     DRAFT: 'DRAFT',

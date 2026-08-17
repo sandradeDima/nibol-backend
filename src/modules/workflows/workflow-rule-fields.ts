@@ -71,7 +71,7 @@ const normalizeCatalogToken = (value: unknown): string | null => {
   }
 
   const aliases: Record<string, string> = {
-    CRITICAL: "CRITICO",
+    CRITICAL: "ALTO",
     HIGH: "ALTO",
     LOW: "BAJO",
     MEDIUM: "MEDIO",

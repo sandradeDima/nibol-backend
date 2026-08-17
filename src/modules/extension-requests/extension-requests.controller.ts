@@ -1,20 +1,15 @@
 import type { Request, Response } from "express";
 
-import { activityLogService } from "../../services/activity-log-service.js";
 import type { AuthorizationSummary } from "../../services/authorization-service.js";
+import { activityLogService } from "../../services/activity-log-service.js";
 import { auditLogService } from "../../services/audit-log-service.js";
 import { entityActivityService } from "../../services/entity-activity-service.js";
-import { getExtensionActivityType } from "../../services/entity-activity-mapping.js";
 import { AppError } from "../../utils/app-error.js";
 import { getRequestLogActorContext } from "../../utils/request-context.js";
 import { sendPaginated, sendSuccess } from "../../utils/response.js";
+import { extensionRequestsService as service } from "./extension-requests.service.js";
 import {
-  EXTENSION_REQUEST_ACTIVITY_ACTIONS,
-  EXTENSION_REQUEST_ENTITY_TYPES,
-} from "./extension-requests.constants.js";
-import { extensionRequestsService } from "./extension-requests.service.js";
-import {
-  commitmentIdParamSchema,
+  actionPlanIdParamSchema,
   createExtensionRequestSchema,
   extensionRequestIdParamSchema,
   listExtensionRequestsQuerySchema,
@@ -23,316 +18,171 @@ import {
   updateExtensionRequestSchema,
 } from "./extension-requests.validators.js";
 
-const getQueryValue = (value: unknown): string | undefined => {
-  if (typeof value === "string") {
-    return value;
-  }
-
-  if (Array.isArray(value)) {
-    const firstValue = value[0];
-
-    if (typeof firstValue === "string") {
-      return firstValue;
-    }
-  }
-
-  return undefined;
-};
-
-const getRequiredExtensionRequestId = (
-  value: string | string[] | undefined,
-): string => {
-  const extensionRequestId = Array.isArray(value) ? value[0] : value;
-
-  if (!extensionRequestId) {
-    throw new AppError("Extension request id is required.", 400);
-  }
-
-  return extensionRequestIdParamSchema.parse({
-    id: extensionRequestId,
-  }).id;
-};
-
-const getRequiredObservationId = (value: string | string[] | undefined): string => {
-  const observationId = Array.isArray(value) ? value[0] : value;
-
-  if (!observationId) {
-    throw new AppError("Observation id is required.", 400);
-  }
-
-  return observationIdParamSchema.parse({
-    id: observationId,
-  }).id;
-};
-
-const getRequiredCommitmentId = (value: string | string[] | undefined): string => {
-  const commitmentId = Array.isArray(value) ? value[0] : value;
-
-  if (!commitmentId) {
-    throw new AppError("Commitment id is required.", 400);
-  }
-
-  return commitmentIdParamSchema.parse({
-    id: commitmentId,
-  }).id;
-};
-
-const getRequiredAuthorizationSummary = (request: Request): AuthorizationSummary => {
-  if (!request.authorizationSummary) {
+const value = (input: unknown): string | undefined =>
+  typeof input === "string" ? input : undefined;
+const access = (request: Request): AuthorizationSummary => {
+  if (!request.authorizationSummary)
     throw new AppError("Authorization required.", 401);
-  }
-
   return request.authorizationSummary;
 };
+const parsedId = (
+  request: Request,
+  schema: typeof extensionRequestIdParamSchema,
+) => schema.parse({ id: value(request.params.id) }).id;
 
-const logMutation = async ({
-  action,
-  request,
-  summary,
-  values,
-}: {
-  action: string;
-  request: Request;
-  summary: string;
-  values: Awaited<ReturnType<typeof extensionRequestsService.createForObservation>>;
-}) => {
-  const actorContext = getRequestLogActorContext(request);
-
+const log = async (
+  request: Request,
+  action: string,
+  current: { id: string; observation?: { id: string } | null } | null,
+  previous: { id: string; observation?: { id: string } | null } | null,
+) => {
+  const record = current ?? previous;
+  if (!record) return;
+  const actor = getRequestLogActorContext(request);
   await Promise.all([
     activityLogService.logUserAction({
-      ...actorContext,
+      ...actor,
       action,
-      entityId: values.current.id,
-      entityType: EXTENSION_REQUEST_ENTITY_TYPES.request,
-      metadata: {
-        observationCode: values.current.observation.code,
-        statusAfter: values.current.status,
-        statusBefore: values.previous?.status ?? null,
-        summary,
-      },
+      entityId: record.id,
+      entityType: "DEADLINE_EXTENSION_REQUEST",
+      metadata: { summary: action },
     }),
     auditLogService.create({
-      ...actorContext,
-      entityId: values.current.id,
-      entityType: EXTENSION_REQUEST_ENTITY_TYPES.request,
-      newValues: values.current,
-      oldValues: values.previous,
+      ...actor,
+      entityId: record.id,
+      entityType: "DEADLINE_EXTENSION_REQUEST",
+      newValues: current,
+      oldValues: previous,
     }),
     entityActivityService.recordEntityChange({
       action,
-      activityType: getExtensionActivityType(action, values.current.status),
-      actorUserId: actorContext.userId,
-      description: summary,
-      entityId: values.current.id,
-      entityType: "EXTENSION_REQUEST",
-      metadata: { summary },
-      newData: values.current,
-      previousData: values.previous,
-      title: summary,
+      activityType: action
+        .toUpperCase()
+        .replaceAll(".", "_")
+        .replaceAll("-", "_"),
+      actorUserId: actor.userId,
+      entityId: record.id,
+      entityType: "DEADLINE_EXTENSION_REQUEST",
+      newData: current,
+      observationId: record.observation?.id,
+      previousData: previous,
+      title: action,
     }),
   ]);
 };
 
 export const extensionRequestsController = {
   async auditApprove(request: Request, response: Response) {
-    const result = await extensionRequestsService.auditApprove(
-      getRequiredExtensionRequestId(request.params.id),
+    const result = await service.auditReview(
+      parsedId(request, extensionRequestIdParamSchema),
+      true,
       reviewExtensionRequestSchema.parse(request.body),
-      getRequiredAuthorizationSummary(request),
+      access(request),
     );
-
-    await logMutation({
-      action: EXTENSION_REQUEST_ACTIVITY_ACTIONS.auditApprove,
+    await log(
       request,
-      summary: `Auditoria aprobo la ampliacion para ${result.current.observation.code}.`,
-      values: result,
-    });
-
+      "extension_requests.approve",
+      result.current,
+      result.previous,
+    );
     sendSuccess(response, result.current);
   },
-
   async auditReject(request: Request, response: Response) {
-    const result = await extensionRequestsService.auditReject(
-      getRequiredExtensionRequestId(request.params.id),
+    const result = await service.auditReview(
+      parsedId(request, extensionRequestIdParamSchema),
+      false,
       reviewExtensionRequestSchema.parse(request.body),
-      getRequiredAuthorizationSummary(request),
+      access(request),
     );
-
-    await logMutation({
-      action: EXTENSION_REQUEST_ACTIVITY_ACTIONS.auditReject,
+    await log(
       request,
-      summary: `Auditoria rechazo la ampliacion para ${result.current.observation.code}.`,
-      values: result,
-    });
-
+      "extension_requests.reject",
+      result.current,
+      result.previous,
+    );
     sendSuccess(response, result.current);
   },
-
   async cancel(request: Request, response: Response) {
-    const result = await extensionRequestsService.cancel(
-      getRequiredExtensionRequestId(request.params.id),
-      getRequiredAuthorizationSummary(request),
+    const result = await service.cancel(
+      parsedId(request, extensionRequestIdParamSchema),
+      access(request),
     );
-
-    await logMutation({
-      action: EXTENSION_REQUEST_ACTIVITY_ACTIONS.cancel,
-      request,
-      summary: `Se cancelo la ampliacion para ${result.current.observation.code}.`,
-      values: result,
-    });
-
     sendSuccess(response, result.current);
   },
-
-  async createForCommitment(request: Request, response: Response) {
-    const result = await extensionRequestsService.createForCommitment(
-      getRequiredCommitmentId(request.params.id),
+  async createForActionPlan(request: Request, response: Response) {
+    const record = await service.createForActionPlan(
+      parsedId(request, actionPlanIdParamSchema),
       createExtensionRequestSchema.parse(request.body),
-      getRequiredAuthorizationSummary(request),
+      access(request),
     );
-
-    await logMutation({
-      action: EXTENSION_REQUEST_ACTIVITY_ACTIONS.createForCommitment,
-      request,
-      summary: `Se creo una solicitud de ampliacion para el compromiso ${result.current.commitment?.title ?? result.current.id}.`,
-      values: result,
-    });
-
-    sendSuccess(response, result.current, 201);
+    await log(request, "extension_requests.create", record, null);
+    sendSuccess(response, record, 201);
   },
-
   async createForObservation(request: Request, response: Response) {
-    const result = await extensionRequestsService.createForObservation(
-      getRequiredObservationId(request.params.id),
+    const record = await service.createForObservation(
+      parsedId(request, observationIdParamSchema),
       createExtensionRequestSchema.parse(request.body),
-      getRequiredAuthorizationSummary(request),
+      access(request),
     );
-
-    await logMutation({
-      action: EXTENSION_REQUEST_ACTIVITY_ACTIONS.createForObservation,
-      request,
-      summary: `Se creo una solicitud de ampliacion para la observacion ${result.current.observation.code}.`,
-      values: result,
-    });
-
-    sendSuccess(response, result.current, 201);
+    await log(request, "extension_requests.create", record, null);
+    sendSuccess(response, record, 201);
   },
-
   async getById(request: Request, response: Response) {
-    const result = await extensionRequestsService.getById(
-      getRequiredExtensionRequestId(request.params.id),
-      getRequiredAuthorizationSummary(request),
+    sendSuccess(
+      response,
+      await service.getById(
+        parsedId(request, extensionRequestIdParamSchema),
+        access(request),
+      ),
     );
-
-    sendSuccess(response, result);
   },
-
   async list(request: Request, response: Response) {
-    const query = listExtensionRequestsQuerySchema.parse({
-      areaId: getQueryValue(request.query["filter.areaId"]),
-      observationId: getQueryValue(request.query["filter.observationId"]),
-      overdue: getQueryValue(request.query["filter.overdue"]),
-      page: getQueryValue(request.query.page),
-      pendingMine: getQueryValue(request.query["filter.pendingMine"]),
-      perPage: getQueryValue(request.query.perPage),
-      requestedByUserId: getQueryValue(request.query["filter.requestedByUserId"]),
-      requestedDateFrom: getQueryValue(request.query["filter.requestedDateFrom"]),
-      requestedDateTo: getQueryValue(request.query["filter.requestedDateTo"]),
-      riskLevelId: getQueryValue(request.query["filter.riskLevelId"]),
-      search: getQueryValue(request.query.search),
-      sortBy: getQueryValue(request.query.sortBy),
-      sortDirection: getQueryValue(request.query.sortDirection),
-      status: getQueryValue(request.query["filter.status"]),
-    });
-
-    const result = await extensionRequestsService.list(
-      query,
-      getRequiredAuthorizationSummary(request),
+    const result = await service.list(
+      listExtensionRequestsQuerySchema.parse({
+        actionPlanId: value(request.query["filter.actionPlanId"]),
+        observationId: value(request.query["filter.observationId"]),
+        page: value(request.query.page),
+        perPage: value(request.query.perPage),
+        requestedByUserId: value(request.query["filter.requestedByUserId"]),
+        search: value(request.query.search),
+        status: value(request.query["filter.status"]),
+        targetType: value(request.query["filter.targetType"]),
+      }),
+      access(request),
     );
-
     sendPaginated(response, result.data, result.pagination);
   },
-
   async managerApprove(request: Request, response: Response) {
-    const result = await extensionRequestsService.managerApprove(
-      getRequiredExtensionRequestId(request.params.id),
+    const result = await service.managerReview(
+      parsedId(request, extensionRequestIdParamSchema),
+      true,
       reviewExtensionRequestSchema.parse(request.body),
-      getRequiredAuthorizationSummary(request),
+      access(request),
     );
-
-    await logMutation({
-      action: EXTENSION_REQUEST_ACTIVITY_ACTIONS.managerApprove,
-      request,
-      summary: `Gerencia aprobo la ampliacion para ${result.current.observation.code}.`,
-      values: result,
-    });
-
     sendSuccess(response, result.current);
   },
-
   async managerReject(request: Request, response: Response) {
-    const result = await extensionRequestsService.managerReject(
-      getRequiredExtensionRequestId(request.params.id),
+    const result = await service.managerReview(
+      parsedId(request, extensionRequestIdParamSchema),
+      false,
       reviewExtensionRequestSchema.parse(request.body),
-      getRequiredAuthorizationSummary(request),
+      access(request),
     );
-
-    await logMutation({
-      action: EXTENSION_REQUEST_ACTIVITY_ACTIONS.managerReject,
-      request,
-      summary: `Gerencia rechazo la ampliacion para ${result.current.observation.code}.`,
-      values: result,
-    });
-
     sendSuccess(response, result.current);
   },
-
-  async sendToAudit(request: Request, response: Response) {
-    const result = await extensionRequestsService.sendToAudit(
-      getRequiredExtensionRequestId(request.params.id),
-      getRequiredAuthorizationSummary(request),
-    );
-
-    await logMutation({
-      action: EXTENSION_REQUEST_ACTIVITY_ACTIONS.sendToAudit,
-      request,
-      summary: `La ampliacion para ${result.current.observation.code} fue enviada a Auditoria.`,
-      values: result,
-    });
-
-    sendSuccess(response, result.current);
-  },
-
   async sendToManager(request: Request, response: Response) {
-    const result = await extensionRequestsService.sendToManager(
-      getRequiredExtensionRequestId(request.params.id),
-      getRequiredAuthorizationSummary(request),
+    const result = await service.submit(
+      parsedId(request, extensionRequestIdParamSchema),
+      access(request),
     );
-
-    await logMutation({
-      action: EXTENSION_REQUEST_ACTIVITY_ACTIONS.sendToManager,
-      request,
-      summary: `La ampliacion para ${result.current.observation.code} fue enviada a Gerencia.`,
-      values: result,
-    });
-
     sendSuccess(response, result.current);
   },
-
   async update(request: Request, response: Response) {
-    const result = await extensionRequestsService.update(
-      getRequiredExtensionRequestId(request.params.id),
+    const result = await service.update(
+      parsedId(request, extensionRequestIdParamSchema),
       updateExtensionRequestSchema.parse(request.body),
-      getRequiredAuthorizationSummary(request),
+      access(request),
     );
-
-    await logMutation({
-      action: EXTENSION_REQUEST_ACTIVITY_ACTIONS.update,
-      request,
-      summary: `Se actualizo la solicitud de ampliacion para ${result.current.observation.code}.`,
-      values: result,
-    });
-
     sendSuccess(response, result.current);
   },
 };

@@ -24,7 +24,7 @@ const normalizeCatalogToken = (value) => {
         return null;
     }
     const aliases = {
-        CRITICAL: "CRITICO",
+        CRITICAL: "ALTO",
         HIGH: "ALTO",
         LOW: "BAJO",
         MEDIUM: "MEDIO",

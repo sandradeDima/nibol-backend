@@ -12,28 +12,30 @@ const userSelect = {
     name: true,
 };
 const observationSelect = {
-    area: {
+    areaAssignments: {
         select: {
-            id: true,
-            managerUser: { select: userSelect },
-            name: true,
+            area: {
+                select: { id: true, managerUser: { select: userSelect }, name: true },
+            },
+            areaResponsible: { select: userSelect },
+            processOwner: { select: userSelect },
         },
     },
     auditorUser: { select: userSelect },
-    code: true,
+    auditReport: { select: { reportNumber: true } },
+    observationNumber: true,
     description: true,
-    dueDate: true,
+    currentDueDate: true,
     id: true,
-    responsibleUser: { select: userSelect },
     status: { select: { isFinal: true, key: true, name: true } },
     title: true,
 };
-const commitmentSelect = {
+const actionPlanSelect = {
     description: true,
-    dueDate: true,
+    currentDueDate: true,
     id: true,
     progressPercent: true,
-    remediationPlan: {
+    observationArea: {
         select: {
             area: {
                 select: {
@@ -42,14 +44,16 @@ const commitmentSelect = {
                     name: true,
                 },
             },
-            observation: {
-                select: {
-                    auditorUser: { select: userSelect },
-                    code: true,
-                    id: true,
-                },
-            },
-            ownerUser: { select: userSelect },
+            areaResponsible: { select: userSelect },
+            processOwner: { select: userSelect },
+        },
+    },
+    observation: {
+        select: {
+            auditReport: { select: { reportNumber: true } },
+            auditorUser: { select: userSelect },
+            id: true,
+            observationNumber: true,
         },
     },
     responsibleUser: { select: userSelect },
@@ -82,7 +86,7 @@ const readParameters = async () => {
         notify_in_app: parseBoolean(values.get("notify_in_app"), DEADLINE_MONITOR_PARAMETER_DEFAULTS.notify_in_app),
         notify_observation_assignee: parseBoolean(values.get("notify_observation_assignee"), DEADLINE_MONITOR_PARAMETER_DEFAULTS.notify_observation_assignee),
         overdue_check_enabled: parseBoolean(values.get("overdue_check_enabled"), DEADLINE_MONITOR_PARAMETER_DEFAULTS.overdue_check_enabled),
-        overdue_status_auto_update_enabled: parseBoolean(values.get("overdue_status_auto_update_enabled"), DEADLINE_MONITOR_PARAMETER_DEFAULTS.overdue_status_auto_update_enabled),
+        overdue_activity_enabled: parseBoolean(values.get("overdue_activity_enabled"), DEADLINE_MONITOR_PARAMETER_DEFAULTS.overdue_activity_enabled),
         pending_extension_reminder_hours: parseNumber(values.get("pending_extension_reminder_hours"), DEADLINE_MONITOR_PARAMETER_DEFAULTS.pending_extension_reminder_hours),
         pending_review_reminder_hours: parseNumber(values.get("pending_review_reminder_hours"), DEADLINE_MONITOR_PARAMETER_DEFAULTS.pending_review_reminder_hours),
         reminder_days_before_due: parseNumber(values.get("reminder_days_before_due"), DEADLINE_MONITOR_PARAMETER_DEFAULTS.reminder_days_before_due),
@@ -140,9 +144,15 @@ const createDelivery = async (input) => {
             data: {
                 channel: input.channel,
                 dedupeKey: input.dedupeKey,
-                ...(input.notificationId ? { notificationId: input.notificationId } : {}),
-                ...(input.recipientEmail ? { recipientEmail: input.recipientEmail } : {}),
-                ...(input.recipientUserId ? { recipientUserId: input.recipientUserId } : {}),
+                ...(input.notificationId
+                    ? { notificationId: input.notificationId }
+                    : {}),
+                ...(input.recipientEmail
+                    ? { recipientEmail: input.recipientEmail }
+                    : {}),
+                ...(input.recipientUserId
+                    ? { recipientUserId: input.recipientUserId }
+                    : {}),
                 status: input.status ?? NotificationDeliveryStatus.PENDING,
             },
         });
@@ -266,7 +276,10 @@ const recordFailure = (context, entityType, entityId, error) => {
     });
 };
 const notifyObservation = async (context, observation, auditRecipients, now) => {
-    const daysUntilDue = daysBetween(now, observation.dueDate);
+    const dueDate = observation.currentDueDate;
+    const code = `${observation.auditReport.reportNumber} / OBS-${String(observation.observationNumber).padStart(3, "0")}`;
+    const primaryArea = observation.areaAssignments[0];
+    const daysUntilDue = daysBetween(now, dueDate);
     const isOverdue = daysUntilDue < 0;
     const cycle = isOverdue
         ? `overdue-${Math.floor(Math.abs(daysUntilDue) / context.parameters.reminder_repeat_days)}`
@@ -275,8 +288,15 @@ const notifyObservation = async (context, observation, auditRecipients, now) => 
         ? AUTOMATIC_NOTIFICATION_TYPES.observationOverdue
         : AUTOMATIC_NOTIFICATION_TYPES.observationDueSoon;
     const recipients = uniqueRecipients([
-        context.parameters.notify_observation_assignee ? observation.responsibleUser : null,
-        context.parameters.notify_area_manager ? observation.area.managerUser : null,
+        ...(context.parameters.notify_observation_assignee
+            ? observation.areaAssignments.flatMap((assignment) => [
+                assignment.areaResponsible,
+                assignment.processOwner,
+            ])
+            : []),
+        ...(context.parameters.notify_area_manager
+            ? observation.areaAssignments.map((assignment) => assignment.area.managerUser)
+            : []),
         ...(context.parameters.notify_audit_team
             ? [observation.auditorUser, ...auditRecipients]
             : []),
@@ -285,18 +305,20 @@ const notifyObservation = async (context, observation, auditRecipients, now) => 
         actionRequired: isOverdue
             ? "Actualice el avance y gestione la regularización del vencimiento."
             : "Revise el avance y complete las acciones antes de la fecha límite.",
-        areaName: observation.area.name,
-        code: observation.code,
+        areaName: primaryArea?.area.name ?? "Sin área",
+        code,
         currentStatus: observation.status.name,
         description: isOverdue
-            ? `La observación ${observation.code} se encuentra vencida.`
-            : `La observación ${observation.code} vencerá el ${dateLabel(observation.dueDate)}.`,
-        dueDate: dateLabel(observation.dueDate),
+            ? `La observación ${code} se encuentra vencida.`
+            : `La observación ${code} vencerá el ${dateLabel(dueDate)}.`,
+        dueDate: dateLabel(dueDate),
         entityId: observation.id,
         entityType: "observation",
         eventType,
         observationId: observation.id,
-        priority: isOverdue ? NotificationPriority.CRITICAL : NotificationPriority.HIGH,
+        priority: isOverdue
+            ? NotificationPriority.CRITICAL
+            : NotificationPriority.HIGH,
         targetUrl: `${env.FRONTEND_URL}/observaciones/${observation.id}`,
         title: isOverdue ? "Plazo vencido" : "Próximo vencimiento",
     };
@@ -309,204 +331,168 @@ const notifyObservation = async (context, observation, auditRecipients, now) => 
         }
     }
 };
-const notifyCommitment = async (context, commitment, auditRecipients, now) => {
-    const daysUntilDue = daysBetween(now, commitment.dueDate);
+const notifyActionPlan = async (context, actionPlan, auditRecipients, now) => {
+    const dueDate = actionPlan.currentDueDate;
+    const code = `${actionPlan.observation.auditReport.reportNumber} / OBS-${String(actionPlan.observation.observationNumber).padStart(3, "0")}`;
+    const daysUntilDue = daysBetween(now, dueDate);
     const isOverdue = daysUntilDue < 0;
     const cycle = isOverdue
         ? `overdue-${Math.floor(Math.abs(daysUntilDue) / context.parameters.reminder_repeat_days)}`
         : `due-${Math.floor((context.parameters.reminder_days_before_due - daysUntilDue) / context.parameters.reminder_repeat_days)}`;
     const recipients = uniqueRecipients([
-        commitment.responsibleUser,
-        commitment.remediationPlan.ownerUser,
-        context.parameters.notify_area_manager ? commitment.remediationPlan.area.managerUser : null,
+        actionPlan.responsibleUser,
+        actionPlan.observationArea.areaResponsible,
+        actionPlan.observationArea.processOwner,
+        context.parameters.notify_area_manager
+            ? actionPlan.observationArea.area.managerUser
+            : null,
         ...(context.parameters.notify_audit_team
-            ? [commitment.remediationPlan.observation.auditorUser, ...auditRecipients]
+            ? [actionPlan.observation.auditorUser, ...auditRecipients]
             : []),
     ]);
     const event = {
         actionRequired: isOverdue
-            ? "Actualice el compromiso y coordine la regularización del plazo."
+            ? "Actualice el plan de acción y coordine la regularización del plazo."
             : "Revise el plan de remediación y registre el avance comprometido.",
-        areaName: commitment.remediationPlan.area.name,
-        code: commitment.remediationPlan.observation.code,
-        currentStatus: commitment.status,
+        areaName: actionPlan.observationArea.area.name,
+        code,
+        currentStatus: actionPlan.status,
         description: isOverdue
-            ? `El compromiso “${commitment.title}” se encuentra vencido.`
-            : `El compromiso “${commitment.title}” vencerá el ${dateLabel(commitment.dueDate)}.`,
-        dueDate: dateLabel(commitment.dueDate),
-        entityId: commitment.id,
-        entityType: "commitment",
+            ? `El plan de acción “${actionPlan.title}” se encuentra vencido.`
+            : `El plan de acción “${actionPlan.title}” vencerá el ${dateLabel(dueDate)}.`,
+        dueDate: dateLabel(dueDate),
+        entityId: actionPlan.id,
+        entityType: "actionPlan",
         eventType: isOverdue
-            ? AUTOMATIC_NOTIFICATION_TYPES.commitmentOverdue
-            : AUTOMATIC_NOTIFICATION_TYPES.commitmentDueSoon,
-        observationId: commitment.remediationPlan.observation.id,
-        priority: isOverdue ? NotificationPriority.CRITICAL : NotificationPriority.HIGH,
-        targetUrl: `${env.FRONTEND_URL}/planes-remediacion?observacion=${commitment.remediationPlan.observation.id}`,
-        title: isOverdue ? "Compromiso vencido" : "Próximo vencimiento de compromiso",
+            ? AUTOMATIC_NOTIFICATION_TYPES.actionPlanOverdue
+            : AUTOMATIC_NOTIFICATION_TYPES.actionPlanDueSoon,
+        observationId: actionPlan.observation.id,
+        priority: isOverdue
+            ? NotificationPriority.CRITICAL
+            : NotificationPriority.HIGH,
+        targetUrl: `${env.FRONTEND_URL}/observaciones/${actionPlan.observation.id}`,
+        title: isOverdue
+            ? "Plan de acción vencido"
+            : "Próximo vencimiento del plan de acción",
     };
     for (const recipient of recipients) {
         try {
             await emitEvent(context, event, recipient, cycle);
         }
         catch (error) {
-            recordFailure(context, "commitment", commitment.id, error);
+            recordFailure(context, "actionPlan", actionPlan.id, error);
         }
     }
 };
-const updateOverdueStatuses = async (context, observations, commitments) => {
-    if (!context.parameters.overdue_status_auto_update_enabled)
+const recordOverdueActivity = async (context, observations, actionPlans) => {
+    if (!context.parameters.overdue_activity_enabled)
         return;
-    const overdueStatus = await prisma.observationStatus.findFirst({
-        select: { id: true },
-        where: { active: true, deletedAt: null, key: "VENCIDA" },
-    });
     for (const observation of observations) {
-        if (!overdueStatus ||
-            observation.status.key === "VENCIDA" ||
-            observation.status.isFinal ||
-            /audit|revision|revisi[oó]n/i.test(observation.status.key))
+        if (observation.status.isFinal)
             continue;
         try {
-            await prisma.$transaction(async (transaction) => {
-                await transaction.observation.update({
-                    data: { statusId: overdueStatus.id },
-                    where: { id: observation.id },
-                });
-                await transaction.auditLog.create({
-                    data: {
-                        entityId: observation.id,
-                        entityType: "observation",
-                        newValues: { status: "VENCIDA" },
-                        oldValues: { status: observation.status.key },
-                    },
-                });
-            });
             await entityActivityService.create({
                 action: "overdue.detected",
                 activityType: "OVERDUE_DETECTED",
                 actorType: "SYSTEM",
                 dedupeKey: `overdue-detected:${observation.id}:${new Date().toISOString().slice(0, 10)}`,
-                description: `El monitor automático detectó que la observación ${observation.code} está vencida.`,
+                description: `El monitor automático detectó que la observación ${observation.auditReport.reportNumber} / OBS-${String(observation.observationNumber).padStart(3, "0")} está vencida.`,
                 entityId: observation.id,
                 entityType: "OBSERVATION",
                 observationId: observation.id,
                 title: "Vencimiento detectado",
             });
-            if (overdueStatus) {
-                await entityActivityService.create({
-                    action: "status.automatic-change",
-                    activityType: "AUTOMATIC_STATUS_CHANGE",
-                    actorType: "SYSTEM",
-                    dedupeKey: `automatic-status:${observation.id}:${new Date().toISOString().slice(0, 10)}`,
-                    description: `El estado cambió de ${observation.status.name} a Vencida.`,
-                    entityId: observation.id,
-                    entityType: "OBSERVATION",
-                    newData: { status: "Vencida" },
-                    observationId: observation.id,
-                    previousData: { status: observation.status.name },
-                    title: "Estado actualizado automáticamente",
-                });
-            }
         }
         catch (error) {
             recordFailure(context, "observation-status", observation.id, error);
         }
     }
-    for (const commitment of commitments) {
-        if (!["PENDING", "IN_PROGRESS"].includes(commitment.status))
-            continue;
+    for (const actionPlan of actionPlans) {
         try {
-            await prisma.$transaction(async (transaction) => {
-                await transaction.commitment.update({
-                    data: { status: "OVERDUE" },
-                    where: { id: commitment.id },
-                });
-                await transaction.auditLog.create({
-                    data: {
-                        entityId: commitment.id,
-                        entityType: "commitment",
-                        newValues: { status: "OVERDUE" },
-                        oldValues: { status: commitment.status },
-                    },
-                });
-            });
             await entityActivityService.create({
                 action: "overdue.detected",
                 activityType: "OVERDUE_DETECTED",
                 actorType: "SYSTEM",
-                dedupeKey: `overdue-detected:${commitment.id}:${new Date().toISOString().slice(0, 10)}`,
-                description: `El monitor automático detectó que el compromiso “${commitment.title}” está vencido.`,
-                entityId: commitment.id,
-                entityType: "COMMITMENT",
-                observationId: commitment.remediationPlan.observation.id,
-                title: "Compromiso vencido",
-            });
-            await entityActivityService.create({
-                action: "status.automatic-change",
-                activityType: "AUTOMATIC_STATUS_CHANGE",
-                actorType: "SYSTEM",
-                dedupeKey: `automatic-status:${commitment.id}:${new Date().toISOString().slice(0, 10)}`,
-                description: `El compromiso cambió de ${commitment.status} a Vencido.`,
-                entityId: commitment.id,
-                entityType: "COMMITMENT",
-                newData: { status: "OVERDUE" },
-                observationId: commitment.remediationPlan.observation.id,
-                previousData: { status: commitment.status },
-                title: "Compromiso marcado como vencido",
+                dedupeKey: `overdue-detected:${actionPlan.id}:${new Date().toISOString().slice(0, 10)}`,
+                description: `El monitor automático detectó que el plan de acción “${actionPlan.title}” está vencido.`,
+                entityId: actionPlan.id,
+                entityType: "ACTION_PLAN",
+                observationId: actionPlan.observation.id,
+                title: "Plan de acción vencido",
             });
         }
         catch (error) {
-            recordFailure(context, "commitment-status", commitment.id, error);
+            recordFailure(context, "actionPlan-status", actionPlan.id, error);
         }
     }
 };
 const processPendingProgress = async (context, auditRecipients, now) => {
-    const threshold = new Date(now.getTime() - context.parameters.pending_review_reminder_hours * 3_600_000);
-    const returnedThreshold = new Date(now.getTime() - context.parameters.returned_progress_reminder_days * 86_400_000);
-    const updates = await prisma.progressUpdate.findMany({
+    const threshold = new Date(now.getTime() -
+        context.parameters.pending_review_reminder_hours * 3_600_000);
+    const returnedThreshold = new Date(now.getTime() -
+        context.parameters.returned_progress_reminder_days * 86_400_000);
+    const updates = await prisma.progressEvaluation.findMany({
         select: {
-            commitment: { select: { responsibleUser: { select: userSelect } } },
+            actionPlan: {
+                select: {
+                    currentDueDate: true,
+                    observationArea: { select: { area: { select: { name: true } } } },
+                    observation: {
+                        select: {
+                            auditReport: { select: { reportNumber: true } },
+                            id: true,
+                            observationNumber: true,
+                        },
+                    },
+                    responsibleUser: { select: userSelect },
+                },
+            },
             id: true,
-            observation: { select: { code: true, id: true, responsibleUser: { select: userSelect }, area: { select: { name: true } }, dueDate: true } },
             reviewedAt: true,
-            status: true,
+            reviewStatus: true,
             submittedByUser: { select: userSelect },
             updatedAt: true,
         },
         where: {
             deletedAt: null,
             OR: [
-                { status: "SENT_TO_AUDIT", updatedAt: { lte: threshold } },
-                { status: "RETURNED", updatedAt: { lte: returnedThreshold } },
+                { reviewStatus: "SENT_TO_AUDIT", updatedAt: { lte: threshold } },
+                { reviewStatus: "RETURNED", updatedAt: { lte: returnedThreshold } },
             ],
         },
     });
     for (const update of updates) {
         context.summary.processedCount += 1;
-        const returned = update.status === "RETURNED";
+        const returned = update.reviewStatus === "RETURNED";
+        const observation = update.actionPlan.observation;
+        const code = `${observation.auditReport.reportNumber} / OBS-${String(observation.observationNumber).padStart(3, "0")}`;
         const recipients = uniqueRecipients(returned
-            ? [update.submittedByUser, update.observation.responsibleUser, update.commitment?.responsibleUser]
-            : context.parameters.notify_audit_team ? auditRecipients : []);
+            ? [update.submittedByUser, update.actionPlan.responsibleUser]
+            : context.parameters.notify_audit_team
+                ? auditRecipients
+                : []);
         const event = {
             actionRequired: returned
                 ? "Corrija el avance devuelto y envíelo nuevamente a revisión."
                 : "Revise y atienda el avance pendiente en la bandeja de Auditoría.",
-            areaName: update.observation.area.name,
-            code: update.observation.code,
+            areaName: update.actionPlan.observationArea.area.name,
+            code,
             currentStatus: returned ? "Devuelto" : "Enviado a Auditoría",
             description: returned
-                ? `El avance de ${update.observation.code} fue devuelto para corrección.`
-                : `El avance de ${update.observation.code} lleva más de ${context.parameters.pending_review_reminder_hours} horas pendiente de revisión.`,
-            dueDate: dateLabel(update.observation.dueDate),
+                ? `La evaluación de ${code} fue devuelta para corrección.`
+                : `La evaluación de ${code} lleva más de ${context.parameters.pending_review_reminder_hours} horas pendiente de revisión.`,
+            dueDate: dateLabel(update.actionPlan.currentDueDate),
             entityId: update.id,
             entityType: "progress_update",
             eventType: returned
                 ? AUTOMATIC_NOTIFICATION_TYPES.progressCorrectionPending
                 : AUTOMATIC_NOTIFICATION_TYPES.pendingProgressReview,
-            observationId: update.observation.id,
+            observationId: observation.id,
             priority: NotificationPriority.HIGH,
-            targetUrl: `${env.FRONTEND_URL}/avances-evidencias?observacion=${update.observation.code}`,
-            title: returned ? "Avance devuelto para corrección" : "Avance pendiente de revisión",
+            targetUrl: `${env.FRONTEND_URL}/observaciones/${observation.id}`,
+            title: returned
+                ? "Avance devuelto para corrección"
+                : "Avance pendiente de revisión",
         };
         for (const recipient of recipients) {
             try {
@@ -520,14 +506,46 @@ const processPendingProgress = async (context, auditRecipients, now) => {
     }
 };
 const processPendingExtensions = async (context, auditRecipients, now) => {
-    const threshold = new Date(now.getTime() - context.parameters.pending_extension_reminder_hours * 3_600_000);
+    const threshold = new Date(now.getTime() -
+        context.parameters.pending_extension_reminder_hours * 3_600_000);
     const requests = await prisma.deadlineExtensionRequest.findMany({
         select: {
-            area: { select: { managerUser: { select: userSelect }, name: true } },
-            commitment: { select: { title: true } },
+            observationArea: {
+                select: {
+                    area: { select: { managerUser: { select: userSelect }, name: true } },
+                },
+            },
+            actionPlan: {
+                select: {
+                    observation: {
+                        select: {
+                            auditReport: { select: { reportNumber: true } },
+                            id: true,
+                            observationNumber: true,
+                            title: true,
+                        },
+                    },
+                    title: true,
+                },
+            },
             id: true,
-            observation: { select: { code: true, dueDate: true, id: true, title: true } },
-            requestedDueDate: true,
+            observation: {
+                select: {
+                    auditReport: { select: { reportNumber: true } },
+                    areaAssignments: {
+                        select: {
+                            area: {
+                                select: { managerUser: { select: userSelect }, name: true },
+                            },
+                        },
+                        take: 1,
+                    },
+                    id: true,
+                    observationNumber: true,
+                    title: true,
+                },
+            },
+            proposedDueDate: true,
             status: true,
             updatedAt: true,
         },
@@ -540,9 +558,15 @@ const processPendingExtensions = async (context, auditRecipients, now) => {
     for (const request of requests) {
         context.summary.processedCount += 1;
         const managerReview = request.status === "SENT_TO_MANAGER";
+        const observation = request.observation ?? request.actionPlan?.observation;
+        if (!observation)
+            continue;
+        const area = request.observationArea?.area ??
+            request.observation?.areaAssignments[0]?.area;
+        const code = `${observation.auditReport.reportNumber} / OBS-${String(observation.observationNumber).padStart(3, "0")}`;
         const recipients = uniqueRecipients(managerReview
             ? context.parameters.notify_area_manager
-                ? [request.area.managerUser]
+                ? [area?.managerUser ?? null]
                 : []
             : context.parameters.notify_audit_team
                 ? auditRecipients
@@ -551,20 +575,24 @@ const processPendingExtensions = async (context, auditRecipients, now) => {
             actionRequired: managerReview
                 ? "Revise la solicitud y apruebe o rechace la ampliación propuesta."
                 : "Revise la solicitud de ampliación en la bandeja de Auditoría.",
-            areaName: request.area.name,
-            code: request.observation.code,
-            currentStatus: managerReview ? "Pendiente de Gerencia" : "Pendiente de Auditoría",
-            description: `La ampliación de plazo para ${request.commitment?.title ?? request.observation.title} lleva más de ${context.parameters.pending_extension_reminder_hours} horas pendiente.`,
-            dueDate: dateLabel(request.requestedDueDate),
+            areaName: area?.name ?? "Sin área",
+            code,
+            currentStatus: managerReview
+                ? "Pendiente de Gerencia"
+                : "Pendiente de Auditoría",
+            description: `La ampliación de plazo para ${request.actionPlan?.title ?? observation.title} lleva más de ${context.parameters.pending_extension_reminder_hours} horas pendiente.`,
+            dueDate: dateLabel(request.proposedDueDate),
             entityId: request.id,
             entityType: "deadline_extension_request",
             eventType: managerReview
                 ? AUTOMATIC_NOTIFICATION_TYPES.pendingExtensionManagerReview
                 : AUTOMATIC_NOTIFICATION_TYPES.pendingExtensionAuditReview,
-            observationId: request.observation.id,
+            observationId: observation.id,
             priority: NotificationPriority.HIGH,
             targetUrl: `${env.FRONTEND_URL}/ampliaciones-plazo/${request.id}`,
-            title: managerReview ? "Ampliación pendiente de aprobación" : "Ampliación pendiente en Auditoría",
+            title: managerReview
+                ? "Ampliación pendiente de aprobación"
+                : "Ampliación pendiente en Auditoría",
         };
         for (const recipient of recipients) {
             try {
@@ -581,7 +609,7 @@ const finalizeExecution = async (executionId, context, status, error) => {
         data: {
             detailsJson: {
                 failures: context.summary.failures.slice(0, 100),
-                processedCommitments: context.summary.processedCommitments,
+                processedActionPlans: context.summary.processedActionPlans,
                 processedObservations: context.summary.processedObservations,
             },
             errorMessage: error ?? null,
@@ -604,7 +632,9 @@ export const deadlineMonitorService = {
                 startedAt,
                 status: ScheduledJobExecutionStatus.RUNNING,
                 triggeredBy: options.triggeredBy,
-                ...(options.triggeredByUserId ? { triggeredByUserId: options.triggeredByUserId } : {}),
+                ...(options.triggeredByUserId
+                    ? { triggeredByUserId: options.triggeredByUserId }
+                    : {}),
             },
         });
         const summary = {
@@ -614,7 +644,7 @@ export const deadlineMonitorService = {
             finishedAt: "",
             jobName: DEADLINE_MONITOR_JOB_NAME,
             notificationsCreated: 0,
-            processedCommitments: 0,
+            processedActionPlans: 0,
             processedCount: 0,
             processedObservations: 0,
             startedAt: startedAt.toISOString(),
@@ -635,37 +665,38 @@ export const deadlineMonitorService = {
                 return summary;
             }
             const today = utcDayStart(startedAt);
-            const reminderEnd = new Date(today.getTime() + context.parameters.reminder_days_before_due * 86_400_000);
+            const reminderEnd = new Date(today.getTime() +
+                context.parameters.reminder_days_before_due * 86_400_000);
             const observations = await prisma.observation.findMany({
                 select: observationSelect,
                 where: {
                     deletedAt: null,
-                    dueDate: { lte: reminderEnd },
+                    currentDueDate: { lte: reminderEnd },
                     status: { isFinal: false },
                 },
             });
-            const commitments = await prisma.commitment.findMany({
-                select: commitmentSelect,
+            const actionPlans = await prisma.actionPlan.findMany({
+                select: actionPlanSelect,
                 where: {
                     deletedAt: null,
-                    dueDate: { lte: reminderEnd },
+                    currentDueDate: { lte: reminderEnd },
                     progressPercent: { lt: 100 },
-                    status: { not: "COMPLETED" },
+                    status: { not: "CONCLUDED" },
                 },
             });
             const auditRecipients = await getAuditRecipients();
-            const overdueObservations = observations.filter((item) => item.dueDate < today);
-            const overdueCommitments = commitments.filter((item) => item.dueDate < today);
-            await updateOverdueStatuses(context, overdueObservations, overdueCommitments);
+            const overdueObservations = observations.filter((item) => item.currentDueDate < today);
+            const overdueActionPlans = actionPlans.filter((item) => item.currentDueDate < today);
+            await recordOverdueActivity(context, overdueObservations, overdueActionPlans);
             for (const observation of observations) {
                 summary.processedCount += 1;
                 summary.processedObservations += 1;
                 await notifyObservation(context, observation, auditRecipients, startedAt);
             }
-            for (const commitment of commitments) {
+            for (const actionPlan of actionPlans) {
                 summary.processedCount += 1;
-                summary.processedCommitments += 1;
-                await notifyCommitment(context, commitment, auditRecipients, startedAt);
+                summary.processedActionPlans += 1;
+                await notifyActionPlan(context, actionPlan, auditRecipients, startedAt);
             }
             await processPendingProgress(context, auditRecipients, startedAt);
             await processPendingExtensions(context, auditRecipients, startedAt);
@@ -678,13 +709,17 @@ export const deadlineMonitorService = {
             summary.status = "FAILED";
             summary.finishedAt = new Date().toISOString();
             await finalizeExecution(execution.id, context, "FAILED", errorMessage(error));
-            logger.error("Deadline monitor failed.", { message: errorMessage(error) });
+            logger.error("Deadline monitor failed.", {
+                message: errorMessage(error),
+            });
             return summary;
         }
     },
     async listExecutions(page, perPage) {
         const [total, data] = await prisma.$transaction([
-            prisma.scheduledJobExecution.count({ where: { jobName: DEADLINE_MONITOR_JOB_NAME } }),
+            prisma.scheduledJobExecution.count({
+                where: { jobName: DEADLINE_MONITOR_JOB_NAME },
+            }),
             prisma.scheduledJobExecution.findMany({
                 orderBy: { startedAt: "desc" },
                 skip: (page - 1) * perPage,

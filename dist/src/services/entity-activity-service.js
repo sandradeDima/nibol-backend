@@ -3,13 +3,13 @@ import { prisma } from "../utils/prisma.js";
 import { AppError } from "../utils/app-error.js";
 export const ACTIVITY_ENTITY_TYPES = {
     comment: "COMMENT",
-    commitment: "COMMITMENT",
+    actionPlan: "ACTION_PLAN",
     evidence: "EVIDENCE",
     extensionRequest: "EXTENSION_REQUEST",
     notification: "NOTIFICATION",
     observation: "OBSERVATION",
     plan: "REMEDIATION_PLAN",
-    progressUpdate: "PROGRESS_UPDATE",
+    progressEvaluation: "PROGRESS_EVALUATION",
     system: "SYSTEM",
 };
 export const ACTIVITY_VISIBILITIES = {
@@ -29,10 +29,14 @@ const safeValue = (value, key) => {
         return value.toISOString();
     if (typeof value === "bigint")
         return value.toString();
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean")
+    if (typeof value === "string" ||
+        typeof value === "number" ||
+        typeof value === "boolean")
         return value;
     if (Array.isArray(value))
-        return value.map((item) => safeValue(item)).filter((item) => item !== null);
+        return value
+            .map((item) => safeValue(item))
+            .filter((item) => item !== null);
     if (typeof value === "object") {
         const result = {};
         for (const [entryKey, entryValue] of Object.entries(value)) {
@@ -58,23 +62,45 @@ const activityScope = (access) => {
         return {};
     const observationScope = {
         OR: [
-            { responsibleUserId: access.userId },
             { auditorUserId: access.userId },
-            { area: { managerUserId: access.userId } },
-            { commitments: { some: { responsibleUserId: access.userId } } },
+            {
+                areaAssignments: {
+                    some: {
+                        OR: [
+                            { areaResponsibleUserId: access.userId },
+                            { processOwnerUserId: access.userId },
+                            { area: { managerUserId: access.userId } },
+                        ],
+                    },
+                },
+            },
+            { actionPlans: { some: { responsibleUserId: access.userId } } },
             { remediationPlans: { some: { ownerUserId: access.userId } } },
         ],
     };
     if (isAuditRole(access)) {
         return {
-            visibility: { in: [ACTIVITY_VISIBILITIES.allAuthorized, ACTIVITY_VISIBILITIES.areaVisible, ACTIVITY_VISIBILITIES.auditOnly] },
+            visibility: {
+                in: [
+                    ACTIVITY_VISIBILITIES.allAuthorized,
+                    ACTIVITY_VISIBILITIES.areaVisible,
+                    ACTIVITY_VISIBILITIES.auditOnly,
+                ],
+            },
             OR: [{ observationId: null }, { observation: observationScope }],
         };
     }
     return {
-        visibility: { in: [ACTIVITY_VISIBILITIES.allAuthorized, ACTIVITY_VISIBILITIES.areaVisible] },
+        visibility: {
+            in: [
+                ACTIVITY_VISIBILITIES.allAuthorized,
+                ACTIVITY_VISIBILITIES.areaVisible,
+            ],
+        },
         observation: isManagerRole(access)
-            ? { area: { managerUserId: access.userId } }
+            ? {
+                areaAssignments: { some: { area: { managerUserId: access.userId } } },
+            }
             : observationScope,
     };
 };
@@ -92,23 +118,37 @@ const dateFilter = (dateFrom, dateTo) => {
 const buildWhere = (query, access) => {
     const observationFilters = [];
     if (query.areaId)
-        observationFilters.push({ observation: { areaId: query.areaId } });
+        observationFilters.push({
+            observation: { areaAssignments: { some: { areaId: query.areaId } } },
+        });
     if (query.observationCode)
-        observationFilters.push({ observation: { code: { contains: query.observationCode } } });
+        observationFilters.push({
+            observation: {
+                auditReport: { reportNumber: { contains: query.observationCode } },
+            },
+        });
     return {
         ...activityScope(access),
         ...(query.activityType ? { activityType: query.activityType } : {}),
         ...(query.actorUserId ? { actorUserId: query.actorUserId } : {}),
-        ...(query.dateFrom || query.dateTo ? { createdAt: dateFilter(query.dateFrom, query.dateTo) } : {}),
+        ...(query.dateFrom || query.dateTo
+            ? { createdAt: dateFilter(query.dateFrom, query.dateTo) }
+            : {}),
         ...(query.entityType ? { entityType: query.entityType } : {}),
         ...(query.entityId ? { entityId: query.entityId } : {}),
         ...(query.observationId ? { observationId: query.observationId } : {}),
         ...(query.origin
-            ? { actorType: query.origin === "SYSTEM" ? { in: ["SYSTEM", "CRON"] } : "USER" }
+            ? {
+                actorType: query.origin === "SYSTEM" ? { in: ["SYSTEM", "CRON"] } : "USER",
+            }
             : {}),
         ...(observationFilters.length ? { AND: observationFilters } : {}),
         ...(query.role
-            ? { actorUser: { userRoles: { some: { role: { name: { contains: query.role } } } } } }
+            ? {
+                actorUser: {
+                    userRoles: { some: { role: { name: { contains: query.role } } } },
+                },
+            }
             : {}),
         ...(query.search
             ? {
@@ -116,7 +156,11 @@ const buildWhere = (query, access) => {
                     { title: { contains: query.search } },
                     { description: { contains: query.search } },
                     { action: { contains: query.search } },
-                    { observation: { code: { contains: query.search } } },
+                    {
+                        observation: {
+                            auditReport: { reportNumber: { contains: query.search } },
+                        },
+                    },
                     { actorUser: { name: { contains: query.search } } },
                 ],
             }
@@ -142,7 +186,17 @@ const activitySelect = {
     id: true,
     metadataJson: true,
     newDataJson: true,
-    observation: { select: { area: { select: { id: true, name: true } }, code: true, title: true } },
+    observation: {
+        select: {
+            areaAssignments: {
+                select: { area: { select: { id: true, name: true } } },
+                take: 1,
+            },
+            auditReport: { select: { reportNumber: true } },
+            observationNumber: true,
+            title: true,
+        },
+    },
     previousDataJson: true,
     relatedAuditLogId: true,
     targetUrl: true,
@@ -154,22 +208,40 @@ const resolveObservationId = async (entityType, entityId) => {
     if (normalized === "OBSERVATION")
         return entityId;
     if (normalized === "REMEDIATION_PLAN") {
-        return (await prisma.remediationPlan.findUnique({ where: { id: entityId }, select: { observationId: true } }))?.observationId ?? null;
+        return ((await prisma.remediationPlan.findUnique({
+            where: { id: entityId },
+            select: { observationId: true },
+        }))?.observationId ?? null);
     }
-    if (normalized === "COMMITMENT") {
-        return (await prisma.commitment.findUnique({ where: { id: entityId }, select: { observationId: true } }))?.observationId ?? null;
+    if (normalized === "ACTION_PLAN") {
+        return ((await prisma.actionPlan.findUnique({
+            where: { id: entityId },
+            select: { observationId: true },
+        }))?.observationId ?? null);
     }
-    if (normalized === "PROGRESS_UPDATE") {
-        return (await prisma.progressUpdate.findUnique({ where: { id: entityId }, select: { observationId: true } }))?.observationId ?? null;
+    if (normalized === "PROGRESS_EVALUATION") {
+        return ((await prisma.progressEvaluation.findUnique({
+            where: { id: entityId },
+            select: { actionPlan: { select: { observationId: true } } },
+        }))?.actionPlan.observationId ?? null);
     }
     if (normalized === "EVIDENCE") {
-        return (await prisma.evidenceFile.findUnique({ where: { id: entityId }, select: { observationId: true } }))?.observationId ?? null;
+        return ((await prisma.evidenceFile.findUnique({
+            where: { id: entityId },
+            select: { observationId: true },
+        }))?.observationId ?? null);
     }
     if (normalized === "COMMENT") {
-        return (await prisma.observationComment.findUnique({ where: { id: entityId }, select: { observationId: true } }))?.observationId ?? null;
+        return ((await prisma.observationComment.findUnique({
+            where: { id: entityId },
+            select: { observationId: true },
+        }))?.observationId ?? null);
     }
     if (normalized === "EXTENSION_REQUEST") {
-        return (await prisma.deadlineExtensionRequest.findUnique({ where: { id: entityId }, select: { observationId: true } }))?.observationId ?? null;
+        return ((await prisma.deadlineExtensionRequest.findUnique({
+            where: { id: entityId },
+            select: { observationId: true },
+        }))?.observationId ?? null);
     }
     return null;
 };
@@ -185,7 +257,7 @@ const mapActivity = (activity, includeTechnicalDetails) => ({
         }
         : null,
     actorType: activity.actorType,
-    area: activity.observation?.area ?? null,
+    area: activity.observation?.areaAssignments[0]?.area ?? null,
     createdAt: activity.createdAt.toISOString(),
     description: activity.description,
     entityId: includeTechnicalDetails ? activity.entityId : null,
@@ -194,10 +266,15 @@ const mapActivity = (activity, includeTechnicalDetails) => ({
     metadata: activity.metadataJson,
     newData: activity.newDataJson,
     observation: activity.observation
-        ? { code: activity.observation.code, title: activity.observation.title }
+        ? {
+            code: `${activity.observation.auditReport.reportNumber} / OBS-${String(activity.observation.observationNumber).padStart(3, "0")}`,
+            title: activity.observation.title,
+        }
         : null,
     previousData: activity.previousDataJson,
-    relatedAuditLogId: includeTechnicalDetails ? activity.relatedAuditLogId : null,
+    relatedAuditLogId: includeTechnicalDetails
+        ? activity.relatedAuditLogId
+        : null,
     targetUrl: activity.targetUrl,
     title: activity.title,
     visibility: activity.visibility,
@@ -205,27 +282,44 @@ const mapActivity = (activity, includeTechnicalDetails) => ({
 export const entityActivityService = {
     async create(input, options) {
         const db = options?.db ?? prisma;
-        const observationId = input.observationId ?? (await resolveObservationId(input.entityType, input.entityId));
+        const observationId = input.observationId ??
+            (await resolveObservationId(input.entityType, input.entityId));
         const data = {
             action: input.action,
             activityType: input.activityType,
             actorType: input.actorType ?? (input.actorUserId ? "USER" : "SYSTEM"),
-            ...(input.actorUserId ? { actorUser: { connect: { id: input.actorUserId } } } : {}),
-            ...(input.description !== undefined ? { description: input.description } : {}),
+            ...(input.actorUserId
+                ? { actorUser: { connect: { id: input.actorUserId } } }
+                : {}),
+            ...(input.description !== undefined
+                ? { description: input.description }
+                : {}),
             ...(input.dedupeKey !== undefined ? { dedupeKey: input.dedupeKey } : {}),
             entityId: input.entityId,
             entityType: input.entityType,
-            ...(input.metadata !== undefined ? { metadataJson: asJson(input.metadata) } : {}),
-            ...(input.newData !== undefined ? { newDataJson: asJson(input.newData) } : {}),
-            ...(observationId ? { observation: { connect: { id: observationId } } } : {}),
-            ...(input.previousData !== undefined ? { previousDataJson: asJson(input.previousData) } : {}),
-            ...(input.relatedAuditLogId ? { relatedAuditLogId: input.relatedAuditLogId } : {}),
+            ...(input.metadata !== undefined
+                ? { metadataJson: asJson(input.metadata) }
+                : {}),
+            ...(input.newData !== undefined
+                ? { newDataJson: asJson(input.newData) }
+                : {}),
+            ...(observationId
+                ? { observation: { connect: { id: observationId } } }
+                : {}),
+            ...(input.previousData !== undefined
+                ? { previousDataJson: asJson(input.previousData) }
+                : {}),
+            ...(input.relatedAuditLogId
+                ? { relatedAuditLogId: input.relatedAuditLogId }
+                : {}),
             ...(input.targetUrl !== undefined ? { targetUrl: input.targetUrl } : {}),
             title: input.title,
             visibility: input.visibility ?? ACTIVITY_VISIBILITIES.allAuthorized,
         };
         try {
-            await db.entityActivity.create({ data: data });
+            await db.entityActivity.create({
+                data: data,
+            });
         }
         catch (error) {
             if (error.code === "P2002" && input.dedupeKey)
@@ -236,7 +330,16 @@ export const entityActivityService = {
     async recordEntityChange(input) {
         return this.create({
             ...input,
-            metadata: input.metadata ?? { fieldLabels: { statusId: "Estado", riskLevelId: "Nivel de riesgo", dueDate: "Fecha de vencimiento", responsibleUserId: "Responsable", areaId: "Área", progressPercent: "Porcentaje de avance" } },
+            metadata: input.metadata ?? {
+                fieldLabels: {
+                    statusId: "Estado",
+                    riskLevelId: "Nivel de riesgo",
+                    dueDate: "Fecha de vencimiento",
+                    responsibleUserId: "Responsable",
+                    areaId: "Área",
+                    progressPercent: "Porcentaje de avance",
+                },
+            },
             newData: input.newData,
             previousData: input.previousData,
         });
@@ -276,12 +379,18 @@ export const entityActivityService = {
             item.activityType,
             item.action,
             item.description ?? item.title,
-            item.actor?.name ?? (item.actorType === "CRON" ? "Proceso automático" : "Sistema"),
+            item.actor?.name ??
+                (item.actorType === "CRON" ? "Proceso automático" : "Sistema"),
             item.actor?.roles?.join(", ") ?? "",
             item.area?.name ?? "",
             item.actorType,
-        ].map(escape).join(","));
-        return ["\uFEFFFecha,Hora,Código de observación,Entidad,Tipo de actividad,Acción,Descripción,Usuario,Rol,Área,Origen", ...rows].join("\n");
+        ]
+            .map(escape)
+            .join(","));
+        return [
+            "\uFEFFFecha,Hora,Código de observación,Entidad,Tipo de actividad,Acción,Descripción,Usuario,Rol,Área,Origen",
+            ...rows,
+        ].join("\n");
     },
 };
 //# sourceMappingURL=entity-activity-service.js.map

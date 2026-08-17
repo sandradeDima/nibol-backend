@@ -50,24 +50,29 @@ export const ModelName = {
     NotificationDelivery: 'NotificationDelivery',
     EntityActivity: 'EntityActivity',
     ScheduledJobExecution: 'ScheduledJobExecution',
+    ScheduledJobLock: 'ScheduledJobLock',
     ModuleRecord: 'ModuleRecord',
     ActivityLog: 'ActivityLog',
     AuditLog: 'AuditLog',
     RiskLevel: 'RiskLevel',
     ObservationStatus: 'ObservationStatus',
     Area: 'Area',
+    AuditReport: 'AuditReport',
+    ObservationDictionary: 'ObservationDictionary',
+    Risk: 'Risk',
     SystemParameter: 'SystemParameter',
     Catalog: 'Catalog',
     Observation: 'Observation',
-    ObservationAreaAssignment: 'ObservationAreaAssignment',
+    ObservationRisk: 'ObservationRisk',
+    ObservationArea: 'ObservationArea',
     RemediationPlan: 'RemediationPlan',
-    Commitment: 'Commitment',
+    ActionPlan: 'ActionPlan',
     DeadlineExtensionRequest: 'DeadlineExtensionRequest',
     DeadlineExtensionAttachment: 'DeadlineExtensionAttachment',
     Session: 'Session',
     Account: 'Account',
     Verification: 'Verification',
-    ProgressUpdate: 'ProgressUpdate',
+    ProgressEvaluation: 'ProgressEvaluation',
     EvidenceFile: 'EvidenceFile',
     ObservationComment: 'ObservationComment',
     ProgressReviewHistory: 'ProgressReviewHistory',
@@ -97,6 +102,7 @@ export const UserScalarFieldEnum = {
     email: 'email',
     password: 'password',
     avatar: 'avatar',
+    jobTitle: 'jobTitle',
     isActive: 'isActive',
     emailVerified: 'emailVerified',
     lastLoginAt: 'lastLoginAt',
@@ -229,6 +235,14 @@ export const ScheduledJobExecutionScalarFieldEnum = {
     triggeredByUserId: 'triggeredByUserId',
     createdAt: 'createdAt'
 };
+export const ScheduledJobLockScalarFieldEnum = {
+    jobName: 'jobName',
+    lockToken: 'lockToken',
+    acquiredAt: 'acquiredAt',
+    expiresAt: 'expiresAt',
+    createdAt: 'createdAt',
+    updatedAt: 'updatedAt'
+};
 export const ModuleRecordScalarFieldEnum = {
     id: 'id',
     moduleKey: 'moduleKey',
@@ -299,6 +313,32 @@ export const AreaScalarFieldEnum = {
     updatedAt: 'updatedAt',
     deletedAt: 'deletedAt'
 };
+export const AuditReportScalarFieldEnum = {
+    id: 'id',
+    reportNumber: 'reportNumber',
+    title: 'title',
+    reportDate: 'reportDate',
+    createdByUserId: 'createdByUserId',
+    createdAt: 'createdAt',
+    updatedAt: 'updatedAt',
+    deletedAt: 'deletedAt'
+};
+export const ObservationDictionaryScalarFieldEnum = {
+    id: 'id',
+    name: 'name',
+    description: 'description',
+    isActive: 'isActive',
+    createdAt: 'createdAt',
+    updatedAt: 'updatedAt'
+};
+export const RiskScalarFieldEnum = {
+    id: 'id',
+    name: 'name',
+    description: 'description',
+    isActive: 'isActive',
+    createdAt: 'createdAt',
+    updatedAt: 'updatedAt'
+};
 export const SystemParameterScalarFieldEnum = {
     id: 'id',
     key: 'key',
@@ -327,18 +367,17 @@ export const CatalogScalarFieldEnum = {
 };
 export const ObservationScalarFieldEnum = {
     id: 'id',
-    code: 'code',
+    auditReportId: 'auditReportId',
+    observationNumber: 'observationNumber',
+    mainObservationId: 'mainObservationId',
     title: 'title',
     description: 'description',
     auditRecommendation: 'auditRecommendation',
     riskLevelId: 'riskLevelId',
     statusId: 'statusId',
-    areaId: 'areaId',
-    responsibleUserId: 'responsibleUserId',
     auditorUserId: 'auditorUserId',
-    dueDate: 'dueDate',
-    detectedAt: 'detectedAt',
-    observationType: 'observationType',
+    originalDueDate: 'originalDueDate',
+    currentDueDate: 'currentDueDate',
     source: 'source',
     process: 'process',
     category: 'category',
@@ -348,12 +387,18 @@ export const ObservationScalarFieldEnum = {
     updatedAt: 'updatedAt',
     deletedAt: 'deletedAt'
 };
-export const ObservationAreaAssignmentScalarFieldEnum = {
+export const ObservationRiskScalarFieldEnum = {
+    id: 'id',
+    observationId: 'observationId',
+    riskId: 'riskId',
+    createdAt: 'createdAt'
+};
+export const ObservationAreaScalarFieldEnum = {
     id: 'id',
     observationId: 'observationId',
     areaId: 'areaId',
-    responsibleUserId: 'responsibleUserId',
-    roleInFinding: 'roleInFinding',
+    processOwnerUserId: 'processOwnerUserId',
+    areaResponsibleUserId: 'areaResponsibleUserId',
     createdAt: 'createdAt',
     updatedAt: 'updatedAt'
 };
@@ -375,16 +420,19 @@ export const RemediationPlanScalarFieldEnum = {
     createdByUserId: 'createdByUserId',
     createdAt: 'createdAt',
     updatedAt: 'updatedAt',
-    deletedAt: 'deletedAt'
+    deletedAt: 'deletedAt',
+    workflowInstanceId: 'workflowInstanceId'
 };
-export const CommitmentScalarFieldEnum = {
+export const ActionPlanScalarFieldEnum = {
     id: 'id',
     remediationPlanId: 'remediationPlanId',
     observationId: 'observationId',
+    observationAreaId: 'observationAreaId',
+    responsibleUserId: 'responsibleUserId',
     title: 'title',
     description: 'description',
-    responsibleUserId: 'responsibleUserId',
-    dueDate: 'dueDate',
+    originalDueDate: 'originalDueDate',
+    currentDueDate: 'currentDueDate',
     completedAt: 'completedAt',
     progressPercent: 'progressPercent',
     status: 'status',
@@ -395,12 +443,13 @@ export const CommitmentScalarFieldEnum = {
 };
 export const DeadlineExtensionRequestScalarFieldEnum = {
     id: 'id',
+    targetType: 'targetType',
     observationId: 'observationId',
-    commitmentId: 'commitmentId',
+    actionPlanId: 'actionPlanId',
+    observationAreaId: 'observationAreaId',
     requestedByUserId: 'requestedByUserId',
-    areaId: 'areaId',
-    currentDueDate: 'currentDueDate',
-    requestedDueDate: 'requestedDueDate',
+    previousDueDate: 'previousDueDate',
+    proposedDueDate: 'proposedDueDate',
     reason: 'reason',
     status: 'status',
     managerReviewerId: 'managerReviewerId',
@@ -412,7 +461,8 @@ export const DeadlineExtensionRequestScalarFieldEnum = {
     finalApprovedAt: 'finalApprovedAt',
     createdAt: 'createdAt',
     updatedAt: 'updatedAt',
-    deletedAt: 'deletedAt'
+    deletedAt: 'deletedAt',
+    workflowInstanceId: 'workflowInstanceId'
 };
 export const DeadlineExtensionAttachmentScalarFieldEnum = {
     id: 'id',
@@ -453,29 +503,30 @@ export const VerificationScalarFieldEnum = {
     createdAt: 'createdAt',
     updatedAt: 'updatedAt'
 };
-export const ProgressUpdateScalarFieldEnum = {
+export const ProgressEvaluationScalarFieldEnum = {
     id: 'id',
-    observationId: 'observationId',
-    remediationPlanId: 'remediationPlanId',
-    commitmentId: 'commitmentId',
+    actionPlanId: 'actionPlanId',
     submittedByUserId: 'submittedByUserId',
     type: 'type',
     progressPercent: 'progressPercent',
+    actionPlanStatus: 'actionPlanStatus',
     comment: 'comment',
-    status: 'status',
+    reviewStatus: 'reviewStatus',
     reviewedByUserId: 'reviewedByUserId',
+    submittedAt: 'submittedAt',
     reviewedAt: 'reviewedAt',
     reviewComment: 'reviewComment',
     createdAt: 'createdAt',
     updatedAt: 'updatedAt',
-    deletedAt: 'deletedAt'
+    deletedAt: 'deletedAt',
+    workflowInstanceId: 'workflowInstanceId'
 };
 export const EvidenceFileScalarFieldEnum = {
     id: 'id',
     observationId: 'observationId',
-    remediationPlanId: 'remediationPlanId',
-    commitmentId: 'commitmentId',
-    progressUpdateId: 'progressUpdateId',
+    context: 'context',
+    actionPlanId: 'actionPlanId',
+    progressEvaluationId: 'progressEvaluationId',
     uploadedByUserId: 'uploadedByUserId',
     originalName: 'originalName',
     storedName: 'storedName',
@@ -491,8 +542,8 @@ export const ObservationCommentScalarFieldEnum = {
     id: 'id',
     observationId: 'observationId',
     remediationPlanId: 'remediationPlanId',
-    commitmentId: 'commitmentId',
-    progressUpdateId: 'progressUpdateId',
+    actionPlanId: 'actionPlanId',
+    progressEvaluationId: 'progressEvaluationId',
     authorUserId: 'authorUserId',
     visibility: 'visibility',
     body: 'body',
@@ -502,7 +553,7 @@ export const ObservationCommentScalarFieldEnum = {
 };
 export const ProgressReviewHistoryScalarFieldEnum = {
     id: 'id',
-    progressUpdateId: 'progressUpdateId',
+    progressEvaluationId: 'progressEvaluationId',
     action: 'action',
     fromStatus: 'fromStatus',
     toStatus: 'toStatus',
@@ -584,6 +635,10 @@ export const WorkflowInstanceScalarFieldEnum = {
     startedById: 'startedById',
     startedAt: 'startedAt',
     completedAt: 'completedAt',
+    finalResult: 'finalResult',
+    runtimeErrorCode: 'runtimeErrorCode',
+    runtimeErrorMessage: 'runtimeErrorMessage',
+    lastExecutionAt: 'lastExecutionAt',
     contextJson: 'contextJson'
 };
 export const WorkflowTaskScalarFieldEnum = {
@@ -594,10 +649,14 @@ export const WorkflowTaskScalarFieldEnum = {
     assignedRoleId: 'assignedRoleId',
     assignedAreaId: 'assignedAreaId',
     status: 'status',
+    entrySequence: 'entrySequence',
     dueAt: 'dueAt',
     completedAt: 'completedAt',
     decision: 'decision',
     comments: 'comments',
+    assignmentSnapshotJson: 'assignmentSnapshotJson',
+    assignmentHistoryJson: 'assignmentHistoryJson',
+    evidenceReferencesJson: 'evidenceReferencesJson',
     createdAt: 'createdAt'
 };
 export const WorkflowTransitionLogScalarFieldEnum = {
@@ -608,6 +667,8 @@ export const WorkflowTransitionLogScalarFieldEnum = {
     triggerType: 'triggerType',
     performedById: 'performedById',
     decision: 'decision',
+    eventType: 'eventType',
+    detailsJson: 'detailsJson',
     contextSnapshotJson: 'contextSnapshotJson',
     createdAt: 'createdAt'
 };
@@ -622,7 +683,9 @@ export const WorkflowTimerScalarFieldEnum = {
     configurationJson: 'configurationJson',
     attempts: 'attempts',
     lastError: 'lastError',
-    createdAt: 'createdAt'
+    lastAttemptAt: 'lastAttemptAt',
+    createdAt: 'createdAt',
+    updatedAt: 'updatedAt'
 };
 export const SortOrder = {
     asc: 'asc',
@@ -644,7 +707,8 @@ export const UserOrderByRelevanceFieldEnum = {
     name: 'name',
     email: 'email',
     password: 'password',
-    avatar: 'avatar'
+    avatar: 'avatar',
+    jobTitle: 'jobTitle'
 };
 export const RoleOrderByRelevanceFieldEnum = {
     id: 'id',
@@ -734,6 +798,10 @@ export const ScheduledJobExecutionOrderByRelevanceFieldEnum = {
     errorMessage: 'errorMessage',
     triggeredByUserId: 'triggeredByUserId'
 };
+export const ScheduledJobLockOrderByRelevanceFieldEnum = {
+    jobName: 'jobName',
+    lockToken: 'lockToken'
+};
 export const ModuleRecordOrderByRelevanceFieldEnum = {
     id: 'id',
     moduleKey: 'moduleKey',
@@ -774,6 +842,22 @@ export const AreaOrderByRelevanceFieldEnum = {
     description: 'description',
     managerUserId: 'managerUserId'
 };
+export const AuditReportOrderByRelevanceFieldEnum = {
+    id: 'id',
+    reportNumber: 'reportNumber',
+    title: 'title',
+    createdByUserId: 'createdByUserId'
+};
+export const ObservationDictionaryOrderByRelevanceFieldEnum = {
+    id: 'id',
+    name: 'name',
+    description: 'description'
+};
+export const RiskOrderByRelevanceFieldEnum = {
+    id: 'id',
+    name: 'name',
+    description: 'description'
+};
 export const SystemParameterOrderByRelevanceFieldEnum = {
     id: 'id',
     key: 'key',
@@ -792,27 +876,30 @@ export const CatalogOrderByRelevanceFieldEnum = {
 };
 export const ObservationOrderByRelevanceFieldEnum = {
     id: 'id',
-    code: 'code',
+    auditReportId: 'auditReportId',
+    mainObservationId: 'mainObservationId',
     title: 'title',
     description: 'description',
     auditRecommendation: 'auditRecommendation',
     riskLevelId: 'riskLevelId',
     statusId: 'statusId',
-    areaId: 'areaId',
-    responsibleUserId: 'responsibleUserId',
     auditorUserId: 'auditorUserId',
-    observationType: 'observationType',
     source: 'source',
     process: 'process',
     category: 'category',
     currentStage: 'currentStage'
 };
-export const ObservationAreaAssignmentOrderByRelevanceFieldEnum = {
+export const ObservationRiskOrderByRelevanceFieldEnum = {
+    id: 'id',
+    observationId: 'observationId',
+    riskId: 'riskId'
+};
+export const ObservationAreaOrderByRelevanceFieldEnum = {
     id: 'id',
     observationId: 'observationId',
     areaId: 'areaId',
-    responsibleUserId: 'responsibleUserId',
-    roleInFinding: 'roleInFinding'
+    processOwnerUserId: 'processOwnerUserId',
+    areaResponsibleUserId: 'areaResponsibleUserId'
 };
 export const RemediationPlanOrderByRelevanceFieldEnum = {
     id: 'id',
@@ -825,27 +912,30 @@ export const RemediationPlanOrderByRelevanceFieldEnum = {
     approvedByUserId: 'approvedByUserId',
     returnedByUserId: 'returnedByUserId',
     returnReason: 'returnReason',
-    createdByUserId: 'createdByUserId'
+    createdByUserId: 'createdByUserId',
+    workflowInstanceId: 'workflowInstanceId'
 };
-export const CommitmentOrderByRelevanceFieldEnum = {
+export const ActionPlanOrderByRelevanceFieldEnum = {
     id: 'id',
     remediationPlanId: 'remediationPlanId',
     observationId: 'observationId',
+    observationAreaId: 'observationAreaId',
+    responsibleUserId: 'responsibleUserId',
     title: 'title',
-    description: 'description',
-    responsibleUserId: 'responsibleUserId'
+    description: 'description'
 };
 export const DeadlineExtensionRequestOrderByRelevanceFieldEnum = {
     id: 'id',
     observationId: 'observationId',
-    commitmentId: 'commitmentId',
+    actionPlanId: 'actionPlanId',
+    observationAreaId: 'observationAreaId',
     requestedByUserId: 'requestedByUserId',
-    areaId: 'areaId',
     reason: 'reason',
     managerReviewerId: 'managerReviewerId',
     managerComment: 'managerComment',
     auditReviewerId: 'auditReviewerId',
-    auditComment: 'auditComment'
+    auditComment: 'auditComment',
+    workflowInstanceId: 'workflowInstanceId'
 };
 export const DeadlineExtensionAttachmentOrderByRelevanceFieldEnum = {
     id: 'id',
@@ -875,22 +965,20 @@ export const VerificationOrderByRelevanceFieldEnum = {
     identifier: 'identifier',
     value: 'value'
 };
-export const ProgressUpdateOrderByRelevanceFieldEnum = {
+export const ProgressEvaluationOrderByRelevanceFieldEnum = {
     id: 'id',
-    observationId: 'observationId',
-    remediationPlanId: 'remediationPlanId',
-    commitmentId: 'commitmentId',
+    actionPlanId: 'actionPlanId',
     submittedByUserId: 'submittedByUserId',
     comment: 'comment',
     reviewedByUserId: 'reviewedByUserId',
-    reviewComment: 'reviewComment'
+    reviewComment: 'reviewComment',
+    workflowInstanceId: 'workflowInstanceId'
 };
 export const EvidenceFileOrderByRelevanceFieldEnum = {
     id: 'id',
     observationId: 'observationId',
-    remediationPlanId: 'remediationPlanId',
-    commitmentId: 'commitmentId',
-    progressUpdateId: 'progressUpdateId',
+    actionPlanId: 'actionPlanId',
+    progressEvaluationId: 'progressEvaluationId',
     uploadedByUserId: 'uploadedByUserId',
     originalName: 'originalName',
     storedName: 'storedName',
@@ -903,14 +991,14 @@ export const ObservationCommentOrderByRelevanceFieldEnum = {
     id: 'id',
     observationId: 'observationId',
     remediationPlanId: 'remediationPlanId',
-    commitmentId: 'commitmentId',
-    progressUpdateId: 'progressUpdateId',
+    actionPlanId: 'actionPlanId',
+    progressEvaluationId: 'progressEvaluationId',
     authorUserId: 'authorUserId',
     body: 'body'
 };
 export const ProgressReviewHistoryOrderByRelevanceFieldEnum = {
     id: 'id',
-    progressUpdateId: 'progressUpdateId',
+    progressEvaluationId: 'progressEvaluationId',
     userId: 'userId',
     comment: 'comment'
 };
@@ -964,7 +1052,10 @@ export const WorkflowInstanceOrderByRelevanceFieldEnum = {
     entityType: 'entityType',
     entityId: 'entityId',
     currentNodeId: 'currentNodeId',
-    startedById: 'startedById'
+    startedById: 'startedById',
+    finalResult: 'finalResult',
+    runtimeErrorCode: 'runtimeErrorCode',
+    runtimeErrorMessage: 'runtimeErrorMessage'
 };
 export const WorkflowTaskOrderByRelevanceFieldEnum = {
     id: 'id',
@@ -983,7 +1074,8 @@ export const WorkflowTransitionLogOrderByRelevanceFieldEnum = {
     targetNodeId: 'targetNodeId',
     triggerType: 'triggerType',
     performedById: 'performedById',
-    decision: 'decision'
+    decision: 'decision',
+    eventType: 'eventType'
 };
 export const WorkflowTimerOrderByRelevanceFieldEnum = {
     id: 'id',

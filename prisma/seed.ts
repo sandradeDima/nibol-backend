@@ -13,8 +13,10 @@ import {
   type AdminSeedConfig,
 } from "./admin-seed-config.js";
 import {
+  AUDIT_REPORT_PERMISSION_NAMES,
   AUDIT_WORKFLOW_PERMISSION_NAMES,
   ALL_PERMISSION_NAMES,
+  REPORT_PERMISSION_NAMES,
 } from "../src/permissions/definitions.js";
 
 const seedEnvSchema = z.object({
@@ -45,14 +47,12 @@ type SeedPermission = {
   description: string;
 };
 
-type SeedRiskLevelKey = "CRITICO" | "ALTO" | "MEDIO" | "BAJO";
+type SeedRiskLevelKey = "ALTO" | "MEDIO" | "BAJO";
 type SeedObservationStatusKey =
-  | "PENDIENTE"
-  | "EN_PROCESO"
-  | "EN_REVISION"
-  | "CERRADA"
-  | "VENCIDA"
-  | "RECHAZADA";
+  | "NO_INICIADO"
+  | "INICIADO"
+  | "CON_AVANCE"
+  | "CONCLUIDO";
 type SeedAreaKey =
   | "technology"
   | "operations"
@@ -138,36 +138,28 @@ const roles: SeedRole[] = [
 
 const riskLevels: SeedRiskLevel[] = [
   {
-    colorToken: "critical",
-    defaultDeadlineDays: 15,
-    description: "Observaciones con impacto severo y atención inmediata.",
-    key: "CRITICO",
-    name: "Crítico",
-    severityOrder: 1,
-  },
-  {
     colorToken: "high",
-    defaultDeadlineDays: 30,
+    defaultDeadlineDays: 90,
     description: "Observaciones de alta prioridad con impacto material.",
     key: "ALTO",
     name: "Alto",
-    severityOrder: 2,
+    severityOrder: 1,
   },
   {
     colorToken: "medium",
-    defaultDeadlineDays: 60,
+    defaultDeadlineDays: 120,
     description: "Observaciones relevantes con seguimiento programado.",
     key: "MEDIO",
     name: "Medio",
-    severityOrder: 3,
+    severityOrder: 2,
   },
   {
     colorToken: "low",
-    defaultDeadlineDays: 90,
+    defaultDeadlineDays: 180,
     description: "Observaciones de menor criticidad y ejecución gradual.",
     key: "BAJO",
     name: "Bajo",
-    severityOrder: 4,
+    severityOrder: 3,
   },
 ];
 
@@ -177,8 +169,8 @@ const observationStatuses: SeedObservationStatus[] = [
     description: "Estado inicial para observaciones recién registradas.",
     isFinal: false,
     isInitial: true,
-    key: "PENDIENTE",
-    name: "Pendiente",
+    key: "NO_INICIADO",
+    name: "No iniciado",
     sortOrder: 10,
   },
   {
@@ -186,17 +178,17 @@ const observationStatuses: SeedObservationStatus[] = [
     description: "La observación está siendo atendida por el área responsable.",
     isFinal: false,
     isInitial: false,
-    key: "EN_PROCESO",
-    name: "En proceso",
+    key: "INICIADO",
+    name: "Iniciado",
     sortOrder: 20,
   },
   {
     countsAsOverdue: false,
-    description: "La observación cuenta con evidencia en revisión.",
+    description: "Uno o más planes de acción tienen avance aprobado.",
     isFinal: false,
     isInitial: false,
-    key: "EN_REVISION",
-    name: "En revisión",
+    key: "CON_AVANCE",
+    name: "Con avance",
     sortOrder: 30,
   },
   {
@@ -204,27 +196,9 @@ const observationStatuses: SeedObservationStatus[] = [
     description: "La observación fue cerrada y validada.",
     isFinal: true,
     isInitial: false,
-    key: "CERRADA",
-    name: "Cerrada",
+    key: "CONCLUIDO",
+    name: "Concluido",
     sortOrder: 40,
-  },
-  {
-    countsAsOverdue: true,
-    description: "La observación excedió la fecha límite comprometida.",
-    isFinal: false,
-    isInitial: false,
-    key: "VENCIDA",
-    name: "Vencida",
-    sortOrder: 50,
-  },
-  {
-    countsAsOverdue: false,
-    description: "La remediación fue rechazada y requiere ajustes.",
-    isFinal: true,
-    isInitial: false,
-    key: "RECHAZADA",
-    name: "Rechazada",
-    sortOrder: 60,
   },
 ];
 
@@ -262,6 +236,39 @@ const areas: SeedArea[] = [
     name: "Almacenes y Logística",
   },
 ];
+
+const demoUsers = [
+  {
+    email: "owner.finanzas@nibol.demo",
+    jobTitle: "Gerente de Finanzas",
+    name: "Ana Dueña Finanzas",
+  },
+  {
+    email: "responsable.finanzas@nibol.demo",
+    jobTitle: "Jefe de Tesorería",
+    name: "Bruno Responsable Finanzas",
+  },
+  {
+    email: "owner.tecnologia@nibol.demo",
+    jobTitle: "Gerente de Tecnología",
+    name: "Carla Dueña Tecnología",
+  },
+  {
+    email: "responsable.tecnologia@nibol.demo",
+    jobTitle: "Jefe de Seguridad",
+    name: "Diego Responsable Tecnología",
+  },
+  {
+    email: "owner.operaciones@nibol.demo",
+    jobTitle: "Gerente de Operaciones",
+    name: "Elena Dueña Operaciones",
+  },
+  {
+    email: "responsable.operaciones@nibol.demo",
+    jobTitle: "Jefe de Control Operativo",
+    name: "Fabio Responsable Operaciones",
+  },
+] as const;
 
 const systemParameters: SeedSystemParameter[] = [
   {
@@ -381,23 +388,13 @@ const systemParameters: SeedSystemParameter[] = [
   {
     active: true,
     description:
-      "Permite actualizar automáticamente el estado a vencido cuando el catálogo lo soporta.",
+      "Registra de forma idempotente la detección de vencimientos sin alterar el estado de negocio.",
     editable: true,
     group: "notificaciones_automaticas",
-    key: "overdue_status_auto_update_enabled",
-    name: "Actualización automática de estado vencido",
+    key: "overdue_activity_enabled",
+    name: "Trazabilidad automática de vencimientos",
     value: "true",
     valueType: "boolean",
-  },
-  {
-    active: true,
-    description: "Prefijo base para la numeración operativa de observaciones.",
-    editable: true,
-    group: "observaciones",
-    key: "default_observation_prefix",
-    name: "Prefijo por defecto de observaciones",
-    value: "OBS",
-    valueType: "string",
   },
   {
     active: true,
@@ -667,7 +664,13 @@ const requiredTables = [
   "system_parameters",
   "catalogs",
   "observations",
-  "observation_area_assignments",
+  "audit_reports",
+  "observation_dictionary",
+  "risks",
+  "observation_risks",
+  "observation_areas",
+  "action_plans",
+  "progress_evaluations",
 ] as const;
 
 type NamedIdRow = RowDataPacket & {
@@ -700,24 +703,6 @@ type UserRow = RowDataPacket & {
 
 const placeholders = (length: number): string => {
   return Array.from({ length }, () => "?").join(", ");
-};
-
-const toMysqlDateTime = (value: string): string => {
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    throw new Error(`Invalid ISO datetime value provided to seed: ${value}`);
-  }
-
-  const year = date.getUTCFullYear();
-  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(date.getUTCDate()).padStart(2, "0");
-  const hours = String(date.getUTCHours()).padStart(2, "0");
-  const minutes = String(date.getUTCMinutes()).padStart(2, "0");
-  const seconds = String(date.getUTCSeconds()).padStart(2, "0");
-  const milliseconds = String(date.getUTCMilliseconds()).padStart(3, "0");
-
-  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}.${milliseconds}`;
 };
 
 const assertTablesExist = async (
@@ -1168,7 +1153,11 @@ const seedAuditWorkflowPermissions = async (
   });
 
   for (const [, roleId] of auditRoles) {
-    for (const permissionName of AUDIT_WORKFLOW_PERMISSION_NAMES) {
+    for (const permissionName of [
+      ...AUDIT_WORKFLOW_PERMISSION_NAMES,
+      ...REPORT_PERMISSION_NAMES,
+      ...AUDIT_REPORT_PERMISSION_NAMES,
+    ]) {
       const permissionId = permissionMap.get(permissionName);
 
       if (!permissionId) {
@@ -1310,6 +1299,38 @@ const seedAdminAccount = async (
   );
 };
 
+const seedDemoUsers = async (
+  connection: Awaited<ReturnType<typeof createConnection>>,
+  roleMap: Map<string, string>,
+): Promise<string[]> => {
+  const roleId = roleMap.get("Non Admin");
+  if (!roleId)
+    throw new Error("Non Admin role not found before seeding demo users.");
+
+  const userIds: string[] = [];
+  for (const user of demoUsers) {
+    const userId = uuidv5(`demo-user:${user.email}`, SEED_NAMESPACE);
+    userIds.push(userId);
+    await connection.execute(
+      `INSERT INTO users (
+        id, name, email, password, avatar, job_title, is_active, email_verified,
+        last_login_at, created_at, updated_at, deleted_at
+      ) VALUES (?, ?, ?, NULL, NULL, ?, true, true, NULL, NOW(3), NOW(3), NULL)
+      ON DUPLICATE KEY UPDATE
+        name = VALUES(name), job_title = VALUES(job_title), is_active = true,
+        email_verified = true, deleted_at = NULL, updated_at = NOW(3)`,
+      [userId, user.name, user.email, user.jobTitle],
+    );
+    await connection.execute(
+      `INSERT INTO user_roles (id, user_id, role_id, created_at, updated_at)
+       VALUES (?, ?, ?, NOW(3), NOW(3))
+       ON DUPLICATE KEY UPDATE updated_at = NOW(3)`,
+      [uuidv5(`user-role:${userId}:${roleId}`, SEED_NAMESPACE), userId, roleId],
+    );
+  }
+  return userIds;
+};
+
 const seedDefaultSettings = async (
   connection: Awaited<ReturnType<typeof createConnection>>,
 ): Promise<void> => {
@@ -1361,6 +1382,7 @@ const seedSampleObservationsIfEmpty = async (
   options: {
     adminUserId: string;
     areaMap: Map<SeedAreaKey, string>;
+    demoUserIds: string[];
     riskLevelMap: Map<SeedRiskLevelKey, string>;
     statusMap: Map<SeedObservationStatusKey, string>;
   },
@@ -1376,209 +1398,293 @@ const seedSampleObservationsIfEmpty = async (
   if ((countRows[0]?.total ?? 0) > 0) {
     return 0;
   }
+  if (options.demoUserIds.length < 6) {
+    throw new Error("Six demo users are required for the multi-area sample.");
+  }
+
+  const auditReportId = uuidv5("audit-report:AI-2026-004", SEED_NAMESPACE);
+  const secondAuditReportId = uuidv5(
+    "audit-report:AI-2026-005",
+    SEED_NAMESPACE,
+  );
+  const dictionaryId = uuidv5(
+    "observation-dictionary:control-interno",
+    SEED_NAMESPACE,
+  );
+  const riskIds = {
+    access: uuidv5("risk:acceso-no-autorizado", SEED_NAMESPACE),
+    continuity: uuidv5("risk:continuidad-operativa", SEED_NAMESPACE),
+    financial: uuidv5("risk:informacion-financiera-incorrecta", SEED_NAMESPACE),
+  };
+
+  await connection.execute(
+    `INSERT INTO audit_reports (id, report_number, title, report_date, created_by_user_id, created_at, updated_at, deleted_at)
+     VALUES (?, ?, ?, ?, ?, NOW(3), NOW(3), NULL)`,
+    [
+      auditReportId,
+      "AI-2026-004",
+      "Auditoría integral de procesos críticos",
+      "2026-05-15",
+      options.adminUserId,
+    ],
+  );
+  await connection.execute(
+    `INSERT INTO observation_dictionary (id, name, description, is_active, created_at, updated_at)
+     VALUES (?, ?, ?, true, NOW(3), NOW(3))`,
+    [
+      dictionaryId,
+      "Debilidad de control interno",
+      "Diseño o ejecución insuficiente de un control clave.",
+    ],
+  );
+  await connection.execute(
+    `INSERT INTO audit_reports (id, report_number, title, report_date, created_by_user_id, created_at, updated_at, deleted_at)
+     VALUES (?, ?, ?, ?, ?, NOW(3), NOW(3), NULL)`,
+    [
+      secondAuditReportId,
+      "AI-2026-005",
+      "Auditoría de inventarios y continuidad",
+      "2026-06-01",
+      options.adminUserId,
+    ],
+  );
+
+  for (const [key, id, name] of [
+    ["access", riskIds.access, "Acceso no autorizado"],
+    [
+      "continuity",
+      riskIds.continuity,
+      "Interrupción de la continuidad operativa",
+    ],
+    ["financial", riskIds.financial, "Información financiera incorrecta"],
+  ] as const) {
+    await connection.execute(
+      `INSERT INTO risks (id, name, description, is_active, created_at, updated_at)
+       VALUES (?, ?, ?, true, NOW(3), NOW(3))`,
+      [id, name, `Riesgo de referencia ${key} para datos demostrativos.`],
+    );
+  }
 
   const sampleObservations = [
     {
-      additionalAreaKeys: ["operations"] as const,
-      auditRecommendation:
-        "Formalizar la segregación de funciones privilegiadas y evidenciar revisiones mensuales de accesos.",
-      category: "Controles de TI",
-      code: "OBS-2026-001",
-      currentStage: "Registro inicial",
-      description:
-        "Se identificó uso compartido de credenciales administrativas en servidores críticos sin trazabilidad individual.",
-      detectedAt: "2026-06-10T09:00:00.000Z",
-      dueDate: "2026-07-15T23:59:59.000Z",
-      observationType: "Hallazgo",
-      primaryAreaKey: "technology" as const,
-      process: "Gestión de accesos",
-      progressPercent: 10,
-      responsibleUserId: options.adminUserId,
-      riskLevelKey: "CRITICO" as const,
-      roleInFinding: "Área de apoyo",
-      source: "Auditoría interna",
-      statusKey: "PENDIENTE" as const,
+      auditReportId,
+      reportNumber: "AI-2026-004",
+      number: 1,
       title: "Segregación insuficiente de accesos privilegiados",
+      description:
+        "Se identificó uso compartido de credenciales administrativas sin trazabilidad individual.",
+      recommendation:
+        "Formalizar la segregación de funciones y evidenciar revisiones mensuales.",
+      riskLevelKey: "ALTO" as const,
+      statusKey: "CON_AVANCE" as const,
+      originalDueDate: "2026-08-13",
+      currentDueDate: "2026-08-13",
+      progressPercent: 45,
+      currentStage: "Ejecución de planes de acción",
+      areaKeys: ["finance", "technology", "operations"] as const,
+      riskIds: [riskIds.access, riskIds.continuity],
     },
     {
-      additionalAreaKeys: ["commercial"] as const,
-      auditRecommendation:
-        "Diseñar un calendario de conciliaciones con responsables definidos y seguimiento semanal hasta su cierre.",
-      category: "Control financiero",
-      code: "OBS-2026-002",
-      currentStage: "Plan de acción aprobado",
-      description:
-        "Se observaron conciliaciones bancarias pendientes en dos cuentas operativas con más de 30 días de rezago.",
-      detectedAt: "2026-05-22T10:30:00.000Z",
-      dueDate: "2026-07-28T23:59:59.000Z",
-      observationType: "Hallazgo",
-      primaryAreaKey: "finance" as const,
-      process: "Tesorería",
-      progressPercent: 45,
-      responsibleUserId: options.adminUserId,
-      riskLevelKey: "ALTO" as const,
-      roleInFinding: "Área impactada",
-      source: "Revisión corporativa",
-      statusKey: "EN_PROCESO" as const,
+      auditReportId,
+      reportNumber: "AI-2026-004",
+      number: 2,
       title: "Conciliaciones bancarias fuera de plazo",
-    },
-    {
-      additionalAreaKeys: ["technology"] as const,
-      auditRecommendation:
-        "Actualizar la matriz de inventario y establecer validaciones cruzadas entre almacenes y sistema transaccional.",
-      category: "Inventarios",
-      code: "OBS-2026-003",
-      currentStage: "Validación de evidencia",
       description:
-        "El conteo selectivo de inventarios mostró diferencias entre existencia física y sistema en materiales de alta rotación.",
-      detectedAt: "2026-05-30T08:15:00.000Z",
-      dueDate: "2026-07-08T23:59:59.000Z",
-      observationType: "Hallazgo",
-      primaryAreaKey: "warehouse" as const,
-      process: "Control de inventarios",
-      progressPercent: 70,
-      responsibleUserId: null,
+        "Existen conciliaciones pendientes en cuentas operativas con más de treinta días de rezago.",
+      recommendation:
+        "Definir responsables y ejecutar un seguimiento semanal hasta su cierre.",
       riskLevelKey: "MEDIO" as const,
-      roleInFinding: "Área de soporte sistémico",
-      source: "Auditoría de procesos",
-      statusKey: "EN_REVISION" as const,
+      statusKey: "CON_AVANCE" as const,
+      originalDueDate: "2026-09-12",
+      currentDueDate: "2026-09-12",
+      progressPercent: 75,
+      currentStage: "Evaluación de avance",
+      areaKeys: ["finance"] as const,
+      riskIds: [riskIds.financial],
+    },
+    {
+      auditReportId: secondAuditReportId,
+      reportNumber: "AI-2026-005",
+      number: 1,
       title: "Diferencias de inventario sin conciliación documentada",
-    },
-    {
-      additionalAreaKeys: ["finance"] as const,
-      auditRecommendation:
-        "Mantener la política documentada y anexar evidencia periódica de aprobación para preservar el control.",
-      category: "Gobierno comercial",
-      code: "OBS-2026-004",
-      currentStage: "Cierre validado",
       description:
-        "Se encontró falta de respaldo formal en descuentos extraordinarios aplicados durante campañas comerciales del trimestre anterior.",
-      detectedAt: "2026-04-11T14:00:00.000Z",
-      dueDate: "2026-06-20T23:59:59.000Z",
-      observationType: "Hallazgo",
-      primaryAreaKey: "commercial" as const,
-      process: "Aprobación de descuentos",
-      progressPercent: 100,
-      responsibleUserId: options.adminUserId,
+        "El conteo selectivo mostró diferencias entre existencia física y sistema.",
+      recommendation:
+        "Actualizar la matriz de inventario y documentar validaciones cruzadas.",
       riskLevelKey: "BAJO" as const,
-      roleInFinding: "Área revisora",
-      source: "Seguimiento de cierre",
-      statusKey: "CERRADA" as const,
-      title: "Respaldo incompleto de descuentos excepcionales",
-    },
-    {
-      additionalAreaKeys: ["finance", "operations"] as const,
-      auditRecommendation:
-        "Reformular el plan de remediación con hitos semanales y escalar el incumplimiento al comité de control interno.",
-      category: "Cumplimiento operativo",
-      code: "OBS-2026-005",
-      currentStage: "Compromiso vencido",
-      description:
-        "Persisten debilidades en la documentación de cierres operativos diarios y no se completó el plan comprometido.",
-      detectedAt: "2026-05-05T11:20:00.000Z",
-      dueDate: "2026-06-15T23:59:59.000Z",
-      observationType: "Hallazgo",
-      primaryAreaKey: "operations" as const,
-      process: "Cierre operativo diario",
-      progressPercent: 45,
-      responsibleUserId: options.adminUserId,
-      riskLevelKey: "ALTO" as const,
-      roleInFinding: "Área co-responsable",
-      source: "Comité de riesgos",
-      statusKey: "VENCIDA" as const,
-      title: "Plan de remediación operativo vencido sin cierre",
+      statusKey: "NO_INICIADO" as const,
+      originalDueDate: "2026-11-28",
+      currentDueDate: "2026-11-28",
+      progressPercent: 0,
+      currentStage: "Asignación de responsables",
+      areaKeys: ["warehouse", "technology"] as const,
+      riskIds: [riskIds.continuity],
     },
   ];
 
   for (const sample of sampleObservations) {
-    const observationId = uuidv5(`observation:${sample.code}`, SEED_NAMESPACE);
+    const displayCode = `${sample.reportNumber}-${sample.number}`;
+    const observationId = uuidv5(`observation:${displayCode}`, SEED_NAMESPACE);
     const riskLevelId = options.riskLevelMap.get(sample.riskLevelKey);
     const statusId = options.statusMap.get(sample.statusKey);
-    const primaryAreaId = options.areaMap.get(sample.primaryAreaKey);
 
-    if (!riskLevelId || !statusId || !primaryAreaId) {
+    if (!riskLevelId || !statusId) {
       throw new Error(
-        `Missing catalog references while seeding ${sample.code}.`,
+        `Missing catalog references while seeding ${displayCode}.`,
       );
     }
 
     await connection.execute(
-      `
-        INSERT INTO observations (
-          id,
-          code,
-          title,
-          description,
-          audit_recommendation,
-          risk_level_id,
-          status_id,
-          area_id,
-          responsible_user_id,
-          auditor_user_id,
-          due_date,
-          detected_at,
-          observation_type,
-          source,
-          process_name,
-          category,
-          progress_percent,
-          current_stage,
-          created_at,
-          updated_at,
-          deleted_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3), NOW(3), NULL)
-      `,
+      `INSERT INTO observations (
+        id, audit_report_id, observation_number, main_observation_id, title, description,
+        audit_recommendation, risk_level_id, status_id, auditor_user_id,
+        original_due_date, current_due_date, source, process_name, category,
+        progress_percent, current_stage, created_at, updated_at, deleted_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3), NOW(3), NULL)`,
       [
         observationId,
-        sample.code,
+        sample.auditReportId,
+        sample.number,
+        dictionaryId,
         sample.title,
         sample.description,
-        sample.auditRecommendation,
+        sample.recommendation,
         riskLevelId,
         statusId,
-        primaryAreaId,
-        sample.responsibleUserId,
         options.adminUserId,
-        toMysqlDateTime(sample.dueDate),
-        toMysqlDateTime(sample.detectedAt),
-        sample.observationType,
-        sample.source,
-        sample.process,
-        sample.category,
+        sample.originalDueDate,
+        sample.currentDueDate,
+        "Auditoría interna",
+        "Control interno",
+        "Hallazgo de auditoría",
         sample.progressPercent,
         sample.currentStage,
       ],
     );
 
-    for (const areaKey of sample.additionalAreaKeys) {
-      const areaId = options.areaMap.get(areaKey);
-
-      if (!areaId || areaId === primaryAreaId) {
-        continue;
-      }
-
+    for (const riskId of sample.riskIds) {
       await connection.execute(
-        `
-          INSERT INTO observation_area_assignments (
-            id,
-            observation_id,
-            area_id,
-            responsible_user_id,
-            role_in_finding,
-            created_at,
-            updated_at
-          )
-          VALUES (?, ?, ?, ?, ?, NOW(3), NOW(3))
-        `,
+        `INSERT INTO observation_risks (id, observation_id, risk_id, created_at) VALUES (?, ?, ?, NOW(3))`,
         [
-          uuidv5(`observation-area:${sample.code}:${areaKey}`, SEED_NAMESPACE),
+          uuidv5(`observation-risk:${displayCode}:${riskId}`, SEED_NAMESPACE),
           observationId,
-          areaId,
-          sample.responsibleUserId,
-          sample.roleInFinding,
+          riskId,
         ],
       );
+    }
+
+    for (const [areaIndex, areaKey] of sample.areaKeys.entries()) {
+      const areaId = options.areaMap.get(areaKey);
+      if (!areaId)
+        throw new Error(
+          `Missing area ${areaKey} while seeding ${displayCode}.`,
+        );
+      const observationAreaId = uuidv5(
+        `observation-area:${displayCode}:${areaKey}`,
+        SEED_NAMESPACE,
+      );
+      const processOwnerUserId =
+        options.demoUserIds[(areaIndex * 2) % options.demoUserIds.length]!;
+      const areaResponsibleUserId =
+        options.demoUserIds[(areaIndex * 2 + 1) % options.demoUserIds.length]!;
+      await connection.execute(
+        `INSERT INTO observation_areas (
+          id, observation_id, area_id, process_owner_user_id, area_responsible_user_id, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, NOW(3), NOW(3))`,
+        [
+          observationAreaId,
+          observationId,
+          areaId,
+          processOwnerUserId,
+          areaResponsibleUserId,
+        ],
+      );
+
+      if (sample.auditReportId === auditReportId && sample.number === 1) {
+        const actionPlanId = uuidv5(
+          `action-plan:${displayCode}:${areaKey}`,
+          SEED_NAMESPACE,
+        );
+        const actionOriginalDueDate =
+          areaIndex === 0 ? "2026-08-05" : "2026-08-20";
+        const actionCurrentDueDate =
+          areaIndex === 0 ? "2026-09-15" : "2026-08-20";
+        const progressPercent = [60, 25, 0][areaIndex] ?? 0;
+        const planStatus = ["WITH_PROGRESS", "STARTED", "NOT_STARTED"][
+          areaIndex
+        ]!;
+        const planTitles = [
+          "Conciliar saldos y formalizar revisión financiera",
+          "Individualizar cuentas privilegiadas",
+          "Actualizar protocolo de contingencia operativa",
+        ];
+        await connection.execute(
+          `INSERT INTO action_plans (
+            id, remediation_plan_id, observation_id, observation_area_id, responsible_user_id,
+            title, description, original_due_date, current_due_date, completed_at,
+            progress_percent, status, sort_order, created_at, updated_at, deleted_at
+          ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, NOW(3), NOW(3), NULL)`,
+          [
+            actionPlanId,
+            observationId,
+            observationAreaId,
+            areaResponsibleUserId,
+            planTitles[areaIndex] ?? "Ejecutar control correctivo",
+            "Ejecutar, documentar y validar el control asignado.",
+            actionOriginalDueDate,
+            actionCurrentDueDate,
+            progressPercent,
+            planStatus,
+            areaIndex,
+          ],
+        );
+
+        const evaluationId = uuidv5(
+          `progress-evaluation:${actionPlanId}`,
+          SEED_NAMESPACE,
+        );
+        await connection.execute(
+          `INSERT INTO progress_evaluations (
+            id, action_plan_id, submitted_by_user_id, type, progress_percent, action_plan_status,
+            comment, review_status, reviewed_by_user_id, submitted_at, reviewed_at,
+            review_comment, created_at, updated_at, deleted_at, workflow_instance_id
+          ) VALUES (?, ?, ?, 'ADVANCE', ?, ?, ?, 'APPROVED', ?, NOW(3), NOW(3), ?, NOW(3), NOW(3), NULL, NULL)`,
+          [
+            evaluationId,
+            actionPlanId,
+            areaResponsibleUserId,
+            progressPercent,
+            planStatus,
+            "Avance respaldado y enviado a auditoría.",
+            options.adminUserId,
+            "Evaluación aprobada para datos demostrativos.",
+          ],
+        );
+
+        if (areaIndex === 0) {
+          await connection.execute(
+            `INSERT INTO deadline_extension_requests (
+              id, target_type, observation_id, action_plan_id, observation_area_id, requested_by_user_id,
+              previous_due_date, proposed_due_date, reason, status, manager_reviewer_id,
+              manager_reviewed_at, manager_comment, audit_reviewer_id, audit_reviewed_at,
+              audit_comment, final_approved_at, created_at, updated_at, deleted_at, workflow_instance_id
+            ) VALUES (?, 'ACTION_PLAN', NULL, ?, ?, ?, ?, ?, ?, 'AUDIT_APPROVED', ?, NOW(3), ?, ?, NOW(3), ?, NOW(3), NOW(3), NOW(3), NULL, NULL)`,
+            [
+              uuidv5(`extension:${actionPlanId}`, SEED_NAMESPACE),
+              actionPlanId,
+              observationAreaId,
+              areaResponsibleUserId,
+              actionOriginalDueDate,
+              actionCurrentDueDate,
+              "Se requiere una ventana adicional para concluir las pruebas de acceso.",
+              processOwnerUserId,
+              "Conforme por la jefatura.",
+              options.adminUserId,
+              "Ampliación aprobada por auditoría.",
+            ],
+          );
+        }
+      }
     }
   }
 
@@ -1627,6 +1733,7 @@ const main = async (): Promise<void> => {
       throw new Error("No admin users were seeded.");
     }
 
+    const demoUserIds = await seedDemoUsers(connection, roleMap);
     await seedDefaultSettings(connection);
     await seedAreas(connection, primaryAdminUserId);
 
@@ -1634,6 +1741,7 @@ const main = async (): Promise<void> => {
     const seededObservations = await seedSampleObservationsIfEmpty(connection, {
       adminUserId: primaryAdminUserId,
       areaMap,
+      demoUserIds,
       riskLevelMap,
       statusMap,
     });
@@ -1648,6 +1756,7 @@ const main = async (): Promise<void> => {
           permissions: permissions.length,
           rolePermissions: permissions.length,
           adminUsers: seededAdmins.length,
+          demoUsers: demoUserIds.length,
           adminEmails: seededAdmins.map((admin) => admin.email),
           accounts: seededAdmins.length,
           userRoles: seededAdmins.length,
@@ -1657,6 +1766,7 @@ const main = async (): Promise<void> => {
           areas: areas.length,
           systemParameters: systemParameters.length,
           catalogs: catalogs.length,
+          sampleAuditReports: 2,
           sampleObservations: seededObservations,
         },
         null,

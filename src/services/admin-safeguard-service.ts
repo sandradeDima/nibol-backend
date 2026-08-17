@@ -45,7 +45,10 @@ export const adminSafeguardService = {
     }
   },
 
-  async assertUserRoleRemovalAllowed(userId: string, roleId: string): Promise<void> {
+  async assertUserRoleRemovalAllowed(
+    userId: string,
+    roleId: string,
+  ): Promise<void> {
     const role = await getRole(roleId);
 
     if (!isAdminRole(role?.name)) {
@@ -75,7 +78,10 @@ export const adminSafeguardService = {
     });
 
     if (userStillHasAdminRole && adminCount <= 1) {
-      throw new AppError("Admin role cannot be removed from the last admin.", 400);
+      throw new AppError(
+        "Admin role cannot be removed from the last admin.",
+        400,
+      );
     }
   },
 

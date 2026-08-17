@@ -12,6 +12,7 @@ import { env } from "../utils/env.js";
 import { sendPaginated, sendSuccess } from "../utils/response.js";
 import { deadlineMonitorService } from "../jobs/deadline-monitor/deadline-monitor.service.js";
 import { DEADLINE_MONITOR_PARAMETER_DEFAULTS } from "../jobs/deadline-monitor/deadline-monitor.constants.js";
+import { workflowTimerService } from "../modules/workflows/workflow-timer.service.js";
 
 const paginationSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -39,13 +40,21 @@ const isSystemOperator = (roles: string[], isAdmin: boolean): boolean => {
   return roles.some((role) => /^(sistemas?|systems?)$/i.test(role.trim()));
 };
 
-const requireSystemOperator: RequestHandler = async (request, response, next) => {
+const requireSystemOperator: RequestHandler = async (
+  request,
+  response,
+  next,
+) => {
   try {
     const userId = getUserId(request);
-    const summary = await authorizationService.getUserAuthorizationSummary(userId);
+    const summary =
+      await authorizationService.getUserAuthorizationSummary(userId);
     request.authorizationSummary = summary;
     if (!isSystemOperator(summary.roles, summary.isAdmin)) {
-      response.status(403).json({ success: false, message: "Acceso restringido a Admin o Sistemas." });
+      response.status(403).json({
+        success: false,
+        message: "Acceso restringido a Admin o Sistemas.",
+      });
       return;
     }
     next();
@@ -54,9 +63,12 @@ const requireSystemOperator: RequestHandler = async (request, response, next) =>
   }
 };
 
-const extractCronSecret = (request: Parameters<RequestHandler>[0]): string | null => {
+const extractCronSecret = (
+  request: Parameters<RequestHandler>[0],
+): string | null => {
   const authorization = request.get("authorization");
-  if (authorization?.startsWith("Bearer ")) return authorization.slice(7).trim();
+  if (authorization?.startsWith("Bearer "))
+    return authorization.slice(7).trim();
   return request.get("x-cron-secret")?.trim() ?? null;
 };
 
@@ -80,6 +92,22 @@ automaticJobsRouter.post(
     }
     const result = await deadlineMonitorService.run({ triggeredBy: "CRON" });
     sendSuccess(response, result);
+  }),
+);
+
+automaticJobsRouter.post(
+  "/internal/jobs/workflow-timers",
+  asyncHandler(async (request, response) => {
+    if (!env.CRON_SECRET) {
+      throw new AppError("CRON_SECRET is not configured.", 503);
+    }
+    if (!hasValidCronSecret(extractCronSecret(request))) {
+      throw new AppError("Invalid cron credentials.", 401);
+    }
+    sendSuccess(
+      response,
+      await workflowTimerService.run({ triggeredBy: "CRON" }),
+    );
   }),
 );
 
@@ -127,6 +155,49 @@ automaticJobsRouter.post(
 );
 
 automaticJobsRouter.get(
+  "/automatic-jobs/workflow-timers/executions",
+  requireSystemOperator,
+  asyncHandler(async (request, response) => {
+    const pagination = paginationSchema.parse({
+      page: getQueryValue(request.query.page),
+      perPage: getQueryValue(request.query.perPage),
+    });
+    const result = await workflowTimerService.listExecutions(
+      pagination.page,
+      pagination.perPage,
+    );
+    sendPaginated(response, result.data, result.pagination);
+  }),
+);
+
+automaticJobsRouter.get(
+  "/automatic-jobs/workflow-timers/latest",
+  requireSystemOperator,
+  asyncHandler(async (_request, response) => {
+    sendSuccess(response, await workflowTimerService.getLatestExecution());
+  }),
+);
+
+automaticJobsRouter.post(
+  "/automatic-jobs/workflow-timers/run",
+  requireSystemOperator,
+  asyncHandler(async (request, response) => {
+    const userId = getUserId(request);
+    const result = await workflowTimerService.run({
+      triggeredBy: "USER",
+      triggeredByUserId: userId,
+    });
+    await auditLogService.create({
+      entityId: result.jobName,
+      entityType: "scheduled_job_execution",
+      newValues: { lockSkipped: result.lockSkipped, triggeredBy: "USER" },
+      userId,
+    });
+    sendSuccess(response, result);
+  }),
+);
+
+automaticJobsRouter.get(
   "/automatic-jobs/rules",
   requireSystemOperator,
   asyncHandler(async (_request, response) => {
@@ -148,22 +219,40 @@ automaticJobsRouter.get(
       where: { key: { in: keys } },
     });
     const byKey = new Map(records.map((record) => [record.key, record]));
-    sendSuccess(response, keys.map((key) => ({
-      ...(byKey.get(key) ?? {
-        active: true,
-        description: null,
-        editable: true,
-        group: "notificaciones_automaticas",
-        id: null,
-        key,
-        name: key.replaceAll("_", " "),
-        updatedAt: null,
-        valueType: typeof DEADLINE_MONITOR_PARAMETER_DEFAULTS[key as keyof typeof DEADLINE_MONITOR_PARAMETER_DEFAULTS] === "number" ? "number" : "boolean",
-      }),
-      defaultValue: String(DEADLINE_MONITOR_PARAMETER_DEFAULTS[key as keyof typeof DEADLINE_MONITOR_PARAMETER_DEFAULTS]),
-      value: byKey.get(key)?.value ?? String(DEADLINE_MONITOR_PARAMETER_DEFAULTS[key as keyof typeof DEADLINE_MONITOR_PARAMETER_DEFAULTS]),
-      updatedAt: byKey.get(key)?.updatedAt?.toISOString() ?? null,
-    })));
+    sendSuccess(
+      response,
+      keys.map((key) => ({
+        ...(byKey.get(key) ?? {
+          active: true,
+          description: null,
+          editable: true,
+          group: "notificaciones_automaticas",
+          id: null,
+          key,
+          name: key.replaceAll("_", " "),
+          updatedAt: null,
+          valueType:
+            typeof DEADLINE_MONITOR_PARAMETER_DEFAULTS[
+              key as keyof typeof DEADLINE_MONITOR_PARAMETER_DEFAULTS
+            ] === "number"
+              ? "number"
+              : "boolean",
+        }),
+        defaultValue: String(
+          DEADLINE_MONITOR_PARAMETER_DEFAULTS[
+            key as keyof typeof DEADLINE_MONITOR_PARAMETER_DEFAULTS
+          ],
+        ),
+        value:
+          byKey.get(key)?.value ??
+          String(
+            DEADLINE_MONITOR_PARAMETER_DEFAULTS[
+              key as keyof typeof DEADLINE_MONITOR_PARAMETER_DEFAULTS
+            ],
+          ),
+        updatedAt: byKey.get(key)?.updatedAt?.toISOString() ?? null,
+      })),
+    );
   }),
 );
 
@@ -171,13 +260,16 @@ automaticJobsRouter.patch(
   "/automatic-jobs/rules/:key",
   requireSystemOperator,
   asyncHandler(async (request, response) => {
-    const key = typeof request.params.key === "string" ? request.params.key : "";
+    const key =
+      typeof request.params.key === "string" ? request.params.key : "";
     if (!(key in DEADLINE_MONITOR_PARAMETER_DEFAULTS)) {
       throw new AppError("Unknown automatic notification rule.", 404);
     }
     const payload = ruleUpdateSchema.parse(request.body);
     const userId = getUserId(request);
-    const previous = await prisma.systemParameter.findUnique({ where: { key } });
+    const previous = await prisma.systemParameter.findUnique({
+      where: { key },
+    });
     const current = previous
       ? await prisma.systemParameter.update({
           data: { value: payload.value, active: true },
@@ -186,13 +278,19 @@ automaticJobsRouter.patch(
       : await prisma.systemParameter.create({
           data: {
             active: true,
-            description: "Regla de notificaciones automáticas del monitor de vencimientos.",
+            description:
+              "Regla de notificaciones automáticas del monitor de vencimientos.",
             editable: true,
             group: "notificaciones_automaticas",
             key,
             name: key.replaceAll("_", " "),
             value: payload.value,
-            valueType: typeof DEADLINE_MONITOR_PARAMETER_DEFAULTS[key as keyof typeof DEADLINE_MONITOR_PARAMETER_DEFAULTS] === "number" ? "number" : "boolean",
+            valueType:
+              typeof DEADLINE_MONITOR_PARAMETER_DEFAULTS[
+                key as keyof typeof DEADLINE_MONITOR_PARAMETER_DEFAULTS
+              ] === "number"
+                ? "number"
+                : "boolean",
           },
         });
     await auditLogService.create({
@@ -202,6 +300,9 @@ automaticJobsRouter.patch(
       oldValues: previous ? { key, value: previous.value } : null,
       userId,
     });
-    sendSuccess(response, { ...current, updatedAt: current.updatedAt.toISOString() });
+    sendSuccess(response, {
+      ...current,
+      updatedAt: current.updatedAt.toISOString(),
+    });
   }),
 );

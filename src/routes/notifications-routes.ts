@@ -28,7 +28,9 @@ const getQueryValue = (value: unknown): string | undefined => {
   return undefined;
 };
 
-const getRequiredNotificationId = (value: string | string[] | undefined): string => {
+const getRequiredNotificationId = (
+  value: string | string[] | undefined,
+): string => {
   const notificationId = Array.isArray(value) ? value[0] : value;
 
   if (!notificationId) {

@@ -12,6 +12,7 @@ export const WORKFLOW_PERMISSIONS = {
 };
 export const WORKFLOW_TASK_PERMISSIONS = {
     approve: "workflow_tasks.approve",
+    complete: "workflow_tasks.complete",
     observe: "workflow_tasks.observe",
     reject: "workflow_tasks.reject",
     reassign: "workflow_tasks.reassign",
@@ -21,11 +22,17 @@ export const WORKFLOW_TASK_PERMISSIONS = {
 export const WORKFLOW_INSTANCE_PERMISSIONS = {
     cancel: "workflow_instances.cancel",
     retry: "workflow_instances.retry",
+    start: "workflow_instances.start",
     viewAudit: "workflow_instances.view_audit",
+};
+export const WORKFLOW_TIMER_PERMISSIONS = {
+    retry: "workflow_timers.retry",
+    view: "workflow_timers.view",
 };
 export const WORKFLOW_PERMISSION_NAMES = [
     ...Object.values(WORKFLOW_PERMISSIONS),
     ...Object.values(WORKFLOW_TASK_PERMISSIONS),
     ...Object.values(WORKFLOW_INSTANCE_PERMISSIONS),
+    ...Object.values(WORKFLOW_TIMER_PERMISSIONS),
 ];
 //# sourceMappingURL=workflows.permissions.js.map

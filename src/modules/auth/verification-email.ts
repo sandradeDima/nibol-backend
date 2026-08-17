@@ -51,7 +51,10 @@ export const buildEmailVerificationLink = async (
     undefined,
     EMAIL_VERIFICATION_EXPIRES_IN_SECONDS,
   );
-  const url = new URL("verify-email", `${trimTrailingSlash(getAuthBaseUrl().toString())}/`);
+  const url = new URL(
+    "verify-email",
+    `${trimTrailingSlash(getAuthBaseUrl().toString())}/`,
+  );
 
   url.searchParams.set("callbackURL", callbackURL);
   url.searchParams.set("token", token);
@@ -100,14 +103,21 @@ export const sendVerificationEmailToUser = async (
   };
 
   logger.error("Verification email delivery failed.", metadata);
-  throw new AppError("No se pudo enviar el correo de verificacion.", 502, metadata);
+  throw new AppError(
+    "No se pudo enviar el correo de verificacion.",
+    502,
+    metadata,
+  );
 };
 
 export const resendVerificationEmailToUser = async (
   user: VerificationEmailUser,
   callbackURL = DEFAULT_EMAIL_VERIFICATION_CALLBACK_URL,
 ): Promise<void> => {
-  const verificationLink = await buildEmailVerificationLink(user.email, callbackURL);
+  const verificationLink = await buildEmailVerificationLink(
+    user.email,
+    callbackURL,
+  );
 
   await sendVerificationEmailToUser(user, verificationLink);
 };

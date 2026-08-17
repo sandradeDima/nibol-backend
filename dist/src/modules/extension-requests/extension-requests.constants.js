@@ -23,7 +23,7 @@ export const EXTENSION_REQUEST_ACTIVITY_ACTIONS = {
     auditApprove: "deadline-extension.audit-approve",
     auditReject: "deadline-extension.audit-reject",
     cancel: "deadline-extension.cancel",
-    createForCommitment: "deadline-extension.create-for-commitment",
+    createForActionPlan: "deadline-extension.create-for-actionPlan",
     createForObservation: "deadline-extension.create-for-observation",
     sendToAudit: "deadline-extension.send-to-audit",
     sendToManager: "deadline-extension.send-to-manager",
@@ -31,11 +31,7 @@ export const EXTENSION_REQUEST_ACTIVITY_ACTIONS = {
     managerReject: "deadline-extension.manager-reject",
     update: "deadline-extension.update",
 };
-export const EDITABLE_EXTENSION_REQUEST_STATUSES = new Set([
-    "DRAFT",
-    "MANAGER_REJECTED",
-    "AUDIT_REJECTED",
-]);
+export const EDITABLE_EXTENSION_REQUEST_STATUSES = new Set(["DRAFT", "MANAGER_REJECTED", "AUDIT_REJECTED"]);
 export const ACTIVE_EXTENSION_REQUEST_STATUSES = new Set([
     "DRAFT",
     "SENT_TO_MANAGER",

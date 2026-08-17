@@ -10,7 +10,9 @@ import { AppError } from "../../utils/app-error.js";
 import { prisma } from "../../utils/prisma.js";
 import { PRODUCTS_MODULE_KEY } from "./products.constants.js";
 
-type ModuleRecordEntity = Awaited<ReturnType<typeof prisma.moduleRecord.findFirst>>;
+type ModuleRecordEntity = Awaited<
+  ReturnType<typeof prisma.moduleRecord.findFirst>
+>;
 
 const mapRecord = (record: NonNullable<ModuleRecordEntity>): ProductRecord => {
   return {
@@ -119,9 +121,7 @@ export const productsService = {
     return mapRecord(record);
   },
 
-  async createProduct(
-    input: CreateProductInput,
-  ): Promise<ProductRecord> {
+  async createProduct(input: CreateProductInput): Promise<ProductRecord> {
     const record = await prisma.moduleRecord.create({
       data: {
         description: input.description,

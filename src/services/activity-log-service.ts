@@ -154,7 +154,9 @@ const buildWhereClause = (
 };
 
 export const activityLogService = {
-  async listActivityLogs(query: ListActivityLogsQuery): Promise<ListActivityLogsResult> {
+  async listActivityLogs(
+    query: ListActivityLogsQuery,
+  ): Promise<ListActivityLogsResult> {
     const where = buildWhereClause(query);
     const [total, activityLogs] = await prisma.$transaction([
       prisma.activityLog.count({
