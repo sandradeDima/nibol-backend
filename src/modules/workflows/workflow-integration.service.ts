@@ -14,6 +14,7 @@ const dbAsTransaction = prisma as unknown as Prisma.TransactionClient;
 
 const entityLinkField = {
   DEADLINE_EXTENSION: "deadlineExtensionRequest",
+  EVIDENCE_REVIEW: "evidenceFile",
   OBSERVATION_CLOSURE: "progressEvaluation",
   REMEDIATION_PLAN_APPROVAL: "remediationPlan",
 } as const;
@@ -27,6 +28,15 @@ const getLinkedInstanceId = async (
       return (
         (
           await prisma.deadlineExtensionRequest.findUnique({
+            select: { workflowInstanceId: true },
+            where: { id: entityId },
+          })
+        )?.workflowInstanceId ?? null
+      );
+    case "EVIDENCE_REVIEW":
+      return (
+        (
+          await prisma.evidenceFile.findUnique({
             select: { workflowInstanceId: true },
             where: { id: entityId },
           })
@@ -65,6 +75,15 @@ const linkEntity = async (
       return (
         (
           await prisma.deadlineExtensionRequest.updateMany({
+            data: { workflowInstanceId },
+            where: { id: entityId, workflowInstanceId: null },
+          })
+        ).count === 1
+      );
+    case "EVIDENCE_REVIEW":
+      return (
+        (
+          await prisma.evidenceFile.updateMany({
             data: { workflowInstanceId },
             where: { id: entityId, workflowInstanceId: null },
           })
@@ -155,6 +174,15 @@ const getEntityCreatedAt = async (
           })
         )?.createdAt ?? null
       );
+    case "EVIDENCE_REVIEW":
+      return (
+        (
+          await prisma.evidenceFile.findUnique({
+            select: { createdAt: true },
+            where: { id: entityId },
+          })
+        )?.createdAt ?? null
+      );
     case "OBSERVATION_CLOSURE":
       return (
         (
@@ -190,6 +218,12 @@ const canUseWorkflowForEntity = async (
   if (!workflow) return false;
   const createdAt = await getEntityCreatedAt(processType, entityId);
   if (!createdAt) return false;
+  if (
+    processType === "EVIDENCE_REVIEW" ||
+    processType === "REMEDIATION_PLAN_APPROVAL"
+  ) {
+    return true;
+  }
   const publishedAt = workflow.activeVersion?.publishedAt;
   // Records created before activation remain on the legacy state machine. A
   // record already linked to an instance is handled before this guard.

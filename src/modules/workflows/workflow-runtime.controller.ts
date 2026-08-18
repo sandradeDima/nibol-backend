@@ -71,6 +71,13 @@ const getTaskListQuery = (request: Request) =>
   });
 
 export const workflowRuntimeController = {
+  async getStartOptions(request: Request, response: Response) {
+    sendSuccess(
+      response,
+      await workflowInstanceService.getStartOptions(getAccess(request)),
+    );
+  },
+
   async startInstance(request: Request, response: Response) {
     sendSuccess(
       response,

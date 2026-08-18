@@ -5,6 +5,8 @@ import type { WorkflowActorContext } from "./workflows.types.js";
 import type { WorkflowInstanceStartInput } from "./workflow-runtime.validators.js";
 import {
   buildWorkflowRuntimeContext,
+  getEvidenceReviewRuntimeSummary,
+  getSpecialRequestRuntimeSummary,
   restoreWorkflowRuntimeContext,
 } from "./workflow-runtime-context.js";
 import {
@@ -57,6 +59,12 @@ const canSeeInstance = async (
   ) {
     return true;
   }
+
+  const ownInstance = await db.workflowInstance.findFirst({
+    select: { id: true },
+    where: { id: instanceId, startedById: access.userId },
+  });
+  if (ownInstance) return true;
 
   const task = await db.workflowTask.findFirst({
     select: { id: true },
@@ -217,6 +225,8 @@ const mapInstance = (
   const relatedRecordUrl = getWorkflowEntityAdapter(
     record.processType,
   )?.getEntityLink?.(record.entityId, context);
+  const specialRequest = getSpecialRequestRuntimeSummary(context);
+  const evidenceReview = getEvidenceReviewRuntimeSummary(context);
   return {
     completedAt: record.completedAt?.toISOString() ?? null,
     context: {
@@ -241,7 +251,9 @@ const mapInstance = (
     definition: record.definition,
     entityId: record.entityId,
     entityType: record.entityType,
+    evidenceReview,
     relatedRecordUrl: relatedRecordUrl ?? null,
+    specialRequest,
     finalResult: record.finalResult,
     id: record.id,
     runtimeError: record.runtimeErrorCode
@@ -284,6 +296,45 @@ const mapInstance = (
 };
 
 export const workflowInstanceService = {
+  async getStartOptions(access: WorkflowActorContext) {
+    assertPermission(access, WORKFLOW_INSTANCE_PERMISSIONS.start);
+    const [workflows, users, areas, riskLevels] = await prisma.$transaction([
+      prisma.workflowDefinition.findMany({
+        orderBy: { name: "asc" },
+        select: {
+          activeVersion: {
+            select: { id: true, versionNumber: true },
+          },
+          description: true,
+          id: true,
+          name: true,
+        },
+        where: {
+          activeVersionId: { not: null },
+          archivedAt: null,
+          processType: "SPECIAL_REQUEST",
+          status: "PUBLISHED",
+        },
+      }),
+      prisma.user.findMany({
+        orderBy: [{ name: "asc" }, { email: "asc" }],
+        select: { email: true, id: true, name: true },
+        where: { deletedAt: null, isActive: true },
+      }),
+      prisma.area.findMany({
+        orderBy: { name: "asc" },
+        select: { id: true, name: true },
+        where: { active: true, deletedAt: null },
+      }),
+      prisma.riskLevel.findMany({
+        orderBy: [{ severityOrder: "asc" }, { name: "asc" }],
+        select: { key: true, name: true },
+        where: { active: true, deletedAt: null },
+      }),
+    ]);
+    return { areas, riskLevels, users, workflows };
+  },
+
   async startInstance(
     input: WorkflowInstanceStartInput,
     access: WorkflowActorContext,

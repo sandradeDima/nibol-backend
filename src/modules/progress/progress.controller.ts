@@ -207,6 +207,15 @@ export const progressController = {
       ),
     );
   },
+  async submitEvidenceForReview(request: Request, response: Response) {
+    sendSuccess(
+      response,
+      await progressService.submitEvidenceForReview(
+        idWith(request, evidenceIdParamSchema),
+        access(request),
+      ),
+    );
+  },
   async getProgressEvaluation(request: Request, response: Response) {
     sendSuccess(
       response,

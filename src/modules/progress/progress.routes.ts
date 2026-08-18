@@ -88,6 +88,11 @@ progressRouter.delete(
   requirePermission("finding_evidence.delete"),
   asyncHandler(controller.deleteEvidence),
 );
+progressRouter.post(
+  "/evidences/:id/submit-review",
+  requirePermission("finding_evidence.upload"),
+  asyncHandler(controller.submitEvidenceForReview),
+);
 progressRouter.get(
   "/evidences/:id/download",
   requirePermission("observations.view"),

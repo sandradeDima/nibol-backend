@@ -1,13 +1,17 @@
 import type {
   CreateActionPlanInput,
+  CreateRemediationPlanInput,
   ListActionPlansQuery,
   UpdateActionPlanInput,
+  UpdateRemediationPlanInput,
 } from "./remediation.validators.js";
 
 export type {
   CreateActionPlanInput,
+  CreateRemediationPlanInput,
   ListActionPlansQuery,
   UpdateActionPlanInput,
+  UpdateRemediationPlanInput,
 };
 
 export type ActionPlanStatusValue =
@@ -62,3 +66,23 @@ export type ActionPlanDetail = {
 };
 
 export type ActionPlanListItem = ActionPlanDetail;
+
+export type RemediationPlanDetail = {
+  additionalComments: string | null;
+  area: { id: string; name: string };
+  createdAt: string;
+  id: string;
+  mitigationText: string | null;
+  observationId: string;
+  ownerUser: {
+    email: string;
+    id: string;
+    jobTitle: string | null;
+    name: string;
+  } | null;
+  returnReason: string | null;
+  status: "DRAFT" | "SENT_TO_AUDIT" | "APPROVED" | "RETURNED" | "CLOSED";
+  strategyText: string;
+  updatedAt: string;
+  workflowInstanceId: string | null;
+};

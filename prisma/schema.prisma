@@ -111,6 +111,14 @@ enum EvidenceContext {
   CLOSURE
 }
 
+enum EvidenceReviewStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  RETURNED
+  REJECTED
+}
+
 enum WorkflowDefinitionStatus {
   DRAFT
   PUBLISHED
@@ -999,6 +1007,12 @@ model EvidenceFile {
   sizeBytes                    BigInt                        @map("size_bytes")
   checksum                     String?                       @db.VarChar(128)
   description                  String?                       @db.LongText
+  reviewStatus                 EvidenceReviewStatus          @default(DRAFT) @map("review_status")
+  submittedAt                  DateTime?                     @map("submitted_at")
+  reviewedAt                   DateTime?                     @map("reviewed_at")
+  reviewedByUserId             String?                       @map("reviewed_by_user_id") @db.Char(36)
+  reviewComment                String?                       @map("review_comment") @db.LongText
+  workflowInstanceId           String?                       @map("workflow_instance_id") @db.Char(36)
   createdAt                    DateTime                      @default(now()) @map("created_at")
   deletedAt                    DateTime?                     @map("deleted_at")
   observation                  Observation                   @relation(fields: [observationId], references: [id], onDelete: Cascade)
@@ -1012,7 +1026,9 @@ model EvidenceFile {
   @@index([deletedAt])
   @@index([observationId, createdAt])
   @@index([progressEvaluationId])
+  @@index([reviewStatus])
   @@index([uploadedByUserId])
+  @@index([workflowInstanceId])
   @@map("evidence_files")
 }
 

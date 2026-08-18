@@ -11,9 +11,12 @@ import { remediationService } from "./remediation.service.js";
 import {
   actionPlanIdParamSchema,
   createActionPlanSchema,
+  createRemediationPlanSchema,
   listActionPlansQuerySchema,
   observationActionPlanParamsSchema,
+  remediationPlanIdParamSchema,
   updateActionPlanSchema,
+  updateRemediationPlanSchema,
 } from "./remediation.validators.js";
 
 const value = (input: unknown): string | undefined =>
@@ -27,6 +30,8 @@ const actionPlanId = (request: Request) =>
   actionPlanIdParamSchema.parse({ id: value(request.params.id) }).id;
 const observationId = (request: Request) =>
   observationActionPlanParamsSchema.parse({ id: value(request.params.id) }).id;
+const remediationPlanId = (request: Request) =>
+  remediationPlanIdParamSchema.parse({ id: value(request.params.id) }).id;
 
 const log = async (
   request: Request,
@@ -71,6 +76,45 @@ const log = async (
 };
 
 export const remediationController = {
+  async createRemediationPlan(request: Request, response: Response) {
+    sendSuccess(
+      response,
+      await remediationService.createRemediationPlan(
+        observationId(request),
+        createRemediationPlanSchema.parse(request.body),
+        access(request),
+      ),
+      201,
+    );
+  },
+  async listRemediationPlans(request: Request, response: Response) {
+    sendSuccess(
+      response,
+      await remediationService.listRemediationPlans(
+        observationId(request),
+        access(request),
+      ),
+    );
+  },
+  async submitRemediationPlan(request: Request, response: Response) {
+    sendSuccess(
+      response,
+      await remediationService.submitRemediationPlan(
+        remediationPlanId(request),
+        access(request),
+      ),
+    );
+  },
+  async updateRemediationPlan(request: Request, response: Response) {
+    sendSuccess(
+      response,
+      await remediationService.updateRemediationPlan(
+        remediationPlanId(request),
+        updateRemediationPlanSchema.parse(request.body),
+        access(request),
+      ),
+    );
+  },
   async createActionPlan(request: Request, response: Response) {
     const record = await remediationService.createActionPlan(
       observationId(request),

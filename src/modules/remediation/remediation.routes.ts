@@ -10,6 +10,27 @@ import { remediationController } from "./remediation.controller.js";
 export const remediationRouter = Router();
 
 remediationRouter.get(
+  "/observations/:id/remediation-plans",
+  requirePermission("action_plans.view"),
+  asyncHandler(remediationController.listRemediationPlans),
+);
+remediationRouter.post(
+  "/observations/:id/remediation-plans",
+  requirePermission("action_plans.create"),
+  asyncHandler(remediationController.createRemediationPlan),
+);
+remediationRouter.patch(
+  "/remediation-plans/:id",
+  requirePermission("action_plans.edit"),
+  asyncHandler(remediationController.updateRemediationPlan),
+);
+remediationRouter.post(
+  "/remediation-plans/:id/submit",
+  requirePermission("progress_evaluations.submit"),
+  asyncHandler(remediationController.submitRemediationPlan),
+);
+
+remediationRouter.get(
   "/action-plans",
   requirePermission("action_plans.view"),
   asyncHandler(remediationController.listActionPlans),

@@ -6,6 +6,7 @@ import type { WorkflowNodeConfiguration } from "./workflows.validators.js";
 
 export type WorkflowProcessType =
   | "DEADLINE_EXTENSION"
+  | "EVIDENCE_REVIEW"
   | "OBSERVATION_CLOSURE"
   | "REMEDIATION_PLAN_APPROVAL"
   | "SPECIAL_REQUEST";
@@ -770,8 +771,132 @@ const remediationPlanAdapter: WorkflowEntityAdapter = {
       : "/observaciones",
 };
 
+const evidenceReviewAdapter: WorkflowEntityAdapter = {
+  processType: "EVIDENCE_REVIEW",
+
+  async getEntity(entityId, db) {
+    const evidence = await database(db).evidenceFile.findFirst({
+      include: {
+        actionPlan: {
+          select: {
+            currentDueDate: true,
+            responsibleUserId: true,
+            observationArea: { select: { areaId: true } },
+          },
+        },
+        observation: {
+          select: {
+            auditorUserId: true,
+            currentDueDate: true,
+            id: true,
+            riskLevel: { select: { key: true } },
+            status: { select: { key: true } },
+          },
+        },
+      },
+      where: { deletedAt: null, id: entityId },
+    });
+    if (!evidence) throw new AppError("No se encontró la evidencia.", 404);
+    return evidence;
+  },
+
+  async validateStart({ entityId, db }) {
+    const evidence = (await this.getEntity(entityId, db)) as {
+      reviewStatus: string;
+    };
+    if (!["DRAFT", "RETURNED"].includes(evidence.reviewStatus)) {
+      throw new AppError("La evidencia no está disponible para revisión.", 409);
+    }
+  },
+
+  async buildRuntimeContext({ entityId, db, actorUserId }) {
+    const evidence = (await this.getEntity(entityId, db)) as {
+      actionPlan: {
+        currentDueDate: Date;
+        responsibleUserId: string;
+        observationArea: { areaId: string };
+      } | null;
+      context: string;
+      observation: {
+        auditorUserId: string;
+        currentDueDate: Date;
+        id: string;
+        riskLevel: { key: string };
+        status: { key: string };
+      };
+      originalName: string;
+      uploadedByUserId: string;
+    };
+    const responsibleUserId =
+      evidence.actionPlan?.responsibleUserId ??
+      evidence.observation.auditorUserId;
+    return createContext({
+      areaId: evidence.actionPlan?.observationArea.areaId ?? null,
+      custom: {
+        evidenceId: entityId,
+        evidenceContext: evidence.context,
+        evidenceName: evidence.originalName,
+        observationId: evidence.observation.id,
+        recordOwnerUserId: responsibleUserId,
+      },
+      dueDate:
+        evidence.actionPlan?.currentDueDate ??
+        evidence.observation.currentDueDate,
+      evidenceCount: 1,
+      observationStatus: evidence.observation.status.key,
+      processType: "EVIDENCE_REVIEW",
+      requesterUserId: evidence.uploadedByUserId || actorUserId,
+      requestType: evidence.context,
+      responsibleUserId,
+      riskLevel: evidence.observation.riskLevel.key,
+    });
+  },
+
+  async applyDecision({ action, actorUserId, comment, db, entityId }) {
+    if (!["OBSERVE", "REQUEST_CORRECTION", "REJECT"].includes(action)) return;
+    await db.evidenceFile.update({
+      data: {
+        reviewComment: comment?.trim() || null,
+        reviewedAt: new Date(),
+        reviewedByUserId: actorUserId,
+        reviewStatus: action === "REJECT" ? "REJECTED" : "RETURNED",
+      },
+      where: { id: entityId },
+    });
+  },
+
+  async applyCompletion({ actorUserId, db, entityId, finalResult }) {
+    if (["APPROVED", "CLOSED"].includes(finalResult)) {
+      await db.evidenceFile.update({
+        data: {
+          reviewComment: null,
+          reviewedAt: new Date(),
+          reviewedByUserId: actorUserId ?? null,
+          reviewStatus: "APPROVED",
+        },
+        where: { id: entityId },
+      });
+    } else if (["REJECTED", "EXPIRED"].includes(finalResult)) {
+      await db.evidenceFile.update({
+        data: {
+          reviewedAt: new Date(),
+          reviewedByUserId: actorUserId ?? null,
+          reviewStatus: "REJECTED",
+        },
+        where: { id: entityId },
+      });
+    }
+  },
+
+  getEntityLink: (_entityId, context) =>
+    context?.custom.observationId
+      ? `/observaciones/${context.custom.observationId}#colaboracion`
+      : "/observaciones",
+};
+
 const adapters = new Map<WorkflowProcessType, WorkflowEntityAdapter>([
   [deadlineExtensionAdapter.processType, deadlineExtensionAdapter],
+  [evidenceReviewAdapter.processType, evidenceReviewAdapter],
   [observationClosureAdapter.processType, observationClosureAdapter],
   [remediationPlanAdapter.processType, remediationPlanAdapter],
 ]);

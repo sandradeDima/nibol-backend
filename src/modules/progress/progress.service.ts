@@ -561,10 +561,16 @@ export const progressService = {
               select: {
                 context: true,
                 createdAt: true,
+                description: true,
                 id: true,
                 mimeType: true,
                 originalName: true,
+                reviewComment: true,
+                reviewedAt: true,
+                reviewStatus: true,
                 sizeBytes: true,
+                submittedAt: true,
+                workflowInstanceId: true,
               },
             }),
           ),
@@ -574,7 +580,9 @@ export const progressService = {
         ...record,
         createdAt: record.createdAt.toISOString(),
         downloadPath: `/evidences/${record.id}/download`,
+        reviewedAt: record.reviewedAt?.toISOString() ?? null,
         sizeBytes: Number(record.sizeBytes),
+        submittedAt: record.submittedAt?.toISOString() ?? null,
       }));
     } catch (error) {
       await Promise.all(
@@ -668,7 +676,90 @@ export const progressService = {
       ...record,
       createdAt: record.createdAt.toISOString(),
       downloadPath: `/evidences/${record.id}/download`,
+      reviewedAt: record.reviewedAt?.toISOString() ?? null,
       sizeBytes: Number(record.sizeBytes),
+      submittedAt: record.submittedAt?.toISOString() ?? null,
+    }));
+  },
+
+  async submitEvidenceForReview(id: string, access: AuthorizationSummary) {
+    const evidence = await prisma.evidenceFile.findFirst({
+      select: {
+        id: true,
+        reviewStatus: true,
+        uploadedByUserId: true,
+        workflowInstanceId: true,
+      },
+      where: {
+        deletedAt: null,
+        id,
+        observation: buildObservationAccessWhere(access),
+      },
+    });
+    if (!evidence) throw new AppError("Evidence not found.", 404);
+    if (!access.isAdmin && evidence.uploadedByUserId !== access.userId)
+      throw new AppError("You cannot submit this evidence.", 403);
+    if (!["DRAFT", "RETURNED"].includes(evidence.reviewStatus))
+      throw new AppError("La evidencia no está disponible para envío.", 409);
+    if (evidence.reviewStatus === "RETURNED" && evidence.workflowInstanceId) {
+      const priorInstance = await prisma.workflowInstance.findUnique({
+        select: { status: true },
+        where: { id: evidence.workflowInstanceId },
+      });
+      if (
+        priorInstance &&
+        ["CANCELLED", "COMPLETED", "REJECTED"].includes(priorInstance.status)
+      ) {
+        await prisma.evidenceFile.update({
+          data: { workflowInstanceId: null },
+          where: { id },
+        });
+      }
+    }
+    const workflow = await workflowIntegrationService.startForEntity({
+      access: { ...access, ipAddress: null },
+      actorUserId: access.userId,
+      entityId: id,
+      entityType: "evidence_file",
+      processType: "EVIDENCE_REVIEW",
+    });
+    if (!workflow.instanceId)
+      throw new AppError(
+        "No existe un flujo publicado para revisar evidencias.",
+        409,
+      );
+    await prisma.evidenceFile.update({
+      data: {
+        reviewComment: null,
+        reviewStatus: "PENDING",
+        submittedAt: new Date(),
+        workflowInstanceId: workflow.instanceId,
+      },
+      where: { id },
+    });
+    const [record] = await this.getObservationEvidenceForIds([id], access);
+    return record;
+  },
+
+  async getObservationEvidenceForIds(
+    ids: string[],
+    access: AuthorizationSummary,
+  ) {
+    const records = await prisma.evidenceFile.findMany({
+      include: { uploadedByUser: { select: userSelect } },
+      where: {
+        deletedAt: null,
+        id: { in: ids },
+        observation: buildObservationAccessWhere(access),
+      },
+    });
+    return records.map((record) => ({
+      ...record,
+      createdAt: record.createdAt.toISOString(),
+      downloadPath: `/evidences/${record.id}/download`,
+      reviewedAt: record.reviewedAt?.toISOString() ?? null,
+      sizeBytes: Number(record.sizeBytes),
+      submittedAt: record.submittedAt?.toISOString() ?? null,
     }));
   },
 
@@ -682,6 +773,11 @@ export const progressService = {
       },
     });
     if (!record) throw new AppError("Evidence not found.", 404);
+    if (["PENDING", "APPROVED"].includes(record.reviewStatus))
+      throw new AppError(
+        "No se puede eliminar evidencia pendiente o aprobada.",
+        409,
+      );
     if (!access.isAdmin && record.uploadedByUserId !== access.userId)
       throw new AppError("You cannot delete this evidence.", 403);
     await prisma.evidenceFile.update({

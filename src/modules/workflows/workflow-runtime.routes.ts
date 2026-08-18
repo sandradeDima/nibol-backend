@@ -15,6 +15,12 @@ import {
 
 export const workflowRuntimeRouter = Router();
 
+workflowRuntimeRouter.get(
+  "/workflow-instances/start-options",
+  requirePermission(WORKFLOW_INSTANCE_PERMISSIONS.start),
+  asyncHandler(workflowRuntimeController.getStartOptions),
+);
+
 workflowRuntimeRouter.post(
   "/workflow-instances",
   requirePermission(WORKFLOW_INSTANCE_PERMISSIONS.start),

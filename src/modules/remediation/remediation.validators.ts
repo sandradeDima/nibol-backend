@@ -2,6 +2,24 @@ import { z } from "zod";
 
 export const actionPlanIdParamSchema = z.object({ id: z.uuid() });
 export const observationActionPlanParamsSchema = z.object({ id: z.uuid() });
+export const remediationPlanIdParamSchema = z.object({ id: z.uuid() });
+
+const remediationPlanFields = {
+  additionalComments: z.string().trim().max(10_000).nullable().optional(),
+  areaId: z.uuid(),
+  mitigationText: z.string().trim().max(10_000).nullable().optional(),
+  ownerUserId: z.uuid().nullable().optional(),
+  strategyText: z.string().trim().min(10).max(10_000),
+};
+
+export const createRemediationPlanSchema = z.object(remediationPlanFields);
+export const updateRemediationPlanSchema = z
+  .object(remediationPlanFields)
+  .omit({ areaId: true })
+  .partial()
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field is required.",
+  });
 
 const fields = {
   description: z.string().trim().min(1).max(10_000),
@@ -43,5 +61,11 @@ export const listActionPlansQuerySchema = z.object({
 });
 
 export type CreateActionPlanInput = z.infer<typeof createActionPlanSchema>;
+export type CreateRemediationPlanInput = z.infer<
+  typeof createRemediationPlanSchema
+>;
 export type UpdateActionPlanInput = z.infer<typeof updateActionPlanSchema>;
+export type UpdateRemediationPlanInput = z.infer<
+  typeof updateRemediationPlanSchema
+>;
 export type ListActionPlansQuery = z.infer<typeof listActionPlansQuerySchema>;

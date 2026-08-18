@@ -5,11 +5,14 @@ import { AppError } from "../../utils/app-error.js";
 import { prisma } from "../../utils/prisma.js";
 import { observationAggregationService } from "../observations/observation-aggregation.service.js";
 import { buildObservationAccessWhere } from "../observations/observations.service.js";
+import { workflowIntegrationService } from "../workflows/workflow-integration.service.js";
 import type {
   ActionPlanDetail,
   CreateActionPlanInput,
+  CreateRemediationPlanInput,
   ListActionPlansQuery,
   UpdateActionPlanInput,
+  UpdateRemediationPlanInput,
 } from "./remediation.types.js";
 
 const userSelect = {
@@ -126,6 +129,47 @@ const validateAssignment = async (
     );
 };
 
+const remediationPlanInclude = {
+  area: { select: { id: true, name: true } },
+  ownerUser: { select: userSelect },
+} satisfies Prisma.RemediationPlanInclude;
+
+type RemediationPlanRecord = Prisma.RemediationPlanGetPayload<{
+  include: typeof remediationPlanInclude;
+}>;
+
+const formatRemediationPlan = (record: RemediationPlanRecord) => ({
+  additionalComments: record.additionalComments,
+  area: record.area,
+  createdAt: record.createdAt.toISOString(),
+  id: record.id,
+  mitigationText: record.mitigationText,
+  observationId: record.observationId,
+  ownerUser: record.ownerUser,
+  returnReason: record.returnReason,
+  status: record.status,
+  strategyText: record.strategyText,
+  updatedAt: record.updatedAt.toISOString(),
+  workflowInstanceId: record.workflowInstanceId,
+});
+
+const findRemediationPlan = async (
+  id: string,
+  access: AuthorizationSummary,
+): Promise<RemediationPlanRecord> => {
+  const record = await prisma.remediationPlan.findFirst({
+    include: remediationPlanInclude,
+    where: {
+      deletedAt: null,
+      id,
+      observation: buildObservationAccessWhere(access),
+    },
+  });
+  if (!record)
+    throw new AppError("No se encontró el plan de remediación.", 404);
+  return record;
+};
+
 export const recalculateObservationFromActionPlans = async (
   tx: Prisma.TransactionClient,
   observationId: string,
@@ -161,6 +205,168 @@ export const recalculateObservationFromActionPlans = async (
 };
 
 export const remediationService = {
+  async createRemediationPlan(
+    observationId: string,
+    input: CreateRemediationPlanInput,
+    access: AuthorizationSummary,
+  ) {
+    const [observationArea, owner] = await Promise.all([
+      prisma.observationArea.findFirst({
+        select: { id: true },
+        where: {
+          areaId: input.areaId,
+          observation: {
+            deletedAt: null,
+            id: observationId,
+            ...buildObservationAccessWhere(access),
+          },
+        },
+      }),
+      input.ownerUserId
+        ? prisma.user.findFirst({
+            select: { id: true },
+            where: {
+              deletedAt: null,
+              id: input.ownerUserId,
+              isActive: true,
+            },
+          })
+        : Promise.resolve(null),
+    ]);
+    if (!observationArea)
+      throw new AppError("El área no pertenece a la observación.", 400);
+    if (input.ownerUserId && !owner)
+      throw new AppError("El responsable no existe o está inactivo.", 400);
+    const created = await prisma.$transaction(async (tx) => {
+      const plan = await tx.remediationPlan.create({
+        data: {
+          additionalComments: input.additionalComments ?? null,
+          areaId: input.areaId,
+          createdByUserId: access.userId,
+          mitigationText: input.mitigationText ?? null,
+          observationId,
+          ownerUserId: input.ownerUserId ?? null,
+          strategyText: input.strategyText,
+        },
+        select: { id: true },
+      });
+      await tx.actionPlan.updateMany({
+        data: { remediationPlanId: plan.id },
+        where: {
+          deletedAt: null,
+          observationArea: { areaId: input.areaId },
+          observationId,
+          remediationPlanId: null,
+        },
+      });
+      return plan;
+    });
+    return formatRemediationPlan(await findRemediationPlan(created.id, access));
+  },
+
+  async listRemediationPlans(
+    observationId: string,
+    access: AuthorizationSummary,
+  ) {
+    const observation = await prisma.observation.findFirst({
+      select: { id: true },
+      where: {
+        deletedAt: null,
+        id: observationId,
+        ...buildObservationAccessWhere(access),
+      },
+    });
+    if (!observation) throw new AppError("No se encontró la observación.", 404);
+    const plans = await prisma.remediationPlan.findMany({
+      include: remediationPlanInclude,
+      orderBy: [{ area: { name: "asc" } }, { createdAt: "asc" }],
+      where: { deletedAt: null, observationId },
+    });
+    return plans.map(formatRemediationPlan);
+  },
+
+  async updateRemediationPlan(
+    id: string,
+    input: UpdateRemediationPlanInput,
+    access: AuthorizationSummary,
+  ) {
+    const previous = await findRemediationPlan(id, access);
+    if (previous.status !== "DRAFT" && previous.status !== "RETURNED")
+      throw new AppError("El plan no está disponible para edición.", 409);
+    if (input.ownerUserId) {
+      const owner = await prisma.user.findFirst({
+        select: { id: true },
+        where: { deletedAt: null, id: input.ownerUserId, isActive: true },
+      });
+      if (!owner)
+        throw new AppError("El responsable no existe o está inactivo.", 400);
+    }
+    const data: Prisma.RemediationPlanUncheckedUpdateInput = {
+      ...(input.additionalComments !== undefined
+        ? { additionalComments: input.additionalComments }
+        : {}),
+      ...(input.mitigationText !== undefined
+        ? { mitigationText: input.mitigationText }
+        : {}),
+      ...(input.ownerUserId !== undefined
+        ? { ownerUserId: input.ownerUserId }
+        : {}),
+      ...(input.strategyText !== undefined
+        ? { strategyText: input.strategyText }
+        : {}),
+      ...(previous.status === "RETURNED"
+        ? { returnReason: null, returnedAt: null, returnedByUserId: null }
+        : {}),
+    };
+    await prisma.remediationPlan.update({
+      data,
+      where: { id },
+    });
+    return formatRemediationPlan(await findRemediationPlan(id, access));
+  },
+
+  async submitRemediationPlan(id: string, access: AuthorizationSummary) {
+    const previous = await findRemediationPlan(id, access);
+    if (previous.status !== "DRAFT" && previous.status !== "RETURNED")
+      throw new AppError("El plan no está disponible para envío.", 409);
+    if (previous.status === "RETURNED" && previous.workflowInstanceId) {
+      const priorInstance = await prisma.workflowInstance.findUnique({
+        select: { status: true },
+        where: { id: previous.workflowInstanceId },
+      });
+      if (
+        priorInstance &&
+        ["CANCELLED", "COMPLETED", "REJECTED"].includes(priorInstance.status)
+      ) {
+        await prisma.remediationPlan.update({
+          data: { workflowInstanceId: null },
+          where: { id },
+        });
+      }
+    }
+    const workflow = await workflowIntegrationService.startForEntity({
+      access: { ...access, ipAddress: null },
+      actorUserId: access.userId,
+      entityId: id,
+      entityType: "remediation_plan",
+      processType: "REMEDIATION_PLAN_APPROVAL",
+    });
+    if (!workflow.instanceId)
+      throw new AppError(
+        "No existe un flujo publicado para aprobar planes de remediación.",
+        409,
+      );
+    await prisma.remediationPlan.update({
+      data: {
+        sentToAuditAt: new Date(),
+        status: "SENT_TO_AUDIT",
+        workflowInstanceId: workflow.instanceId,
+      },
+      where: { id },
+    });
+    return formatRemediationPlan(await findRemediationPlan(id, access));
+  },
+
   async createActionPlan(
     observationId: string,
     input: CreateActionPlanInput,
@@ -188,6 +394,22 @@ export const remediationService = {
           observationAreaId: input.observationAreaId,
           observationId,
           originalDueDate: input.dueDate,
+          remediationPlanId:
+            (
+              await tx.remediationPlan.findFirst({
+                select: { id: true },
+                where: {
+                  areaId: (
+                    await tx.observationArea.findUniqueOrThrow({
+                      select: { areaId: true },
+                      where: { id: input.observationAreaId },
+                    })
+                  ).areaId,
+                  deletedAt: null,
+                  observationId,
+                },
+              })
+            )?.id ?? null,
           responsibleUserId: input.responsibleUserId,
           sortOrder: input.sortOrder ?? 0,
           title: input.title,
