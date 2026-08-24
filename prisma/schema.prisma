@@ -764,6 +764,7 @@ model ObservationArea {
   areaResponsible           User                       @relation("ObservationAreaResponsible", fields: [areaResponsibleUserId], references: [id], onDelete: Restrict)
   actionPlans               ActionPlan[]
   deadlineExtensionRequests DeadlineExtensionRequest[]
+  evidenceFiles             EvidenceFile[]
 
   @@unique([observationId, areaId])
   @@index([areaId])
@@ -996,6 +997,7 @@ model ProgressEvaluation {
 model EvidenceFile {
   id                           String                        @id @default(uuid()) @db.Char(36)
   observationId                String                        @map("observation_id") @db.Char(36)
+  observationAreaId            String?                       @map("observation_area_id") @db.Char(36)
   context                      EvidenceContext
   actionPlanId                 String?                       @map("action_plan_id") @db.Char(36)
   progressEvaluationId         String?                       @map("progress_evaluation_id") @db.Char(36)
@@ -1016,6 +1018,7 @@ model EvidenceFile {
   createdAt                    DateTime                      @default(now()) @map("created_at")
   deletedAt                    DateTime?                     @map("deleted_at")
   observation                  Observation                   @relation(fields: [observationId], references: [id], onDelete: Cascade)
+  observationArea              ObservationArea?              @relation(fields: [observationAreaId], references: [id], onDelete: SetNull)
   actionPlan                   ActionPlan?                   @relation(fields: [actionPlanId], references: [id], onDelete: Cascade)
   progressEvaluation           ProgressEvaluation?           @relation(fields: [progressEvaluationId], references: [id], onDelete: Cascade)
   uploadedByUser               User                          @relation("EvidenceUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
@@ -1025,6 +1028,7 @@ model EvidenceFile {
   @@index([context])
   @@index([deletedAt])
   @@index([observationId, createdAt])
+  @@index([observationAreaId])
   @@index([progressEvaluationId])
   @@index([reviewStatus])
   @@index([uploadedByUserId])

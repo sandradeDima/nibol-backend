@@ -53,6 +53,7 @@ const evaluationInclude = {
   actionPlan: {
     select: {
       id: true,
+      observationAreaId: true,
       observation: {
         select: {
           auditReport: { select: { reportNumber: true } },
@@ -63,7 +64,7 @@ const evaluationInclude = {
         },
       },
       observationArea: {
-        select: { area: { select: { id: true, name: true } } },
+        select: { area: { select: { id: true, name: true } }, id: true },
       },
       responsibleUser: { select: userSelect },
     },
@@ -76,6 +77,9 @@ const evaluationInclude = {
       description: true,
       id: true,
       mimeType: true,
+      observationArea: {
+        select: { area: { select: { id: true, name: true } }, id: true },
+      },
       originalName: true,
       sizeBytes: true,
     },
@@ -111,6 +115,9 @@ const formatEvaluation = (record: EvaluationRecord) => ({
     ...file,
     createdAt: file.createdAt.toISOString(),
     downloadPath: `/evidences/${file.id}/download`,
+    observationArea: file.observationArea
+      ? { id: file.observationArea.id, name: file.observationArea.area.name }
+      : null,
     sizeBytes: Number(file.sizeBytes),
   })),
   history: record.reviewHistory.map((item) => ({
@@ -236,6 +243,7 @@ const requireActionPlan = async (id: string, access: AuthorizationSummary) => {
   const actionPlan = await prisma.actionPlan.findFirst({
     select: {
       id: true,
+      observationAreaId: true,
       observation: { select: { auditorUserId: true, id: true } },
       responsibleUserId: true,
     },
@@ -509,6 +517,7 @@ export const progressService = {
     target: {
       actionPlanId?: string;
       observationId: string;
+      observationAreaId?: string;
       progressEvaluationId?: string;
     },
     files: UploadFile[],
@@ -536,6 +545,17 @@ export const progressService = {
       },
     });
     if (!observation) throw new AppError("Observation not found.", 404);
+    if (target.observationAreaId) {
+      const observationArea = await prisma.observationArea.findFirst({
+        select: { id: true },
+        where: {
+          id: target.observationAreaId,
+          observationId: target.observationId,
+        },
+      });
+      if (!observationArea)
+        throw new AppError("El área no pertenece a la observación.", 400);
+    }
     const prepared = await prepareFiles(files);
     try {
       const records = await prisma.$transaction((tx) =>
@@ -549,6 +569,7 @@ export const progressService = {
                 description: input.description,
                 mimeType: file.mimeType,
                 observationId: target.observationId,
+                observationAreaId: target.observationAreaId ?? null,
                 originalName: file.originalName,
                 progressEvaluationId: target.progressEvaluationId ?? null,
                 relativePath: file.relativePath,
@@ -562,6 +583,12 @@ export const progressService = {
                 description: true,
                 id: true,
                 mimeType: true,
+                observationArea: {
+                  select: {
+                    area: { select: { id: true, name: true } },
+                    id: true,
+                  },
+                },
                 originalName: true,
                 reviewComment: true,
                 reviewedAt: true,
@@ -578,6 +605,12 @@ export const progressService = {
         ...record,
         createdAt: record.createdAt.toISOString(),
         downloadPath: `/evidences/${record.id}/download`,
+        observationArea: record.observationArea
+          ? {
+              id: record.observationArea.id,
+              name: record.observationArea.area.name,
+            }
+          : null,
         reviewedAt: record.reviewedAt?.toISOString() ?? null,
         sizeBytes: Number(record.sizeBytes),
         submittedAt: record.submittedAt?.toISOString() ?? null,
@@ -603,7 +636,17 @@ export const progressService = {
         "Observation evidence must be finding or closure evidence.",
         400,
       );
-    return this.uploadEvidence({ observationId }, files, input, access);
+    return this.uploadEvidence(
+      {
+        ...(input.observationAreaId
+          ? { observationAreaId: input.observationAreaId }
+          : {}),
+        observationId,
+      },
+      files,
+      input,
+      access,
+    );
   },
 
   async uploadActionPlanEvidence(
@@ -619,7 +662,11 @@ export const progressService = {
       );
     const actionPlan = await requireActionPlan(actionPlanId, access);
     return this.uploadEvidence(
-      { actionPlanId, observationId: actionPlan.observation.id },
+      {
+        actionPlanId,
+        observationAreaId: actionPlan.observationAreaId,
+        observationId: actionPlan.observation.id,
+      },
       files,
       input,
       access,
@@ -643,6 +690,7 @@ export const progressService = {
     return this.uploadEvidence(
       {
         actionPlanId: evaluation.actionPlan.id,
+        observationAreaId: evaluation.actionPlan.observationAreaId,
         observationId: evaluation.actionPlan.observation.id,
         progressEvaluationId,
       },
@@ -666,7 +714,12 @@ export const progressService = {
     });
     if (!observation) throw new AppError("Observation not found.", 404);
     const records = await prisma.evidenceFile.findMany({
-      include: { uploadedByUser: { select: userSelect } },
+      include: {
+        observationArea: {
+          select: { area: { select: { id: true, name: true } }, id: true },
+        },
+        uploadedByUser: { select: userSelect },
+      },
       orderBy: { createdAt: "desc" },
       where: { deletedAt: null, observationId },
     });
@@ -674,6 +727,12 @@ export const progressService = {
       ...record,
       createdAt: record.createdAt.toISOString(),
       downloadPath: `/evidences/${record.id}/download`,
+      observationArea: record.observationArea
+        ? {
+            id: record.observationArea.id,
+            name: record.observationArea.area.name,
+          }
+        : null,
       reviewedAt: record.reviewedAt?.toISOString() ?? null,
       sizeBytes: Number(record.sizeBytes),
       submittedAt: record.submittedAt?.toISOString() ?? null,
@@ -744,7 +803,12 @@ export const progressService = {
     access: AuthorizationSummary,
   ) {
     const records = await prisma.evidenceFile.findMany({
-      include: { uploadedByUser: { select: userSelect } },
+      include: {
+        observationArea: {
+          select: { area: { select: { id: true, name: true } }, id: true },
+        },
+        uploadedByUser: { select: userSelect },
+      },
       where: {
         deletedAt: null,
         id: { in: ids },
@@ -755,6 +819,12 @@ export const progressService = {
       ...record,
       createdAt: record.createdAt.toISOString(),
       downloadPath: `/evidences/${record.id}/download`,
+      observationArea: record.observationArea
+        ? {
+            id: record.observationArea.id,
+            name: record.observationArea.area.name,
+          }
+        : null,
       reviewedAt: record.reviewedAt?.toISOString() ?? null,
       sizeBytes: Number(record.sizeBytes),
       submittedAt: record.submittedAt?.toISOString() ?? null,

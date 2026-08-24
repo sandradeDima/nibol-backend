@@ -60,6 +60,7 @@ export const reviewProgressEvaluationSchema = z.object({
 export const uploadEvidenceSchema = z.object({
   context: z.enum(["FINDING", "ACTION_PLAN", "PROGRESS_EVALUATION", "CLOSURE"]),
   description: nullableText,
+  observationAreaId: z.uuid().optional(),
 });
 export const createCommentSchema = z.object({
   actionPlanId: z.uuid().nullable().optional(),
