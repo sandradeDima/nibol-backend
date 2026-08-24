@@ -66,7 +66,6 @@ const evaluationInclude = {
         select: { area: { select: { id: true, name: true } } },
       },
       responsibleUser: { select: userSelect },
-      title: true,
     },
   },
   evidenceFiles: {
@@ -105,7 +104,6 @@ const formatEvaluation = (record: EvaluationRecord) => ({
     area: record.actionPlan.observationArea.area,
     id: record.actionPlan.id,
     responsibleUser: record.actionPlan.responsibleUser,
-    title: record.actionPlan.title,
   },
   actionPlanStatus: record.actionPlanStatus,
   comment: record.comment,
@@ -305,7 +303,6 @@ export const progressService = {
         ? {
             OR: [
               { comment: { contains: query.search } },
-              { actionPlan: { title: { contains: query.search } } },
               {
                 actionPlan: {
                   observation: { title: { contains: query.search } },
@@ -414,7 +411,7 @@ export const progressService = {
     });
     if (previous.submittedByUser.id !== access.userId) {
       await notificationService.create({
-        message: `La evaluación de avance de "${previous.actionPlan.title}" fue ${next === "APPROVED" ? "aprobada" : next === "RETURNED" ? "devuelta" : "rechazada"}.`,
+        message: `La evaluación de avance del plan de acción fue ${next === "APPROVED" ? "aprobada" : next === "RETURNED" ? "devuelta" : "rechazada"}.`,
         title: "Evaluación de avance revisada",
         type: next === "APPROVED" ? "success" : "warning",
         userId: previous.submittedByUser.id,
@@ -468,7 +465,8 @@ export const progressService = {
     const auditorId = previous.actionPlan.observation.auditorUserId;
     if (auditorId !== access.userId) {
       await notificationService.create({
-        message: `Hay una evaluación pendiente para "${previous.actionPlan.title}".`,
+        message:
+          "Hay una evaluación de avance pendiente para un plan de acción.",
         title: "Avance pendiente de revisión",
         type: "info",
         userId: auditorId,

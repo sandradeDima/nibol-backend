@@ -36,8 +36,16 @@ const remediationPlanId = (request: Request) =>
 const log = async (
   request: Request,
   action: string,
-  current: { id: string; observation: { id: string }; title: string } | null,
-  previous: { id: string; observation: { id: string }; title: string } | null,
+  current: {
+    description: string;
+    id: string;
+    observation: { id: string };
+  } | null,
+  previous: {
+    description: string;
+    id: string;
+    observation: { id: string };
+  } | null,
 ) => {
   const record = current ?? previous;
   if (!record) return;
@@ -48,7 +56,7 @@ const log = async (
       action,
       entityId: record.id,
       entityType: "ACTION_PLAN",
-      metadata: { summary: `Plan de acción: ${record.title}.` },
+      metadata: { summary: `Plan de acción: ${record.description}.` },
     }),
     auditLogService.create({
       ...actor,
@@ -70,7 +78,7 @@ const log = async (
       observationId: record.observation.id,
       previousData: previous,
       targetUrl: `/planes-accion/${record.id}`,
-      title: `Plan de acción: ${record.title}`,
+      title: "Plan de acción actualizado",
     }),
   ]);
 };

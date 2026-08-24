@@ -61,7 +61,6 @@ export type ActionPlanDetail = {
   sortOrder: number;
   status: ActionPlanStatusValue;
   statusLabel: string;
-  title: string;
   updatedAt: string;
 };
 

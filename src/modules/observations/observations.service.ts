@@ -84,9 +84,10 @@ const hasGlobalAccess = (access: AuthorizationSummary): boolean =>
 export const buildObservationAccessWhere = (
   access: AuthorizationSummary,
 ): Prisma.ObservationWhereInput => {
-  if (hasGlobalAccess(access)) return {};
+  if (hasGlobalAccess(access)) return { deletedAt: null };
 
   return {
+    deletedAt: null,
     OR: [
       { auditorUserId: access.userId },
       {
@@ -272,6 +273,51 @@ const findRecord = async (
   return record;
 };
 
+const cancelLinkedWorkflowInstances = async (
+  tx: Prisma.TransactionClient,
+  workflowInstanceIds: string[],
+  deletedAt: Date,
+) => {
+  if (workflowInstanceIds.length === 0) return;
+
+  await tx.workflowTimer.updateMany({
+    data: { status: "CANCELLED" },
+    where: {
+      status: { in: ["PENDING", "PROCESSING", "FAILED"] },
+      workflowInstanceId: { in: workflowInstanceIds },
+    },
+  });
+  await tx.workflowTask.updateMany({
+    data: { completedAt: deletedAt, status: "CANCELLED" },
+    where: {
+      status: { in: ["PENDING", "IN_PROGRESS"] },
+      workflowInstanceId: { in: workflowInstanceIds },
+    },
+  });
+  await tx.workflowInstance.updateMany({
+    data: {
+      completedAt: deletedAt,
+      finalResult: "CANCELLED",
+      lastExecutionAt: deletedAt,
+      status: "CANCELLED",
+    },
+    where: {
+      id: { in: workflowInstanceIds },
+      status: { in: ["PENDING", "ACTIVE", "WAITING", "FAILED"] },
+    },
+  });
+};
+
+const extensionRequestForObservationWhere = (
+  observationId: string,
+): Prisma.DeadlineExtensionRequestWhereInput => ({
+  OR: [
+    { observationId },
+    { actionPlan: { observationId } },
+    { observationArea: { observationId } },
+  ],
+});
+
 const buildBusinessStatusWhere = (
   status: NonNullable<ListObservationsQuery["observationStatus"]>,
 ): Prisma.ObservationWhereInput => {
@@ -395,7 +441,8 @@ export const observationsService = {
               originalDueDate: plan.dueDate,
               responsibleUserId: plan.responsibleUserId,
               sortOrder: index,
-              title: plan.title,
+              // Kept only for backwards compatibility with the current database column.
+              title: plan.description.slice(0, 191),
             })),
           });
         }
@@ -475,9 +522,93 @@ export const observationsService = {
     access: AuthorizationSummary,
   ): Promise<ObservationDetail> {
     const previous = formatObservation(await findRecord(id, access));
-    await prisma.observation.update({
-      data: { deletedAt: new Date() },
-      where: { id },
+    const deletedAt = new Date();
+    await prisma.$transaction(async (tx) => {
+      const [
+        remediationPlans,
+        extensionRequests,
+        progressEvaluations,
+        evidence,
+      ] = await Promise.all([
+        tx.remediationPlan.findMany({
+          select: { workflowInstanceId: true },
+          where: { observationId: id, workflowInstanceId: { not: null } },
+        }),
+        tx.deadlineExtensionRequest.findMany({
+          select: { workflowInstanceId: true },
+          where: {
+            ...extensionRequestForObservationWhere(id),
+            workflowInstanceId: { not: null },
+          },
+        }),
+        tx.progressEvaluation.findMany({
+          select: { workflowInstanceId: true },
+          where: {
+            actionPlan: { observationId: id },
+            workflowInstanceId: { not: null },
+          },
+        }),
+        tx.evidenceFile.findMany({
+          select: { workflowInstanceId: true },
+          where: { observationId: id, workflowInstanceId: { not: null } },
+        }),
+      ]);
+      const workflowInstanceIds = [
+        ...new Set(
+          [
+            ...remediationPlans,
+            ...extensionRequests,
+            ...progressEvaluations,
+            ...evidence,
+          ]
+            .map((record) => record.workflowInstanceId)
+            .filter((workflowInstanceId): workflowInstanceId is string =>
+              Boolean(workflowInstanceId),
+            ),
+        ),
+      ];
+
+      await cancelLinkedWorkflowInstances(tx, workflowInstanceIds, deletedAt);
+      await tx.deadlineExtensionAttachment.deleteMany({
+        where: {
+          extensionRequest: extensionRequestForObservationWhere(id),
+        },
+      });
+      await tx.progressReviewHistory.deleteMany({
+        where: { progressEvaluation: { actionPlan: { observationId: id } } },
+      });
+      await tx.observationRisk.deleteMany({ where: { observationId: id } });
+      await tx.observationComment.updateMany({
+        data: { deletedAt },
+        where: { deletedAt: null, observationId: id },
+      });
+      await tx.evidenceFile.updateMany({
+        data: { deletedAt },
+        where: { deletedAt: null, observationId: id },
+      });
+      await tx.progressEvaluation.updateMany({
+        data: { deletedAt },
+        where: { actionPlan: { observationId: id }, deletedAt: null },
+      });
+      await tx.deadlineExtensionRequest.updateMany({
+        data: { deletedAt },
+        where: {
+          ...extensionRequestForObservationWhere(id),
+          deletedAt: null,
+        },
+      });
+      await tx.actionPlan.updateMany({
+        data: { deletedAt },
+        where: { deletedAt: null, observationId: id },
+      });
+      await tx.remediationPlan.updateMany({
+        data: { deletedAt },
+        where: { deletedAt: null, observationId: id },
+      });
+      await tx.observation.update({
+        data: { deletedAt },
+        where: { id },
+      });
     });
     return previous;
   },

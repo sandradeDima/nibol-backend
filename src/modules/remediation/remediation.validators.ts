@@ -27,7 +27,6 @@ const fields = {
   observationAreaId: z.uuid(),
   responsibleUserId: z.uuid(),
   sortOrder: z.coerce.number().int().min(0).optional(),
-  title: z.string().trim().min(2).max(191),
 };
 
 export const createActionPlanSchema = z.object(fields);
@@ -52,7 +51,7 @@ export const listActionPlansQuerySchema = z.object({
   responsibleUserId: z.uuid().optional(),
   search: z.string().trim().default(""),
   sortBy: z
-    .enum(["currentDueDate", "progressPercent", "title", "updatedAt"])
+    .enum(["currentDueDate", "progressPercent", "updatedAt"])
     .default("currentDueDate"),
   sortDirection: z.enum(["asc", "desc"]).default("asc"),
   status: z

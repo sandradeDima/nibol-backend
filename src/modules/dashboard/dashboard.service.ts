@@ -135,7 +135,7 @@ const actionPlanRow = (
       key: overdue ? "OVERDUE" : record.status,
       name: overdue ? "Vencido" : statusLabel(record.status),
     },
-    title: record.title,
+    title: record.description,
     updatedAt: record.updatedAt.toISOString(),
     observation: {
       code: displayCode(record.observation),
@@ -259,7 +259,7 @@ const buildReviewRows = (
         responsibleName: item.submittedByUser.name,
         status: { key: item.reviewStatus, name: "Pendiente de Auditoría" },
         subtitle: `${displayCode(item.actionPlan.observation)} · ${item.progressPercent}%`,
-        title: item.actionPlan.title,
+        title: item.actionPlan.description,
         updatedAt: item.updatedAt.toISOString(),
       })),
     ...data.extensions
@@ -282,7 +282,7 @@ const buildReviewRows = (
                 : "Pendiente de Auditoría",
           },
           subtitle: `${displayCode(observation)} · +${Math.round((item.proposedDueDate.getTime() - item.previousDueDate.getTime()) / DAY)} días`,
-          title: item.actionPlan?.title ?? observation.title,
+          title: item.actionPlan?.description ?? observation.title,
           updatedAt: item.updatedAt.toISOString(),
         };
       }),
@@ -303,7 +303,7 @@ const latestRows = (
       title: displayCode(item),
     })),
     ...data.evaluations.slice(0, 6).map((item) => ({
-      description: `Evaluación ${statusLabel(item.reviewStatus).toLowerCase()} para ${item.actionPlan.title}.`,
+      description: `Evaluación ${statusLabel(item.reviewStatus).toLowerCase()} para el plan de acción.`,
       href: `/observaciones/${item.actionPlan.observation.id}#colaboracion`,
       id: item.id,
       kind: "PROGRESS" as const,

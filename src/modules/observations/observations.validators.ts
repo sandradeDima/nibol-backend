@@ -25,11 +25,6 @@ export const observationActionPlanInputSchema = z.object({
     .max(10_000),
   dueDate: z.coerce.date({ error: "Ingrese una fecha límite válida." }),
   responsibleUserId: z.uuid("Seleccione un ejecutor válido."),
-  title: z
-    .string()
-    .trim()
-    .min(2, "Ingrese el título del plan de acción.")
-    .max(191),
 });
 
 const mutationFields = {

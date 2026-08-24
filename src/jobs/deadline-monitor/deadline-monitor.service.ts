@@ -126,7 +126,6 @@ const actionPlanSelect = {
   },
   responsibleUser: { select: userSelect },
   status: true,
-  title: true,
 } as const;
 
 const parseBoolean = (
@@ -524,8 +523,8 @@ const notifyActionPlan = async (
     code,
     currentStatus: actionPlan.status,
     description: isOverdue
-      ? `El plan de acción “${actionPlan.title}” se encuentra vencido.`
-      : `El plan de acción “${actionPlan.title}” vencerá el ${dateLabel(dueDate)}.`,
+      ? "El plan de acción se encuentra vencido."
+      : `El plan de acción vencerá el ${dateLabel(dueDate)}.`,
     dueDate: dateLabel(dueDate),
     entityId: actionPlan.id,
     entityType: "actionPlan",
@@ -581,7 +580,8 @@ const recordOverdueActivity = async (
         activityType: "OVERDUE_DETECTED",
         actorType: "SYSTEM",
         dedupeKey: `overdue-detected:${actionPlan.id}:${new Date().toISOString().slice(0, 10)}`,
-        description: `El monitor automático detectó que el plan de acción “${actionPlan.title}” está vencido.`,
+        description:
+          "El monitor automático detectó que un plan de acción está vencido.",
         entityId: actionPlan.id,
         entityType: "ACTION_PLAN",
         observationId: actionPlan.observation.id,
@@ -713,7 +713,7 @@ const processPendingExtensions = async (
               title: true,
             },
           },
-          title: true,
+          description: true,
         },
       },
       id: true,
@@ -770,7 +770,7 @@ const processPendingExtensions = async (
       currentStatus: managerReview
         ? "Pendiente de Gerencia"
         : "Pendiente de Auditoría",
-      description: `La ampliación de plazo para ${request.actionPlan?.title ?? observation.title} lleva más de ${context.parameters.pending_extension_reminder_hours} horas pendiente.`,
+      description: `La ampliación de plazo para ${request.actionPlan?.description ?? observation.title} lleva más de ${context.parameters.pending_extension_reminder_hours} horas pendiente.`,
       dueDate: dateLabel(request.proposedDueDate),
       entityId: request.id,
       entityType: "deadline_extension_request",

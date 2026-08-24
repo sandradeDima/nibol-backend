@@ -35,7 +35,6 @@ const include = {
       },
       originalDueDate: true,
       responsibleUser: { select: userSelect },
-      title: true,
     },
   },
   attachments: {
@@ -84,7 +83,6 @@ const format = (record: ExtensionRecord) => ({
         currentDueDate: record.actionPlan.currentDueDate.toISOString(),
         originalDueDate: record.actionPlan.originalDueDate.toISOString(),
         responsibleUser: record.actionPlan.responsibleUser,
-        title: record.actionPlan.title,
       }
     : null,
   attachments: record.attachments.map(({ evidenceFile }) => ({
@@ -283,7 +281,6 @@ export const extensionRequestsService = {
         ? {
             OR: [
               { reason: { contains: query.search } },
-              { actionPlan: { title: { contains: query.search } } },
               { observation: { title: { contains: query.search } } },
             ],
           }

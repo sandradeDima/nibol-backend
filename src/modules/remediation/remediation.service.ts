@@ -80,7 +80,6 @@ const format = (record: ActionPlanRecord): ActionPlanDetail => ({
   sortOrder: record.sortOrder,
   status: record.status,
   statusLabel: labels[record.status],
-  title: record.title,
   updatedAt: record.updatedAt.toISOString(),
 });
 
@@ -412,7 +411,8 @@ export const remediationService = {
             )?.id ?? null,
           responsibleUserId: input.responsibleUserId,
           sortOrder: input.sortOrder ?? 0,
-          title: input.title,
+          // Kept only for backwards compatibility with the current database column.
+          title: input.description.slice(0, 191),
         },
         select: { id: true },
       });
@@ -516,7 +516,6 @@ export const remediationService = {
       ...(query.search
         ? {
             OR: [
-              { title: { contains: query.search } },
               { description: { contains: query.search } },
               { observation: { title: { contains: query.search } } },
               {
@@ -636,7 +635,6 @@ export const remediationService = {
         ...(input.sortOrder !== undefined
           ? { sortOrder: input.sortOrder }
           : {}),
-        ...(input.title !== undefined ? { title: input.title } : {}),
       },
       where: { id },
     });

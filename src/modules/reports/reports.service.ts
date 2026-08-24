@@ -748,7 +748,7 @@ const getReportRows = async (
           progressPercent: true,
           responsibleUser: { select: userSummarySelect },
           status: true,
-          title: true,
+          description: true,
         },
         where: { deletedAt: null, observation: observationWhere },
       });
@@ -763,7 +763,7 @@ const getReportRows = async (
         ],
         rows: actionPlans.map((actionPlan: any) => ({
           Avance: `${actionPlan.progressPercent}%`,
-          "Plan de acción": actionPlan.title,
+          "Plan de acción": actionPlan.description,
           "Fecha límite": actionPlan.currentDueDate.toISOString(),
           Estado: actionPlan.status,
           Observación: `${observationDisplayCode(actionPlan.observation)} · ${actionPlan.observation.title}`,
