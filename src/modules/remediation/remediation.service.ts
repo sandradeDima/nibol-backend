@@ -613,7 +613,11 @@ export const remediationService = {
       input.observationAreaId ?? previous.observationAreaId,
       input.responsibleUserId ?? previous.responsibleUser.id,
     );
-    if (input.dueDate && previous._count.progressEvaluations > 0)
+    const dueDateChanged =
+      input.dueDate !== undefined &&
+      input.dueDate.toISOString().slice(0, 10) !==
+        previous.currentDueDate.toISOString().slice(0, 10);
+    if (dueDateChanged && previous._count.progressEvaluations > 0)
       throw new AppError(
         "Después de iniciar la ejecución debe usar una ampliación de plazo para cambiar la fecha límite.",
         409,
@@ -621,7 +625,11 @@ export const remediationService = {
     await prisma.actionPlan.update({
       data: {
         ...(input.description !== undefined
-          ? { description: input.description }
+          ? {
+              description: input.description,
+              // Kept only for backwards compatibility with the current database column.
+              title: input.description.slice(0, 191),
+            }
           : {}),
         ...(input.dueDate !== undefined
           ? { currentDueDate: input.dueDate, originalDueDate: input.dueDate }
