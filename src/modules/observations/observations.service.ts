@@ -23,7 +23,7 @@ const userSummarySelect = {
 
 const observationInclude = {
   actionPlans: {
-    select: { progressPercent: true, status: true },
+    select: { id: true, progressPercent: true, status: true },
     where: { deletedAt: null },
   },
   areaAssignments: {
@@ -122,6 +122,7 @@ const formatObservation = (record: ObservationRecord): ObservationDetail => {
 
   return {
     actionPlanCount: record.actionPlans.length,
+    actionPlans: record.actionPlans.map(({ id }) => ({ id })),
     areas: record.areaAssignments.map((assignment) => ({
       area: assignment.area,
       areaResponsible: assignment.areaResponsible,

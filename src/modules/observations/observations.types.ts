@@ -19,6 +19,7 @@ export type UserSummary = {
 
 export type ObservationListItem = {
   actionPlanCount: number;
+  actionPlans: Array<{ id: string }>;
   areas: Array<{
     area: { id: string; name: string };
     areaResponsible: UserSummary;
