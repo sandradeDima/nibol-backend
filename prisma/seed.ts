@@ -108,7 +108,7 @@ type SeedObservationStatus = {
 };
 
 type SeedArea = {
-  code: string | null;
+  code: string;
   description: string | null;
   key: SeedAreaKey;
   name: string;
@@ -731,8 +731,8 @@ type NamedIdRow = RowDataPacket & {
 };
 
 type AreaRow = RowDataPacket & {
+  code: string;
   id: string;
-  name: string;
 };
 
 type CountRow = RowDataPacket & {
@@ -954,6 +954,7 @@ const seedAreas = async (
         )
         VALUES (?, ?, ?, ?, ?, true, NOW(3), NOW(3), NULL)
         ON DUPLICATE KEY UPDATE
+          name = VALUES(name),
           code = VALUES(code),
           description = VALUES(description),
           manager_user_id = VALUES(manager_user_id),
@@ -1084,21 +1085,23 @@ const getAreaMap = async (
 ): Promise<Map<SeedAreaKey, string>> => {
   const [rows] = await connection.execute<AreaRow[]>(
     `
-      SELECT id, name
+      SELECT id, code
       FROM areas
-      WHERE name IN (${placeholders(areas.length)})
+      WHERE code IN (${placeholders(areas.length)})
     `,
-    areas.map((area) => area.name),
+    areas.map((area) => area.code),
   );
 
-  const idByName = new Map(rows.map((row) => [row.name, row.id]));
+  const idByCode = new Map(rows.map((row) => [row.code, row.id]));
 
   return new Map(
     areas.map((area) => {
-      const areaId = idByName.get(area.name);
+      const areaId = idByCode.get(area.code);
 
       if (!areaId) {
-        throw new Error(`Area ${area.name} not found after seeding.`);
+        throw new Error(
+          `Area ${area.name} (${area.code}) not found after seeding.`,
+        );
       }
 
       return [area.key, areaId];
