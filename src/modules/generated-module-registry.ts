@@ -15,14 +15,12 @@ export const generatedPermissionResources = [
   "catalogs",
   "products",
   "observations",
-  "extension_requests",
   "audit_reports",
   "observation_dictionary",
   "risks",
   "observation_areas",
   "action_plans",
   "progress_evaluations",
-  "finding_evidence",
 ] as const;
 
 export const generatedModuleRouters = [

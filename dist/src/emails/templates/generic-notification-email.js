@@ -1,9 +1,9 @@
 import { renderBaseEmailLayout } from "../layouts/BaseEmailLayout.js";
-import { escapeHtml, greeting, joinTextBlocks, toParagraphHtml, } from "../utils.js";
+import { escapeHtml, greeting, joinTextBlocks, resolveEmailAppName, toParagraphHtml, } from "../utils.js";
 export const genericNotificationEmailTemplate = {
     name: "genericNotification",
     render: ({ brand, variables }) => {
-        const appName = variables.appName?.trim() || brand.appName;
+        const appName = resolveEmailAppName(variables.appName ?? brand.appName);
         const actionHtml = variables.actionLabel && variables.actionLink
             ? `
             <p style="margin: 24px 0;">

@@ -37,12 +37,18 @@ const mutationFields = {
     }),
   auditRecommendation: z.string().trim().min(1).max(5_000),
   auditReportId: z.uuid(),
-  auditorUserId: z.uuid(),
+  auditorUserId: z.preprocess(
+    (value) => (value === "" ? null : value),
+    z.uuid().nullable().default(null),
+  ),
   category: nullableText,
+  commitmentDate: z.coerce
+    .date({ error: "Ingrese una fecha de compromiso válida." })
+    .optional(),
   currentStage: nullableText,
   description: z.string().trim().min(1).max(10_000),
   mainObservationId: z.uuid(),
-  observationNumber: z.coerce.number().int().positive().max(999_999),
+  observationNumber: z.coerce.number().int().positive().max(999_999).optional(),
   process: nullableText,
   riskIds: z
     .array(z.uuid())
@@ -76,12 +82,16 @@ export const createObservationSchema = z
 
 export const updateObservationSchema = z
   .object(mutationFields)
+  .omit({ observationNumber: true })
   .partial()
   .refine((value) => Object.keys(value).length > 0, {
     message: "Debe modificar al menos un campo.",
   });
 
 export const observationIdParamSchema = z.object({ id: z.uuid() });
+export const sendObservationsSchema = z.object({
+  ids: z.array(z.uuid()).min(1).max(100),
+});
 
 export const listObservationsQuerySchema = z.object({
   actionPlanResponsibleUserId: z.uuid().optional(),

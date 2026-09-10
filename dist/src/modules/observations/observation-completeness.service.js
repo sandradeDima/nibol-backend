@@ -108,7 +108,7 @@ export const buildObservationActionItems = (context, access, now = new Date()) =
         items.push({
             actionLabel: "Agregar plan",
             actionType: "ADD_ACTION_PLAN",
-            actionUrl: `${observationUrl}#planes-accion`,
+            actionUrl: `${observationUrl}?tab=plans`,
             code: "ACTION_PLAN_MISSING",
             label: "Falta un plan de acción",
             permission: "action_plans.create",
@@ -119,10 +119,10 @@ export const buildObservationActionItems = (context, access, now = new Date()) =
         items.push({
             actionLabel: "Subir evidencia",
             actionType: "ADD_FINDING_EVIDENCE",
-            actionUrl: `${observationUrl}#evidencia-hallazgo`,
+            actionUrl: `${observationUrl}?tab=evidence`,
             code: "FINDING_EVIDENCE_MISSING",
             label: "Falta evidencia del hallazgo",
-            permission: "finding_evidence.upload",
+            permission: "evidence.create",
             severity: "WARNING",
         });
     }
@@ -133,7 +133,7 @@ export const buildObservationActionItems = (context, access, now = new Date()) =
             actionUrl: `/avances-evidencias?filter.observationId=${context.id}&filter.reviewStatus=SENT_TO_AUDIT`,
             code: "PROGRESS_REVIEW_PENDING",
             label: `${context.pendingReviewCount} avance${context.pendingReviewCount === 1 ? "" : "s"} pendiente${context.pendingReviewCount === 1 ? "" : "s"} de revisión`,
-            permission: "progress_evaluations.review",
+            permission: "action_plans.evaluate",
             severity: "INFO",
         });
     }
@@ -141,10 +141,10 @@ export const buildObservationActionItems = (context, access, now = new Date()) =
         items.unshift({
             actionLabel: "Solicitar ampliación",
             actionType: "REQUEST_EXTENSION",
-            actionUrl: `${observationUrl}#ampliaciones`,
+            actionUrl: `${observationUrl}?tab=plans`,
             code: "OVERDUE",
             label: "La fecha límite está vencida",
-            permission: "extension_requests.create",
+            permission: "deadline_extensions.request",
             severity: "CRITICAL",
         });
     }

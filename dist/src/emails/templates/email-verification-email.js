@@ -1,9 +1,9 @@
 import { renderBaseEmailLayout } from "../layouts/BaseEmailLayout.js";
-import { escapeHtml, greeting, joinTextBlocks } from "../utils.js";
+import { escapeHtml, greeting, joinTextBlocks, resolveEmailAppName, } from "../utils.js";
 export const emailVerificationEmailTemplate = {
     name: "emailVerification",
     render: ({ brand, variables }) => {
-        const appName = variables.appName?.trim() || brand.appName;
+        const appName = resolveEmailAppName(variables.appName ?? brand.appName);
         const contentHtml = `
         <p style="margin: 0 0 16px;">${escapeHtml(greeting(variables.userName))}</p>
         <p style="margin: 0 0 16px;">Confirme su correo electronico para activar su cuenta en ${escapeHtml(appName)}.</p>

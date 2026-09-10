@@ -4,9 +4,9 @@ import { observationAggregationService } from "./observation-aggregation.service
 import { observationDeadlineService } from "./observation-deadline.service.js";
 test("deadlines use calendar days from the audit report date", () => {
     const reportDate = new Date("2026-08-14T00:00:00.000Z");
-    assert.equal(observationDeadlineService.calculate(reportDate, "ALTO").toISOString(), "2026-11-12T00:00:00.000Z");
-    assert.equal(observationDeadlineService.calculate(reportDate, "MEDIO").toISOString(), "2026-12-12T00:00:00.000Z");
-    assert.equal(observationDeadlineService.calculate(reportDate, "BAJO").toISOString(), "2027-02-10T00:00:00.000Z");
+    assert.equal(observationDeadlineService.calculate(reportDate, 90).toISOString(), "2026-11-12T00:00:00.000Z");
+    assert.equal(observationDeadlineService.calculate(reportDate, 120).toISOString(), "2026-12-12T00:00:00.000Z");
+    assert.equal(observationDeadlineService.calculate(reportDate, 180).toISOString(), "2027-02-10T00:00:00.000Z");
 });
 test("observation aggregation averages independent action plans", () => {
     const plans = [

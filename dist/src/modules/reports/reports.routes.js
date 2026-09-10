@@ -5,6 +5,8 @@ import { AUDIT_REPORTS_PERMISSIONS, REPORTS_PERMISSIONS, } from "./reports.permi
 import { reportsController } from "./reports.controller.js";
 export const reportsRouter = Router();
 reportsRouter.get("/reports/dashboard", requirePermission(REPORTS_PERMISSIONS.view), asyncHandler(reportsController.dashboard));
+reportsRouter.get("/reports/options", requirePermission(REPORTS_PERMISSIONS.view), asyncHandler(reportsController.options));
+reportsRouter.get("/reports/action-plans", requirePermission(REPORTS_PERMISSIONS.view), asyncHandler(reportsController.listActionPlans));
 reportsRouter.get("/reports/observations", requirePermission(REPORTS_PERMISSIONS.view), asyncHandler(reportsController.listObservations));
 reportsRouter.get("/reports/preview", requirePermission(REPORTS_PERMISSIONS.view), asyncHandler(reportsController.preview));
 reportsRouter.get("/reports/export", requirePermission(REPORTS_PERMISSIONS.export), asyncHandler(reportsController.exportReport));

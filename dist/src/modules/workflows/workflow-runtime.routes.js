@@ -4,6 +4,7 @@ import { requireAnyPermission, requirePermission, } from "../../middleware/autho
 import { workflowRuntimeController } from "./workflow-runtime.controller.js";
 import { WORKFLOW_INSTANCE_PERMISSIONS, WORKFLOW_PERMISSIONS, WORKFLOW_TASK_PERMISSIONS, WORKFLOW_TIMER_PERMISSIONS, } from "./workflows.permissions.js";
 export const workflowRuntimeRouter = Router();
+workflowRuntimeRouter.get("/workflow-instances/start-options", requirePermission(WORKFLOW_INSTANCE_PERMISSIONS.start), asyncHandler(workflowRuntimeController.getStartOptions));
 workflowRuntimeRouter.post("/workflow-instances", requirePermission(WORKFLOW_INSTANCE_PERMISSIONS.start), asyncHandler(workflowRuntimeController.startInstance));
 workflowRuntimeRouter.get("/workflow-instances/:instanceId/history", requireAnyPermission([
     WORKFLOW_PERMISSIONS.viewInstances,

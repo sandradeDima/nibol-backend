@@ -45,6 +45,64 @@ export type ReportObservationRow = {
   updatedAt: string;
 };
 
+export type ReportActionPlanRow = {
+  actionPlanId: string;
+  auditReportId: string;
+  area: { id: string; name: string };
+  areaResponsible: { email: string; id: string; name: string } | null;
+  completedAt: string | null;
+  createdAt: string;
+  deadlineStatus: "VIGENTE" | "VENCIDO";
+  description: string;
+  effectiveDueDate: string;
+  executor: { email: string; id: string; name: string } | null;
+  href: string;
+  observation: {
+    code: string;
+    id: string;
+    title: string;
+  };
+  observationId: string;
+  officialProgress: {
+    code: "NI" | "I" | "CA" | "CO";
+    key: "NOT_STARTED" | "STARTED" | "WITH_PROGRESS" | "CONCLUDED";
+    label: string;
+    percent: number;
+  };
+  originalDueDate: string;
+  processOwner: { email: string; id: string; name: string } | null;
+  progressPercent: number;
+  reportedProgressPercent: number | null;
+  reprogrammed: boolean;
+  riskLevel: {
+    colorToken: string | null;
+    id: string;
+    key: string;
+    name: string;
+  };
+  title: string;
+  updatedAt: string;
+};
+
+export type ReportOptions = {
+  areas: Array<{ id: string; name: string }>;
+  auditReports: Array<{ id: string; label: string }>;
+  executors: Array<{ email: string; id: string; name: string }>;
+  processOwners: Array<{ email: string; id: string; name: string }>;
+  progressStatuses: Array<{
+    code: "NI" | "I" | "CA" | "CO";
+    key: "NOT_STARTED" | "STARTED" | "WITH_PROGRESS" | "CONCLUDED";
+    label: string;
+    percent: number;
+  }>;
+  riskLevels: Array<{
+    colorToken: string | null;
+    id: string;
+    key: string;
+    name: string;
+  }>;
+};
+
 export type ReportAreaSummary = {
   area: { id: string; name: string };
   averageResolutionDays: number;
@@ -62,7 +120,13 @@ export type ReportDashboardData = {
   areaSummary: ReportAreaSummary[];
   charts: {
     areaPerformance: Array<ReportChartItem & { compliancePercent: number }>;
+    areaDistribution: ReportChartItem[];
     currentVsOverdue: ReportChartItem[];
+    deadlineDistribution: ReportChartItem[];
+    executorDistribution: ReportChartItem[];
+    processOwnerDistribution: ReportChartItem[];
+    progressDistribution: ReportChartItem[];
+    reprogrammedDistribution: ReportChartItem[];
     riskDistribution: ReportChartItem[];
     statusDistribution: ReportChartItem[];
     trend: Array<{
@@ -75,16 +139,24 @@ export type ReportDashboardData = {
   dueSoonDays: number;
   generatedAt: string;
   insights: string[];
+  rows: ReportActionPlanRow[];
   summary: {
     averageResolutionDays: number;
+    conAvance: number;
+    concluido: number;
     closed: number;
     compliancePercent: number;
     dueSoon: number;
+    iniciado: number;
     inProcess: number;
+    noIniciado: number;
     open: number;
     overdue: number;
     predominantRisk: { count: number; key: string; label: string } | null;
+    reprogramados: number;
     total: number;
+    vencidos: number;
+    vigentes: number;
   };
 };
 

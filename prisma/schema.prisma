@@ -64,7 +64,6 @@ enum ActionPlanStatus {
 enum ProgressEvaluationType {
   ADVANCE
   FINALIZATION
-  CORRECTION
 }
 
 enum ProgressEvaluationReviewStatus {
@@ -72,7 +71,6 @@ enum ProgressEvaluationReviewStatus {
   SENT_TO_AUDIT
   APPROVED
   RETURNED
-  REJECTED
 }
 
 enum CommentVisibility {
@@ -85,7 +83,6 @@ enum ProgressReviewAction {
   SENT
   APPROVED
   RETURNED
-  REJECTED
 }
 
 enum DeadlineExtensionStatus {
@@ -93,15 +90,27 @@ enum DeadlineExtensionStatus {
   SENT_TO_MANAGER
   MANAGER_APPROVED
   MANAGER_REJECTED
-  SENT_TO_AUDIT
-  AUDIT_APPROVED
-  AUDIT_REJECTED
   CANCELLED
 }
 
 enum DeadlineExtensionTarget {
   OBSERVATION
   ACTION_PLAN
+}
+
+model DeadlineExtensionClassification {
+  id                  String                        @id @default(uuid()) @db.Char(36)
+  code                String                        @unique @db.VarChar(64)
+  name                String                        @unique @db.VarChar(191)
+  description         String                        @db.VarChar(500)
+  maxAdditionalDays   Int                           @map("max_additional_days")
+  active              Boolean                       @default(true)
+  createdAt           DateTime                      @default(now()) @map("created_at")
+  updatedAt           DateTime                      @updatedAt @map("updated_at")
+  requests            DeadlineExtensionRequest[]
+
+  @@index([active])
+  @@map("deadline_extension_classifications")
 }
 
 enum EvidenceContext {
@@ -137,6 +146,7 @@ enum WorkflowNodeType {
   START
   STAGE
   APPROVAL
+  SUBFLOW
   REJECTION
   CONDITION
   SLA
@@ -245,7 +255,6 @@ model User {
   progressReviewHistoryItems        ProgressReviewHistory[]    @relation("ProgressReviewHistoryActor")
   requestedDeadlineExtensions       DeadlineExtensionRequest[] @relation("DeadlineExtensionRequestedBy")
   managerReviewedDeadlineExtensions DeadlineExtensionRequest[] @relation("DeadlineExtensionManagerReviewer")
-  auditReviewedDeadlineExtensions   DeadlineExtensionRequest[] @relation("DeadlineExtensionAuditReviewer")
   notificationDeliveries            NotificationDelivery[]     @relation("NotificationDeliveryRecipient")
   scheduledJobExecutions            ScheduledJobExecution[]    @relation("ScheduledJobExecutionTriggeredBy")
   entityActivities                  EntityActivity[]           @relation("EntityActivityActor")
@@ -262,6 +271,7 @@ model User {
 
 model Role {
   id                    String           @id @default(uuid()) @db.Char(36)
+  code                  String           @unique @db.VarChar(64)
   name                  String           @unique @db.VarChar(191)
   description           String?          @db.VarChar(255)
   createdAt             DateTime         @default(now()) @map("created_at")
@@ -299,6 +309,7 @@ model UserRole {
   role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
   @@unique([userId, roleId])
+  @@unique([userId])
   @@index([roleId])
   @@map("user_roles")
 }
@@ -391,6 +402,7 @@ model NotificationDelivery {
   channel         NotificationDeliveryChannel
   recipientUserId String?                     @map("recipient_user_id") @db.Char(36)
   recipientEmail  String?                     @map("recipient_email") @db.VarChar(191)
+  payloadJson     Json?                       @map("payload_json")
   status          NotificationDeliveryStatus  @default(PENDING)
   attempts        Int                         @default(0)
   lastAttemptAt   DateTime?                   @map("last_attempt_at")
@@ -441,6 +453,11 @@ model EntityActivity {
 model ScheduledJobExecution {
   id                   String                      @id @default(uuid()) @db.Char(36)
   jobName              String                      @map("job_name") @db.VarChar(100)
+  runType              String?                     @map("run_type") @db.VarChar(16)
+  cadenceKey           String?                     @map("cadence_key") @db.VarChar(32)
+  periodKey            String?                     @map("period_key") @db.VarChar(16)
+  dedupeKey            String?                     @unique @map("dedupe_key") @db.VarChar(255)
+  scheduledFor         DateTime?                   @map("scheduled_for")
   startedAt            DateTime                    @map("started_at")
   finishedAt           DateTime?                   @map("finished_at")
   status               ScheduledJobExecutionStatus
@@ -457,6 +474,7 @@ model ScheduledJobExecution {
 
   @@index([jobName, startedAt])
   @@index([jobName, status])
+  @@index([jobName, cadenceKey, periodKey])
   @@index([triggeredByUserId])
   @@map("scheduled_job_executions")
 }
@@ -532,7 +550,7 @@ model RiskLevel {
   description         String?       @db.VarChar(500)
   colorToken          String?       @map("color_token") @db.VarChar(64)
   severityOrder       Int           @map("severity_order")
-  defaultDeadlineDays Int?          @map("default_deadline_days")
+  maxRemediationDays  Int?          @map("max_remediation_days")
   active              Boolean       @default(true)
   createdAt           DateTime      @default(now()) @map("created_at")
   updatedAt           DateTime      @updatedAt @map("updated_at")
@@ -694,13 +712,14 @@ model Observation {
   id                        String                     @id @default(uuid()) @db.Char(36)
   auditReportId             String                     @map("audit_report_id") @db.Char(36)
   observationNumber         Int                        @map("observation_number")
+  deletedObservationNumber  Int?                       @map("deleted_observation_number")
   mainObservationId         String                     @map("main_observation_id") @db.Char(36)
   title                     String                     @db.VarChar(191)
   description               String                     @db.Text
   auditRecommendation       String                     @map("audit_recommendation") @db.Text
   riskLevelId               String                     @map("risk_level_id") @db.Char(36)
   statusId                  String                     @map("status_id") @db.Char(36)
-  auditorUserId             String                     @map("auditor_user_id") @db.Char(36)
+  auditorUserId             String?                    @map("auditor_user_id") @db.Char(36)
   originalDueDate           DateTime                   @map("original_due_date") @db.Date
   currentDueDate            DateTime                   @map("current_due_date") @db.Date
   source                    String?                    @db.VarChar(191)
@@ -708,6 +727,7 @@ model Observation {
   category                  String?                    @db.VarChar(191)
   progressPercent           Int                        @default(0) @map("progress_percent")
   currentStage              String?                    @map("current_stage") @db.VarChar(191)
+  sentAt                    DateTime?                  @map("sent_at")
   createdAt                 DateTime                   @default(now()) @map("created_at")
   updatedAt                 DateTime                   @updatedAt @map("updated_at")
   deletedAt                 DateTime?                  @map("deleted_at")
@@ -715,7 +735,7 @@ model Observation {
   mainObservation           ObservationDictionary      @relation(fields: [mainObservationId], references: [id], onDelete: Restrict)
   riskLevel                 RiskLevel                  @relation(fields: [riskLevelId], references: [id], onDelete: Restrict)
   status                    ObservationStatus          @relation(fields: [statusId], references: [id], onDelete: Restrict)
-  auditorUser               User                       @relation("ObservationAuditor", fields: [auditorUserId], references: [id], onDelete: Restrict)
+  auditorUser               User?                      @relation("ObservationAuditor", fields: [auditorUserId], references: [id], onDelete: Restrict)
   risks                     ObservationRisk[]
   areaAssignments           ObservationArea[]
   remediationPlans          RemediationPlan[]
@@ -863,32 +883,33 @@ model DeadlineExtensionRequest {
   actionPlanId       String?                       @map("action_plan_id") @db.Char(36)
   observationAreaId  String?                       @map("observation_area_id") @db.Char(36)
   requestedByUserId  String                        @map("requested_by_user_id") @db.Char(36)
+  classificationId   String?                       @map("classification_id") @db.Char(36)
   previousDueDate    DateTime                      @map("previous_due_date") @db.Date
   proposedDueDate    DateTime                      @map("proposed_due_date") @db.Date
+  maxAdditionalDays  Int?                          @map("max_additional_days")
+  maxAllowedDate     DateTime?                     @map("max_allowed_date") @db.Date
   reason             String                        @db.LongText
   status             DeadlineExtensionStatus       @default(DRAFT)
   managerReviewerId  String?                       @map("manager_reviewer_id") @db.Char(36)
   managerReviewedAt  DateTime?                     @map("manager_reviewed_at")
   managerComment     String?                       @map("manager_comment") @db.LongText
-  auditReviewerId    String?                       @map("audit_reviewer_id") @db.Char(36)
-  auditReviewedAt    DateTime?                     @map("audit_reviewed_at")
-  auditComment       String?                       @map("audit_comment") @db.LongText
   finalApprovedAt    DateTime?                     @map("final_approved_at")
   createdAt          DateTime                      @default(now()) @map("created_at")
   updatedAt          DateTime                      @updatedAt @map("updated_at")
   deletedAt          DateTime?                     @map("deleted_at")
   workflowInstanceId String?                       @map("workflow_instance_id") @db.Char(36)
+  classification     DeadlineExtensionClassification? @relation(fields: [classificationId], references: [id], onDelete: Restrict)
   observation        Observation?                  @relation(fields: [observationId], references: [id], onDelete: Cascade)
   actionPlan         ActionPlan?                   @relation(fields: [actionPlanId], references: [id], onDelete: Cascade)
   observationArea    ObservationArea?              @relation(fields: [observationAreaId], references: [id], onDelete: SetNull)
   requestedByUser    User                          @relation("DeadlineExtensionRequestedBy", fields: [requestedByUserId], references: [id], onDelete: Restrict)
   managerReviewer    User?                         @relation("DeadlineExtensionManagerReviewer", fields: [managerReviewerId], references: [id], onDelete: SetNull)
-  auditReviewer      User?                         @relation("DeadlineExtensionAuditReviewer", fields: [auditReviewerId], references: [id], onDelete: SetNull)
   attachments        DeadlineExtensionAttachment[]
 
   @@index([observationAreaId])
-  @@index([auditReviewerId])
   @@index([actionPlanId])
+  @@unique([actionPlanId], map: "deadline_extension_one_per_action_plan_key")
+  @@index([classificationId])
   @@index([deletedAt])
   @@index([managerReviewerId])
   @@index([observationId, actionPlanId, status, deletedAt], map: "der_observation_action_plan_status_deleted_idx")
@@ -965,8 +986,8 @@ model ProgressEvaluation {
   actionPlanId       String                         @map("action_plan_id") @db.Char(36)
   submittedByUserId  String                         @map("submitted_by_user_id") @db.Char(36)
   type               ProgressEvaluationType         @default(ADVANCE)
-  progressPercent    Int                            @map("progress_percent")
-  actionPlanStatus   ActionPlanStatus               @map("action_plan_status")
+  reportedProgressPercent Int?                      @map("reported_progress_percent")
+  evaluatedStatus         ActionPlanStatus?         @map("evaluated_status")
   comment            String                         @db.LongText
   reviewStatus       ProgressEvaluationReviewStatus @default(DRAFT) @map("review_status")
   reviewedByUserId   String?                        @map("reviewed_by_user_id") @db.Char(36)

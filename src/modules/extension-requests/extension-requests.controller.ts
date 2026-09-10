@@ -13,7 +13,6 @@ import {
   createExtensionRequestSchema,
   extensionRequestIdParamSchema,
   listExtensionRequestsQuerySchema,
-  observationIdParamSchema,
   reviewExtensionRequestSchema,
   updateExtensionRequestSchema,
 } from "./extension-requests.validators.js";
@@ -72,36 +71,10 @@ const log = async (
 };
 
 export const extensionRequestsController = {
-  async auditApprove(request: Request, response: Response) {
-    const result = await service.auditReview(
-      parsedId(request, extensionRequestIdParamSchema),
-      true,
-      reviewExtensionRequestSchema.parse(request.body),
-      access(request),
-    );
-    await log(
-      request,
-      "extension_requests.approve",
-      result.current,
-      result.previous,
-    );
-    sendSuccess(response, result.current);
+  async listClassifications(request: Request, response: Response) {
+    sendSuccess(response, await service.listClassifications(access(request)));
   },
-  async auditReject(request: Request, response: Response) {
-    const result = await service.auditReview(
-      parsedId(request, extensionRequestIdParamSchema),
-      false,
-      reviewExtensionRequestSchema.parse(request.body),
-      access(request),
-    );
-    await log(
-      request,
-      "extension_requests.reject",
-      result.current,
-      result.previous,
-    );
-    sendSuccess(response, result.current);
-  },
+
   async cancel(request: Request, response: Response) {
     const result = await service.cancel(
       parsedId(request, extensionRequestIdParamSchema),
@@ -115,16 +88,7 @@ export const extensionRequestsController = {
       createExtensionRequestSchema.parse(request.body),
       access(request),
     );
-    await log(request, "extension_requests.create", record, null);
-    sendSuccess(response, record, 201);
-  },
-  async createForObservation(request: Request, response: Response) {
-    const record = await service.createForObservation(
-      parsedId(request, observationIdParamSchema),
-      createExtensionRequestSchema.parse(request.body),
-      access(request),
-    );
-    await log(request, "extension_requests.create", record, null);
+    await log(request, "deadline_extensions.request", record, null);
     sendSuccess(response, record, 201);
   },
   async getById(request: Request, response: Response) {
@@ -159,6 +123,12 @@ export const extensionRequestsController = {
       reviewExtensionRequestSchema.parse(request.body),
       access(request),
     );
+    await log(
+      request,
+      "deadline_extensions.approve",
+      result.current,
+      result.previous,
+    );
     sendSuccess(response, result.current);
   },
   async managerReject(request: Request, response: Response) {
@@ -168,12 +138,24 @@ export const extensionRequestsController = {
       reviewExtensionRequestSchema.parse(request.body),
       access(request),
     );
+    await log(
+      request,
+      "deadline_extensions.reject",
+      result.current,
+      result.previous,
+    );
     sendSuccess(response, result.current);
   },
   async sendToManager(request: Request, response: Response) {
     const result = await service.submit(
       parsedId(request, extensionRequestIdParamSchema),
       access(request),
+    );
+    await log(
+      request,
+      "action_plans.submit_to_audit",
+      result.current,
+      result.previous,
     );
     sendSuccess(response, result.current);
   },
@@ -182,6 +164,12 @@ export const extensionRequestsController = {
       parsedId(request, extensionRequestIdParamSchema),
       updateExtensionRequestSchema.parse(request.body),
       access(request),
+    );
+    await log(
+      request,
+      "deadline_extensions.request",
+      result.current,
+      result.previous,
     );
     sendSuccess(response, result.current);
   },

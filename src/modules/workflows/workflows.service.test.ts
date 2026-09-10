@@ -3,7 +3,6 @@ import test from "node:test";
 
 import { AppError } from "../../utils/app-error.js";
 import {
-  AUDIT_WORKFLOW_PERMISSION_NAMES,
   ALL_PERMISSION_NAMES,
   WORKFLOW_PERMISSION_NAMES,
 } from "../../permissions/definitions.js";
@@ -29,8 +28,11 @@ import {
 } from "./workflows.service.js";
 
 const unauthorizedAccess = {
+  dataScope: "ASSIGNED" as const,
   isAdmin: false,
   permissions: [],
+  roleCode: "EXECUTOR" as const,
+  roleName: "Ejecutor",
   roles: ["Usuario"],
   userId: "4f7c2f4c-9f1d-42af-8b55-fd54c88e2cc2",
 };
@@ -318,8 +320,11 @@ test("las mutaciones de workflow generan eventos de actividad y auditoría", () 
   const events = buildWorkflowAuditEvents({
     access: {
       ipAddress: "127.0.0.1",
+      dataScope: "ALL" as const,
       isAdmin: true,
       permissions: ["workflows.create"],
+      roleCode: "SYSTEM_ADMIN" as const,
+      roleName: "Administrador del sistema",
       roles: ["Admin"],
       userId: unauthorizedAccess.userId,
     },
@@ -343,7 +348,7 @@ test("los permisos workflow se pueden sembrar de forma idempotente", () => {
     WORKFLOW_PERMISSION_NAMES.length,
   );
   assert.ok(
-    AUDIT_WORKFLOW_PERMISSION_NAMES.every((permission) =>
+    WORKFLOW_PERMISSION_NAMES.every((permission) =>
       WORKFLOW_PERMISSION_NAMES.includes(permission),
     ),
   );

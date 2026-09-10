@@ -16,59 +16,48 @@ export const progressRouter = Router();
 
 progressRouter.get(
   "/progress-evaluations",
-  requirePermission("progress_evaluations.view"),
+  requirePermission("action_plans.view"),
   asyncHandler(controller.listProgressEvaluations),
 );
 progressRouter.get(
   "/progress-evaluations/:id",
-  requirePermission("progress_evaluations.view"),
+  requirePermission("action_plans.view"),
   asyncHandler(controller.getProgressEvaluation),
 );
 progressRouter.post(
   "/action-plans/:id/evaluations",
-  requirePermission("progress_evaluations.submit"),
+  requirePermission("action_plans.submit_to_audit"),
   asyncHandler(controller.createProgressEvaluation),
 );
 progressRouter.patch(
   "/progress-evaluations/:id",
-  requirePermission("progress_evaluations.submit"),
+  requirePermission("action_plans.submit_to_audit"),
   asyncHandler(controller.updateProgressEvaluation),
 );
 progressRouter.post(
   "/progress-evaluations/:id/submit",
-  requirePermission("progress_evaluations.submit"),
+  requirePermission("action_plans.submit_to_audit"),
   asyncHandler(controller.sendProgressEvaluationToAudit),
 );
 progressRouter.post(
   "/progress-evaluations/:id/approve",
-  requireAllPermissions([
-    "progress_evaluations.review",
-    "progress_evaluations.approve",
-  ]),
+  requireAllPermissions(["action_plans.evaluate", "action_plans.approve"]),
   asyncHandler(controller.approveProgressEvaluation),
 );
 progressRouter.post(
   "/progress-evaluations/:id/return",
-  requirePermission("progress_evaluations.review"),
+  requirePermission("action_plans.evaluate"),
   asyncHandler(controller.returnProgressEvaluation),
 );
 progressRouter.post(
-  "/progress-evaluations/:id/reject",
-  requireAllPermissions([
-    "progress_evaluations.review",
-    "progress_evaluations.reject",
-  ]),
-  asyncHandler(controller.rejectProgressEvaluation),
-);
-progressRouter.post(
   "/progress-evaluations/:id/evidence",
-  requirePermission("progress_evaluations.submit"),
+  requirePermission("evidence.create"),
   upload.array("files", 10),
   asyncHandler(controller.createProgressEvaluationEvidence),
 );
 progressRouter.post(
   "/action-plans/:id/evidence",
-  requirePermission("finding_evidence.upload"),
+  requirePermission("evidence.create"),
   upload.array("files", 10),
   asyncHandler(controller.createActionPlanEvidence),
 );
@@ -79,19 +68,29 @@ progressRouter.get(
 );
 progressRouter.post(
   "/observations/:id/evidence",
-  requirePermission("finding_evidence.upload"),
+  requirePermission("evidence.create"),
   upload.array("files", 10),
   asyncHandler(controller.createObservationEvidence),
 );
 progressRouter.delete(
   "/evidences/:id",
-  requirePermission("finding_evidence.delete"),
+  requirePermission("evidence.delete"),
   asyncHandler(controller.deleteEvidence),
 );
 progressRouter.post(
   "/evidences/:id/submit-review",
-  requirePermission("finding_evidence.upload"),
+  requirePermission("evidence.create"),
   asyncHandler(controller.submitEvidenceForReview),
+);
+progressRouter.post(
+  "/evidences/:id/approve-review",
+  requirePermission("evidence.review"),
+  asyncHandler(controller.approveEvidenceReview),
+);
+progressRouter.post(
+  "/evidences/:id/return-review",
+  requirePermission("evidence.review"),
+  asyncHandler(controller.returnEvidenceReview),
 );
 progressRouter.get(
   "/evidences/:id/download",

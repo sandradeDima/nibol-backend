@@ -21,6 +21,8 @@ export type WorkflowSimulationContext = {
   daysOverdue?: number | null;
   hasEvidence?: boolean | null;
   evidenceCount?: number | null;
+  areaPlanRequired?: boolean | null;
+  allPlansValidated?: boolean | null;
   remediationPlanStatus?: string | null;
   requestType?: string | null;
   requestedExtensionDays?: number | null;
@@ -203,6 +205,24 @@ export const WORKFLOW_RULE_FIELDS: Record<
     required: false,
     valueSource: "context",
   },
+  areaPlanRequired: {
+    allowedOperators: booleanOperators,
+    dataType: "boolean",
+    key: "areaPlanRequired",
+    label: "Requiere plan de acción del área",
+    normalize: normalizeBoolean,
+    required: false,
+    valueSource: "context",
+  },
+  allPlansValidated: {
+    allowedOperators: booleanOperators,
+    dataType: "boolean",
+    key: "allPlansValidated",
+    label: "Todos los planes están validados",
+    normalize: normalizeBoolean,
+    required: false,
+    valueSource: "context",
+  },
   observationStatus: {
     allowedOperators: stringOperators,
     catalogSource: "observationStatuses",
@@ -237,7 +257,7 @@ export const WORKFLOW_RULE_FIELDS: Record<
     catalogSource: "remediationPlanStatuses",
     dataType: "string",
     key: "remediationPlanStatus",
-    label: "Estado del plan de remediación",
+    label: "Estado del plan de acción recomendado",
     normalize: normalizeCatalogToken,
     required: false,
     valueSource: "context",

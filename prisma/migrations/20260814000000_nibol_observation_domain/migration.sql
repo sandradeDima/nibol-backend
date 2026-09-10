@@ -1236,4 +1236,3 @@ ALTER TABLE `workflow_timers` ADD CONSTRAINT `workflow_timers_workflow_instance_
 
 -- AddForeignKey
 ALTER TABLE `workflow_timers` ADD CONSTRAINT `workflow_timers_workflow_task_id_fkey` FOREIGN KEY (`workflow_task_id`) REFERENCES `workflow_tasks`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
-

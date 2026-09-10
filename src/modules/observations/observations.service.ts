@@ -1,7 +1,23 @@
-import type { Prisma } from "../../../generated/prisma/client.js";
+import { createHash } from "node:crypto";
 
-import type { AuthorizationSummary } from "../../services/authorization-service.js";
+import {
+  NotificationDeliveryChannel,
+  NotificationDeliveryStatus,
+  type Prisma,
+} from "../../../generated/prisma/client.js";
+
+import {
+  authorizationService,
+  buildActionPlanScopeWhere,
+  buildObservationAreaScopeWhere,
+  buildObservationScopeWhere,
+  type AuthorizationSummary,
+} from "../../services/authorization-service.js";
+import { notificationService } from "../../services/notification-service.js";
+import { emailService } from "../../emails/EmailService.js";
+import { env } from "../../utils/env.js";
 import { AppError } from "../../utils/app-error.js";
+import { logger } from "../../utils/logger.js";
 import { prisma } from "../../utils/prisma.js";
 import { observationAggregationService } from "./observation-aggregation.service.js";
 import { observationDeadlineService } from "./observation-deadline.service.js";
@@ -21,46 +37,244 @@ const userSummarySelect = {
   name: true,
 } as const;
 
-const observationInclude = {
-  actionPlans: {
-    select: { id: true, progressPercent: true, status: true },
-    where: { deletedAt: null },
-  },
-  areaAssignments: {
-    include: {
-      actionPlans: {
-        select: { progressPercent: true, status: true },
-        where: { deletedAt: null },
+export const nextAvailableObservationNumber = (
+  usedNumbers: Iterable<number>,
+): number => {
+  const used = new Set(usedNumbers);
+  let next = 1;
+  while (used.has(next)) next += 1;
+  return next;
+};
+
+type DistributionUser = {
+  email: string;
+  id: string;
+  name: string;
+};
+
+export type ObservationDistributionRecord = {
+  areaAssignments: Array<{
+    area: { id: string; name: string };
+    areaResponsible: DistributionUser;
+    actionPlans: Array<{ responsibleUser: DistributionUser }>;
+    processOwner: DistributionUser;
+  }>;
+  auditReport: { id: string; reportNumber: string; title: string };
+  currentDueDate?: Date | null;
+  description: string;
+  id: string;
+  observationNumber: number;
+  riskLevel: { maxRemediationDays: number | null; name: string };
+  title: string;
+};
+
+export type ObservationAssignmentEmailGroup = {
+  email: string;
+  maxPeriods: string;
+  name: string;
+  observationIds: string[];
+  userId: string;
+  reports: Array<{
+    areaNames: string[];
+    observations: Array<{
+      area?: string;
+      code?: string;
+      description: string;
+      dueDate?: string;
+      number: number;
+      risk: string;
+      title: string;
+    }>;
+    reportNumber: string;
+    reportTitle: string;
+  }>;
+};
+
+export const formatRiskLevelMaxPeriods = (
+  levels: ReadonlyArray<{
+    maxRemediationDays: number | null;
+    name: string;
+    severityOrder?: number;
+  }>,
+): string =>
+  [...levels]
+    .filter(
+      (level) =>
+        Number.isInteger(level.maxRemediationDays) &&
+        (level.maxRemediationDays ?? 0) > 0,
+    )
+    .sort(
+      (left, right) =>
+        (left.severityOrder ?? Number.MAX_SAFE_INTEGER) -
+        (right.severityOrder ?? Number.MAX_SAFE_INTEGER),
+    )
+    .map((level) => `${level.name}: ${level.maxRemediationDays} días`)
+    .join(" · ");
+
+export const buildObservationSendOperationId = (ids: readonly string[]) =>
+  createHash("sha256")
+    .update([...new Set(ids)].sort().join(":"))
+    .digest("hex");
+
+export const buildObservationSendDedupeKey = (
+  operationId: string,
+  userId: string,
+  channel: "notification" | "IN_APP" | "EMAIL",
+) => `observation-send:${operationId}:${userId}:${channel}`;
+
+export const canSendObservation = (sentAt: Date | null): boolean => !sentAt;
+
+export const buildObservationAssignmentGroups = (
+  records: ReadonlyArray<ObservationDistributionRecord>,
+  maxPeriods: string,
+): ObservationAssignmentEmailGroup[] => {
+  const groups = new Map<
+    string,
+    {
+      email: string;
+      maxPeriods: string;
+      name: string;
+      observationIds: Set<string>;
+      userId: string;
+      reports: Map<
+        string,
+        {
+          areaNames: Set<string>;
+          observations: Map<
+            string,
+            {
+              areaNames: Set<string>;
+              description: string;
+              dueDate?: string;
+              number: number;
+              risk: string;
+              title: string;
+            }
+          >;
+          reportNumber: string;
+          reportTitle: string;
+        }
+      >;
+    }
+  >();
+
+  for (const record of records) {
+    for (const assignment of record.areaAssignments) {
+      const recipients = [
+        assignment.processOwner,
+        assignment.areaResponsible,
+        ...assignment.actionPlans.map((plan) => plan.responsibleUser),
+      ];
+      for (const recipient of recipients) {
+        const email = recipient.email.trim().toLowerCase();
+        if (!email) continue;
+        const group = groups.get(email) ?? {
+          email: recipient.email.trim(),
+          maxPeriods,
+          name: recipient.name,
+          observationIds: new Set<string>(),
+          reports: new Map(),
+          userId: recipient.id,
+        };
+        const report = group.reports.get(record.auditReport.id) ?? {
+          areaNames: new Set<string>(),
+          observations: new Map(),
+          reportNumber: record.auditReport.reportNumber,
+          reportTitle: record.auditReport.title,
+        };
+        group.observationIds.add(record.id);
+        report.areaNames.add(assignment.area.name);
+        const observation = report.observations.get(record.id) ?? {
+          areaNames: new Set<string>(),
+          description: record.description,
+          dueDate: record.currentDueDate?.toISOString().slice(0, 10),
+          number: record.observationNumber,
+          risk: record.riskLevel.name,
+          title: record.title,
+        };
+        observation.areaNames.add(assignment.area.name);
+        report.observations.set(record.id, observation);
+        group.reports.set(record.auditReport.id, report);
+        groups.set(email, group);
+      }
+    }
+  }
+
+  return [...groups.values()]
+    .map((group) => ({
+      email: group.email,
+      maxPeriods: group.maxPeriods,
+      name: group.name,
+      observationIds: [...group.observationIds].sort(),
+      userId: group.userId,
+      reports: [...group.reports.values()]
+        .sort((left, right) =>
+          left.reportNumber.localeCompare(right.reportNumber),
+        )
+        .map((report) => ({
+          areaNames: [...report.areaNames].sort((left, right) =>
+            left.localeCompare(right),
+          ),
+          observations: [...report.observations.values()].sort(
+            (left, right) => left.number - right.number,
+          ).map((observation) => ({
+            area: [...observation.areaNames].join(", "),
+            code: `${report.reportNumber}-${observation.number}`,
+            description: observation.description,
+            ...(observation.dueDate ? { dueDate: observation.dueDate } : {}),
+            number: observation.number,
+            risk: observation.risk,
+            title: observation.title,
+          })),
+          reportNumber: report.reportNumber,
+          reportTitle: report.reportTitle,
+        })),
+    }))
+    .sort((left, right) => left.email.localeCompare(right.email));
+};
+
+const buildObservationInclude = (access: AuthorizationSummary) =>
+  ({
+    actionPlans: {
+      select: { id: true, progressPercent: true, status: true },
+      where: buildActionPlanScopeWhere(access),
+    },
+    areaAssignments: {
+      include: {
+        actionPlans: {
+          select: { progressPercent: true, status: true },
+          where: buildActionPlanScopeWhere(access),
+        },
+        area: { select: { id: true, name: true } },
+        areaResponsible: { select: userSummarySelect },
+        processOwner: { select: userSummarySelect },
       },
-      area: { select: { id: true, name: true } },
-      areaResponsible: { select: userSummarySelect },
-      processOwner: { select: userSummarySelect },
+      orderBy: { area: { name: "asc" } },
+      where: buildObservationAreaScopeWhere(access),
     },
-    orderBy: { area: { name: "asc" } },
-  },
-  auditReport: {
-    select: { id: true, reportDate: true, reportNumber: true, title: true },
-  },
-  auditorUser: { select: userSummarySelect },
-  mainObservation: { select: { id: true, name: true } },
-  riskLevel: {
-    select: {
-      colorToken: true,
-      defaultDeadlineDays: true,
-      id: true,
-      key: true,
-      name: true,
+    auditReport: {
+      select: { id: true, reportDate: true, reportNumber: true, title: true },
     },
-  },
-  risks: {
-    orderBy: { risk: { name: "asc" } },
-    select: { risk: { select: { id: true, name: true } } },
-  },
-  status: { select: { id: true, isFinal: true, key: true, name: true } },
-} satisfies Prisma.ObservationInclude;
+    auditorUser: { select: userSummarySelect },
+    mainObservation: { select: { id: true, name: true } },
+    riskLevel: {
+      select: {
+        colorToken: true,
+        maxRemediationDays: true,
+        id: true,
+        key: true,
+        name: true,
+      },
+    },
+    risks: {
+      orderBy: { risk: { name: "asc" } },
+      select: { risk: { select: { id: true, name: true } } },
+    },
+    status: { select: { id: true, isFinal: true, key: true, name: true } },
+  }) satisfies Prisma.ObservationInclude;
 
 type ObservationRecord = Prisma.ObservationGetPayload<{
-  include: typeof observationInclude;
+  include: ReturnType<typeof buildObservationInclude>;
 }>;
 
 const businessStatusLabel = {
@@ -70,45 +284,7 @@ const businessStatusLabel = {
   NO_INICIADO: "No iniciado",
 } as const;
 
-const hasGlobalAccess = (access: AuthorizationSummary): boolean =>
-  access.isAdmin ||
-  access.roles.some((role) =>
-    ["auditoria", "sistema", "sistemas"].includes(
-      role
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .toLowerCase(),
-    ),
-  );
-
-export const buildObservationAccessWhere = (
-  access: AuthorizationSummary,
-): Prisma.ObservationWhereInput => {
-  if (hasGlobalAccess(access)) return { deletedAt: null };
-
-  return {
-    deletedAt: null,
-    OR: [
-      { auditorUserId: access.userId },
-      {
-        areaAssignments: {
-          some: {
-            OR: [
-              { areaResponsibleUserId: access.userId },
-              { processOwnerUserId: access.userId },
-              { area: { managerUserId: access.userId } },
-            ],
-          },
-        },
-      },
-      {
-        actionPlans: {
-          some: { deletedAt: null, responsibleUserId: access.userId },
-        },
-      },
-    ],
-  };
-};
+export const buildObservationAccessWhere = buildObservationScopeWhere;
 
 const formatObservation = (record: ObservationRecord): ObservationDetail => {
   const progressPercent = observationAggregationService.calculateProgress(
@@ -144,6 +320,7 @@ const formatObservation = (record: ObservationRecord): ObservationDetail => {
     description: record.description,
     displayCode: `${record.auditReport.reportNumber} / OBS-${String(record.observationNumber).padStart(3, "0")}`,
     id: record.id,
+    sentAt: record.sentAt?.toISOString() ?? null,
     isOverdue:
       !record.status.isFinal && record.currentDueDate.getTime() < now.getTime(),
     mainObservation: record.mainObservation,
@@ -172,14 +349,14 @@ const requireEntities = async (input: {
   actionPlans?: CreateObservationInput["actionPlans"];
   areaAssignments: CreateObservationInput["areaAssignments"];
   auditReportId: string;
-  auditorUserId: string;
+  auditorUserId: string | null;
   mainObservationId: string;
   riskIds: string[];
   riskLevelId: string;
 }) => {
   const uniqueUserIds = Array.from(
     new Set([
-      input.auditorUserId,
+      ...(input.auditorUserId ? [input.auditorUserId] : []),
       ...input.areaAssignments.flatMap((row) => [
         row.processOwnerUserId,
         row.areaResponsibleUserId,
@@ -198,7 +375,7 @@ const requireEntities = async (input: {
         where: { id: input.mainObservationId, isActive: true },
       }),
       prisma.riskLevel.findFirst({
-        select: { id: true, key: true },
+        select: { id: true, key: true, maxRemediationDays: true, name: true },
         where: { active: true, deletedAt: null, id: input.riskLevelId },
       }),
       prisma.risk.count({
@@ -228,7 +405,16 @@ const requireEntities = async (input: {
     );
   if (!riskLevel)
     throw new AppError("El nivel de riesgo seleccionado no está activo.", 400);
-  observationDeadlineService.getDays(riskLevel.key);
+  const maxRemediationDays = riskLevel.maxRemediationDays;
+  if (
+    maxRemediationDays === null ||
+    !Number.isInteger(maxRemediationDays) ||
+    maxRemediationDays <= 0
+  )
+    throw new AppError(
+      `El nivel de riesgo ${riskLevel.name} no tiene configurado un plazo máximo válido.`,
+      400,
+    );
   if (risks !== input.riskIds.length)
     throw new AppError(
       "Uno o más riesgos asociados no existen o están inactivos.",
@@ -260,14 +446,14 @@ const requireEntities = async (input: {
 
 const findRecord = async (
   id: string,
-  access?: AuthorizationSummary,
+  access: AuthorizationSummary,
 ): Promise<ObservationRecord> => {
   const record = await prisma.observation.findFirst({
-    include: observationInclude,
+    include: buildObservationInclude(access),
     where: {
       deletedAt: null,
       id,
-      ...(access ? buildObservationAccessWhere(access) : {}),
+      ...buildObservationAccessWhere(access),
     },
   });
   if (!record) throw new AppError("Observation not found.", 404);
@@ -367,11 +553,13 @@ export const observationsService = {
     input: CreateObservationInput,
     access: AuthorizationSummary,
   ): Promise<ObservationDetail> {
+    if (!authorizationService.can(access, "observations.create"))
+      throw new AppError("No tiene permiso para crear observaciones.", 403);
     if (
       input.actionPlans.length > 0 &&
       !access.isAdmin &&
-      !["action_plans.create", "action_plans.assign"].every((permission) =>
-        access.permissions.includes(permission),
+      !["action_plans.create", "action_plans.assign_executor"].every(
+        (permission) => access.permissions.includes(permission),
       )
     )
       throw new AppError(
@@ -390,23 +578,54 @@ export const observationsService = {
       );
     const deadline = observationDeadlineService.calculate(
       auditReport.reportDate,
-      riskLevel.key,
+      riskLevel.maxRemediationDays,
     );
+    const commitmentDate = input.commitmentDate ?? deadline;
+    if (
+      !observationDeadlineService.isCommitmentDateAllowed(
+        auditReport.reportDate,
+        riskLevel.maxRemediationDays,
+        commitmentDate,
+      )
+    )
+      throw new AppError(
+        `La fecha de compromiso no puede superar el plazo máximo de ${riskLevel.maxRemediationDays} días para el nivel de riesgo ${riskLevel.name}.`,
+        400,
+      );
+    if ((input.actionPlans ?? []).some((plan) => plan.dueDate > deadline))
+      throw new AppError(
+        `La fecha de un plan supera el plazo máximo permitido para el nivel de riesgo ${riskLevel.name}.`,
+        400,
+      );
 
     try {
       const created = await prisma.$transaction(async (tx) => {
+        // Lock the report row before scanning gaps so concurrent creates share one allocator.
+        await tx.auditReport.update({
+          data: { updatedAt: new Date() },
+          where: { id: input.auditReportId },
+        });
+        const usedNumbers = new Set(
+          (
+            await tx.observation.findMany({
+              select: { observationNumber: true },
+              where: { auditReportId: input.auditReportId, deletedAt: null },
+            })
+          ).map(({ observationNumber }) => observationNumber),
+        );
+        const observationNumber = nextAvailableObservationNumber(usedNumbers);
         const observation = await tx.observation.create({
           data: {
             auditRecommendation: input.auditRecommendation,
             auditReportId: input.auditReportId,
             auditorUserId: input.auditorUserId,
             category: input.category,
-            currentDueDate: deadline,
+            currentDueDate: commitmentDate,
             currentStage: input.currentStage,
             description: input.description,
             mainObservationId: input.mainObservationId,
-            observationNumber: input.observationNumber,
-            originalDueDate: deadline,
+            observationNumber,
+            originalDueDate: commitmentDate,
             process: input.process,
             riskLevelId: input.riskLevelId,
             source: input.source,
@@ -465,6 +684,8 @@ export const observationsService = {
     id: string,
     access: AuthorizationSummary,
   ): Promise<{ current: ObservationDetail; previous: ObservationDetail }> {
+    if (!authorizationService.can(access, "observations.close"))
+      throw new AppError("No tiene permiso para cerrar observaciones.", 403);
     const existing = await findRecord(id, access);
     if (existing.status.isFinal) {
       throw new AppError("The observation is already concluded.", 409);
@@ -522,9 +743,31 @@ export const observationsService = {
     id: string,
     access: AuthorizationSummary,
   ): Promise<ObservationDetail> {
+    if (!authorizationService.can(access, "observations.delete"))
+      throw new AppError("No tiene permiso para eliminar observaciones.", 403);
     const previous = formatObservation(await findRecord(id, access));
+    if (previous.sentAt)
+      throw new AppError(
+        "Las observaciones enviadas a las áreas no se pueden eliminar.",
+        409,
+      );
     const deletedAt = new Date();
     await prisma.$transaction(async (tx) => {
+      // Serialize deletion with the per-report allocator and preserve the composite key.
+      await tx.auditReport.update({
+        data: { updatedAt: deletedAt },
+        where: { id: previous.auditReport.id },
+      });
+      const existingNumbers = new Set(
+        (
+          await tx.observation.findMany({
+            select: { observationNumber: true },
+            where: { auditReportId: previous.auditReport.id },
+          })
+        ).map(({ observationNumber }) => observationNumber),
+      );
+      let releasedKey = -1;
+      while (existingNumbers.has(releasedKey)) releasedKey -= 1;
       const [
         remediationPlans,
         extensionRequests,
@@ -607,7 +850,12 @@ export const observationsService = {
         where: { deletedAt: null, observationId: id },
       });
       await tx.observation.update({
-        data: { deletedAt },
+        data: {
+          deletedAt,
+          deletedObservationNumber: previous.observationNumber,
+          // Keep the composite unique key while making the released number reusable.
+          observationNumber: releasedKey,
+        },
         where: { id },
       });
     });
@@ -619,6 +867,182 @@ export const observationsService = {
     access: AuthorizationSummary,
   ): Promise<ObservationDetail> {
     return formatObservation(await findRecord(id, access));
+  },
+
+  async sendObservation(
+    id: string,
+    access: AuthorizationSummary,
+  ): Promise<{ current: ObservationDetail; previous: ObservationDetail }> {
+    const result = await this.sendObservations([id], access);
+    return {
+      current: result.current[0]!,
+      previous: result.previous[0]!,
+    };
+  },
+
+  async sendObservations(ids: string[], access: AuthorizationSummary) {
+    if (!authorizationService.can(access, "observations.send"))
+      throw new AppError(
+        "No tiene permiso para distribuir observaciones.",
+        403,
+      );
+    const uniqueIds = Array.from(new Set(ids));
+    const previousRecords = await Promise.all(
+      uniqueIds.map((observationId) => findRecord(observationId, access)),
+    );
+    const [records, activeRiskLevels] = await Promise.all([
+      prisma.observation.findMany({
+        include: {
+          auditReport: {
+            select: { id: true, reportNumber: true, title: true },
+          },
+          areaAssignments: {
+            include: {
+              actionPlans: {
+                select: { responsibleUser: { select: userSummarySelect } },
+              },
+              areaResponsible: { select: userSummarySelect },
+              area: { select: { id: true, name: true } },
+              processOwner: { select: userSummarySelect },
+            },
+          },
+          riskLevel: { select: { maxRemediationDays: true, name: true } },
+        },
+        where: {
+          deletedAt: null,
+          id: { in: uniqueIds },
+          ...buildObservationAccessWhere(access),
+        },
+      }),
+      prisma.riskLevel.findMany({
+        select: { maxRemediationDays: true, name: true, severityOrder: true },
+        where: { active: true, deletedAt: null },
+      }),
+    ]);
+    if (records.length !== uniqueIds.length)
+      throw new AppError(
+        "Una o más observaciones no están disponibles para su ámbito.",
+        404,
+      );
+    if (records.some((record) => !canSendObservation(record.sentAt)))
+      throw new AppError(
+        "Una o más observaciones ya fueron enviadas y no se pueden reenviar.",
+        409,
+      );
+    const maxPeriods =
+      formatRiskLevelMaxPeriods(activeRiskLevels) ||
+      "los plazos configurados por nivel de riesgo";
+    const operationId = buildObservationSendOperationId(uniqueIds);
+    const groups = buildObservationAssignmentGroups(records, maxPeriods);
+    const emailDeliveries: Array<{
+      deliveryId: string;
+      group: ObservationAssignmentEmailGroup;
+    }> = [];
+
+    await prisma.$transaction(async (tx) => {
+      const updated = await tx.observation.updateMany({
+        data: {
+          currentStage: "Enviada a los involucrados",
+          sentAt: new Date(),
+        },
+        where: { deletedAt: null, id: { in: uniqueIds }, sentAt: null },
+      });
+      if (updated.count !== uniqueIds.length)
+        throw new AppError("Una o más observaciones ya fueron enviadas.", 409);
+      for (const group of groups) {
+        const targetUrl =
+          group.observationIds.length === 1
+            ? `/observaciones/${group.observationIds[0]}?tab=summary`
+            : "/observaciones";
+        const notification = await notificationService.create(
+          {
+            dedupeKey: buildObservationSendDedupeKey(
+              operationId,
+              group.userId,
+              "notification",
+            ),
+            entityId:
+              group.observationIds.length === 1
+                ? group.observationIds[0]
+                : null,
+            entityType:
+              group.observationIds.length === 1
+                ? "OBSERVATION"
+                : "OBSERVATION_BATCH",
+            eventType: "OBSERVATION_ASSIGNMENT",
+            message: `Tiene ${group.observationIds.length} observación${group.observationIds.length === 1 ? "" : "es"} nueva${group.observationIds.length === 1 ? "" : "s"} asignada${group.observationIds.length === 1 ? "" : "s"} para gestión.`,
+            title: "Nuevas observaciones asignadas",
+            type: "info",
+            targetUrl,
+            userId: group.userId,
+          },
+          { db: tx },
+        );
+        await notificationService.createDelivery(
+          {
+            channel: NotificationDeliveryChannel.IN_APP,
+            dedupeKey: buildObservationSendDedupeKey(
+              operationId,
+              group.userId,
+              "IN_APP",
+            ),
+            notificationId: notification.id,
+            recipientEmail: group.email,
+            recipientUserId: group.userId,
+            status: NotificationDeliveryStatus.SENT,
+          },
+          { db: tx.notificationDelivery },
+        );
+        const delivery = await notificationService.createDelivery(
+          {
+            channel: NotificationDeliveryChannel.EMAIL,
+            dedupeKey: buildObservationSendDedupeKey(
+              operationId,
+              group.userId,
+              "EMAIL",
+            ),
+            notificationId: notification.id,
+            recipientEmail: group.email,
+            recipientUserId: group.userId,
+            status: NotificationDeliveryStatus.PENDING,
+          },
+          { db: tx.notificationDelivery },
+        );
+        emailDeliveries.push({ deliveryId: delivery.id, group });
+      }
+    });
+    void Promise.all(
+      emailDeliveries.map(async ({ deliveryId, group }) => {
+        if (!(await notificationService.claimEmailDelivery(deliveryId))) return;
+        const targetUrl =
+          group.observationIds.length === 1
+            ? `/observaciones/${group.observationIds[0]}?tab=summary`
+            : "/observaciones";
+        const result = await emailService.sendTemplate({
+          template: "observationAssignment",
+          to: group.email,
+          variables: {
+            maxPeriods: group.maxPeriods,
+            platformLink: `${env.FRONTEND_URL}${targetUrl}`,
+            reports: group.reports,
+            total: group.observationIds.length,
+            userName: group.name,
+          },
+        });
+        await notificationService.completeEmailDelivery(deliveryId, result);
+      }),
+    ).catch((error) => {
+      logger.error("Observation assignment email delivery failed.", {
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    });
+    const current = await Promise.all(
+      uniqueIds.map((observationId) => findRecord(observationId, access)),
+    );
+    return {
+      current: current.map(formatObservation),
+      previous: previousRecords.map(formatObservation),
+    };
   },
 
   async getObservationForActionItems(id: string, access: AuthorizationSummary) {
@@ -680,7 +1104,7 @@ export const observationsService = {
           orderBy: { severityOrder: "asc" },
           select: {
             colorToken: true,
-            defaultDeadlineDays: true,
+            maxRemediationDays: true,
             id: true,
             key: true,
             name: true,
@@ -835,7 +1259,7 @@ export const observationsService = {
         : { [query.sortBy]: query.sortDirection };
     const [records, total] = await Promise.all([
       prisma.observation.findMany({
-        include: observationInclude,
+        include: buildObservationInclude(access),
         orderBy: [orderBy, { id: "asc" }],
         skip: (query.page - 1) * query.perPage,
         take: query.perPage,
@@ -860,6 +1284,8 @@ export const observationsService = {
     input: UpdateObservationInput,
     access: AuthorizationSummary,
   ): Promise<{ current: ObservationDetail; previous: ObservationDetail }> {
+    if (!authorizationService.can(access, "observations.edit"))
+      throw new AppError("No tiene permiso para editar observaciones.", 403);
     const existing = await findRecord(id, access);
     if (
       input.areaAssignments !== undefined &&
@@ -894,12 +1320,23 @@ export const observationsService = {
       extensionCount === 0 &&
       (merged.auditReportId !== existing.auditReportId ||
         merged.riskLevelId !== existing.riskLevelId);
-    const deadline = shouldRecalculateDeadline
-      ? observationDeadlineService.calculate(
-          auditReport.reportDate,
-          riskLevel.key,
-        )
-      : null;
+    const maxDeadline = observationDeadlineService.calculate(
+      auditReport.reportDate,
+      riskLevel.maxRemediationDays as number,
+    );
+    const deadline = shouldRecalculateDeadline ? maxDeadline : null;
+    if (
+      input.commitmentDate &&
+      !observationDeadlineService.isCommitmentDateAllowed(
+        auditReport.reportDate,
+        riskLevel.maxRemediationDays,
+        input.commitmentDate,
+      )
+    )
+      throw new AppError(
+        `La fecha de compromiso no puede superar el plazo máximo de ${riskLevel.maxRemediationDays} días para el nivel de riesgo ${riskLevel.name}.`,
+        400,
+      );
 
     const retainedAreaIds = new Set(
       merged.areaAssignments.map((row) => row.areaId),
@@ -939,18 +1376,17 @@ export const observationsService = {
             ...(input.mainObservationId !== undefined
               ? { mainObservationId: input.mainObservationId }
               : {}),
-            ...(input.observationNumber !== undefined
-              ? { observationNumber: input.observationNumber }
-              : {}),
             ...(input.process !== undefined ? { process: input.process } : {}),
             ...(input.riskLevelId !== undefined
               ? { riskLevelId: input.riskLevelId }
               : {}),
             ...(input.source !== undefined ? { source: input.source } : {}),
             ...(input.title !== undefined ? { title: input.title } : {}),
-            ...(deadline
-              ? { currentDueDate: deadline, originalDueDate: deadline }
-              : {}),
+            ...(input.commitmentDate
+              ? { currentDueDate: input.commitmentDate }
+              : deadline
+                ? { currentDueDate: deadline, originalDueDate: deadline }
+                : {}),
           },
           where: { id },
         });

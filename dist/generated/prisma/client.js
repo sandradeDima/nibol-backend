@@ -27,8 +27,8 @@ export * from "./enums.js";
  * const prisma = new PrismaClient({
  *   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL })
  * })
- * // Fetch zero or more Users
- * const users = await prisma.user.findMany()
+ * // Fetch zero or more DeadlineExtensionClassifications
+ * const deadlineExtensionClassifications = await prisma.deadlineExtensionClassification.findMany()
  * ```
  *
  * Read more in our [docs](https://pris.ly/d/client).

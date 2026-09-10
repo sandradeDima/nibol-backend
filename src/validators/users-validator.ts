@@ -29,7 +29,9 @@ const csvStringArraySchema = z
   .optional()
   .default([]);
 
-const roleIdsSchema = z.array(z.uuid()).min(1, "Select at least one role.");
+const roleIdsSchema = z
+  .array(z.uuid())
+  .length(1, "Cada usuario debe tener exactamente un rol.");
 
 export const userIdParamSchema = z.object({
   id: z.uuid(),

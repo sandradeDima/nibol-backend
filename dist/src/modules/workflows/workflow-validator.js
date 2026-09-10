@@ -1,4 +1,4 @@
-import { WORKFLOW_ASSIGNMENT_STRATEGY_VALUES, WORKFLOW_GRAPH_LIMITS, WORKFLOW_NODE_TYPE_VALUES, WORKFLOW_TRANSITION_TYPE_VALUES, } from "./workflows.constants.js";
+import { WORKFLOW_ASSIGNMENT_STRATEGY_VALUES, WORKFLOW_GRAPH_LIMITS, WORKFLOW_NODE_TYPE_VALUES, WORKFLOW_PROCESS_TYPE_VALUES, WORKFLOW_TRANSITION_TYPE_VALUES, } from "./workflows.constants.js";
 import { getIncomingTransitions, getNodeByReference, getNodeReference, getOutgoingTransitions, getTransitionConditionGroup, getTransitionSource, getTransitionTarget, findNodesThatCanReachEnd, findReachableNodeReferences, findStronglyConnectedComponents, buildWorkflowGraphHash, enumerateGraphPaths, isFallbackTransition, isReturnTransition, normalizeTransitionType, } from "./workflow-graph.js";
 import { getWorkflowRuleField } from "./workflow-rule-fields.js";
 import { validateWorkflowRule } from "./workflow-rule-operators.js";
@@ -20,7 +20,8 @@ const isEditableNode = (node) => node.type === "STAGE" || node.type === "APPROVA
 const fieldReferenceIsSupported = (reference) => {
     return (getWorkflowRuleField(reference) !== null ||
         reference === "requesterUserId" ||
-        reference === "responsibleUserId");
+        reference === "responsibleUserId" ||
+        reference === "custom.areaResponsibleUserId");
 };
 const transitionSemanticForAction = {
     APPROVE: "APPROVE",
@@ -331,6 +332,32 @@ const validateNodeConfiguration = (result, graph, node, processType, references)
             validateAssignmentNode(result, node, outgoing, references);
             if (configuration.sla) {
                 validateSla(result, node, configuration.sla, outgoing);
+            }
+            break;
+        case "SUBFLOW":
+            if (!WORKFLOW_PROCESS_TYPE_VALUES.includes(configuration.referencedProcessType)) {
+                addIssue(result, {
+                    code: "SUBFLOW_PROCESS_INVALID",
+                    message: "El proceso referenciado por el subflujo no existe.",
+                    nodeId: getNodeId(node),
+                    nodeKey: node.nodeKey,
+                });
+            }
+            if (configuration.referencedProcessType === processType) {
+                addIssue(result, {
+                    code: "SUBFLOW_SELF_REFERENCE",
+                    message: "Un subflujo no puede referenciarse a sí mismo.",
+                    nodeId: getNodeId(node),
+                    nodeKey: node.nodeKey,
+                });
+            }
+            if (outgoing.length === 0) {
+                addIssue(result, {
+                    code: "SUBFLOW_OUTGOING_REQUIRED",
+                    message: "El subflujo debe tener una ruta de continuación.",
+                    nodeId: getNodeId(node),
+                    nodeKey: node.nodeKey,
+                });
             }
             break;
         case "CONDITION": {

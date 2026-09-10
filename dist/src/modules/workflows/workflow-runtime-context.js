@@ -5,6 +5,30 @@ const getCustom = (value) => {
         return {};
     return { ...value };
 };
+const cleanCustomText = (value, maxLength) => typeof value === "string" ? value.trim().slice(0, maxLength) : "";
+export const getSpecialRequestRuntimeSummary = (context) => {
+    if (context.processType !== "SPECIAL_REQUEST")
+        return null;
+    const title = cleanCustomText(context.custom.title, 191);
+    if (!title)
+        return null;
+    return {
+        description: cleanCustomText(context.custom.description, 10_000),
+        reference: cleanCustomText(context.custom.reference, 100),
+        title,
+    };
+};
+export const getEvidenceReviewRuntimeSummary = (context) => {
+    if (context.processType !== "EVIDENCE_REVIEW")
+        return null;
+    const originalName = cleanCustomText(context.custom.evidenceName, 255);
+    if (!originalName)
+        return null;
+    return {
+        context: cleanCustomText(context.custom.evidenceContext, 100),
+        originalName,
+    };
+};
 export const buildWorkflowRuntimeContext = ({ actorUserId, context, processType, }) => {
     const normalized = normalizeWorkflowSimulationContext({
         ...(context ?? {}),
@@ -45,7 +69,11 @@ export const getAllowlistedRuntimeReference = (context, reference) => {
     const customKey = normalized.startsWith("custom.")
         ? normalized.slice("custom.".length)
         : normalized;
-    if (["recordOwnerUserId", "observationResponsibleUserId"].includes(customKey)) {
+    if ([
+        "areaResponsibleUserId",
+        "recordOwnerUserId",
+        "observationResponsibleUserId",
+    ].includes(customKey)) {
         const customValue = context.custom[customKey];
         return typeof customValue === "string" && customValue.trim()
             ? customValue.trim()
@@ -55,6 +83,8 @@ export const getAllowlistedRuntimeReference = (context, reference) => {
 };
 export const getSafeRuntimeContextSummary = (context) => ({
     areaId: context.areaId ?? null,
+    allPlansValidated: context.allPlansValidated ?? null,
+    areaPlanRequired: context.areaPlanRequired ?? null,
     currentNodeKey: context.currentNodeKey ?? null,
     daysOverdue: context.daysOverdue ?? null,
     dueDate: context.dueDate ?? null,

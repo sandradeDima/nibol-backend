@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { AppError } from "../../utils/app-error.js";
-import { AUDIT_WORKFLOW_PERMISSION_NAMES, ALL_PERMISSION_NAMES, WORKFLOW_PERMISSION_NAMES, } from "../../permissions/definitions.js";
+import { ALL_PERMISSION_NAMES, WORKFLOW_PERMISSION_NAMES, } from "../../permissions/definitions.js";
 import { createWorkflowSchema, duplicateWorkflowSchema, listWorkflowsQuerySchema, workflowActivityQuerySchema, workflowDesignerSaveSchema, } from "./workflows.validators.js";
 import { assertCanPublishWorkflowVersion, assertDraftWorkflowVersion, assertUniqueWorkflowNodeKeys, buildDefinitionOrderBy, buildDefinitionWhere, assertWorkflowCanStartInstance, buildWorkflowAuditEvents, nextWorkflowVersionNumber, summarizeWorkflowStatuses, validateDesignerGraph, workflowService, } from "./workflows.service.js";
 const unauthorizedAccess = {
+    dataScope: "ASSIGNED",
     isAdmin: false,
     permissions: [],
+    roleCode: "EXECUTOR",
+    roleName: "Ejecutor",
     roles: ["Usuario"],
     userId: "4f7c2f4c-9f1d-42af-8b55-fd54c88e2cc2",
 };
@@ -245,8 +248,11 @@ test("las mutaciones de workflow generan eventos de actividad y auditoría", () 
     const events = buildWorkflowAuditEvents({
         access: {
             ipAddress: "127.0.0.1",
+            dataScope: "ALL",
             isAdmin: true,
             permissions: ["workflows.create"],
+            roleCode: "SYSTEM_ADMIN",
+            roleName: "Administrador del sistema",
             roles: ["Admin"],
             userId: unauthorizedAccess.userId,
         },
@@ -264,6 +270,6 @@ test("las mutaciones de workflow generan eventos de actividad y auditoría", () 
 test("los permisos workflow se pueden sembrar de forma idempotente", () => {
     assert.equal(new Set(ALL_PERMISSION_NAMES).size, ALL_PERMISSION_NAMES.length);
     assert.equal(new Set(WORKFLOW_PERMISSION_NAMES).size, WORKFLOW_PERMISSION_NAMES.length);
-    assert.ok(AUDIT_WORKFLOW_PERMISSION_NAMES.every((permission) => WORKFLOW_PERMISSION_NAMES.includes(permission)));
+    assert.ok(WORKFLOW_PERMISSION_NAMES.every((permission) => WORKFLOW_PERMISSION_NAMES.includes(permission)));
 });
 //# sourceMappingURL=workflows.service.test.js.map

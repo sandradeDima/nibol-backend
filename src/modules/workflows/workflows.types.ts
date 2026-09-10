@@ -118,6 +118,7 @@ export type WorkflowDesignerOptions = {
     requiresValue: boolean;
   }>;
   notificationTemplates: Array<{ key: string; name: string }>;
+  processes: Array<{ key: string; name: string }>;
   roles: Array<{ description: string | null; id: string; name: string }>;
   users: Array<{ email: string; id: string; name: string }>;
 };

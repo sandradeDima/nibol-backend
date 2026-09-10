@@ -1,4 +1,5 @@
 import { Prisma } from "../../generated/prisma/client.js";
+import { buildObservationScopeWhere } from "./authorization-service.js";
 import { prisma } from "../utils/prisma.js";
 import { AppError } from "../utils/app-error.js";
 export const ACTIVITY_ENTITY_TYPES = {
@@ -51,33 +52,13 @@ const safeValue = (value, key) => {
 export const sanitizeActivityData = (value) => safeValue(value);
 const asJson = (value) => safeValue(value) ?? Prisma.JsonNull;
 const isSystemOperator = (access) => {
-    if (access.isAdmin)
-        return true;
-    return access.roles.some((role) => /^(sistemas?|systems?)$/i.test(role.trim()));
+    return access.dataScope === "ALL";
 };
-const isAuditRole = (access) => access.roles.some((role) => /audit|auditor|auditoria/i.test(role));
-const isManagerRole = (access) => access.roles.some((role) => /gerencia|manager|jefatura/i.test(role));
+const isAuditRole = (access) => access.dataScope === "AUDIT_SCOPE";
 const activityScope = (access) => {
     if (isSystemOperator(access))
         return {};
-    const observationScope = {
-        OR: [
-            { auditorUserId: access.userId },
-            {
-                areaAssignments: {
-                    some: {
-                        OR: [
-                            { areaResponsibleUserId: access.userId },
-                            { processOwnerUserId: access.userId },
-                            { area: { managerUserId: access.userId } },
-                        ],
-                    },
-                },
-            },
-            { actionPlans: { some: { responsibleUserId: access.userId } } },
-            { remediationPlans: { some: { ownerUserId: access.userId } } },
-        ],
-    };
+    const observationScope = buildObservationScopeWhere(access);
     if (isAuditRole(access)) {
         return {
             visibility: {
@@ -97,11 +78,7 @@ const activityScope = (access) => {
                 ACTIVITY_VISIBILITIES.areaVisible,
             ],
         },
-        observation: isManagerRole(access)
-            ? {
-                areaAssignments: { some: { area: { managerUserId: access.userId } } },
-            }
-            : observationScope,
+        observation: observationScope,
     };
 };
 const dateFilter = (dateFrom, dateTo) => {

@@ -7,6 +7,11 @@ import { extensionRequestsController as controller } from "./extension-requests.
 
 export const extensionRequestsRouter = Router();
 extensionRequestsRouter.get(
+  "/deadline-extension-classifications",
+  requirePermission(permissions.request),
+  asyncHandler(controller.listClassifications),
+);
+extensionRequestsRouter.get(
   "/extension-requests",
   requirePermission(permissions.view),
   asyncHandler(controller.list),
@@ -17,47 +22,32 @@ extensionRequestsRouter.get(
   asyncHandler(controller.getById),
 );
 extensionRequestsRouter.post(
-  "/observations/:id/extension-requests",
-  requirePermission(permissions.create),
-  asyncHandler(controller.createForObservation),
-);
-extensionRequestsRouter.post(
   "/action-plans/:id/extension-requests",
   requirePermission(permissions.create),
   asyncHandler(controller.createForActionPlan),
 );
 extensionRequestsRouter.patch(
   "/extension-requests/:id",
-  requirePermission(permissions.edit),
+  requirePermission(permissions.request),
   asyncHandler(controller.update),
 );
 extensionRequestsRouter.post(
   "/extension-requests/:id/submit",
-  requirePermission(permissions.edit),
+  requirePermission(permissions.request),
   asyncHandler(controller.sendToManager),
 );
 extensionRequestsRouter.post(
   "/extension-requests/:id/manager-approve",
-  requirePermission(permissions.edit),
+  requirePermission(permissions.approve),
   asyncHandler(controller.managerApprove),
 );
 extensionRequestsRouter.post(
   "/extension-requests/:id/manager-reject",
-  requirePermission(permissions.edit),
+  requirePermission(permissions.reject),
   asyncHandler(controller.managerReject),
 );
 extensionRequestsRouter.post(
-  "/extension-requests/:id/audit-approve",
-  requirePermission(permissions.edit),
-  asyncHandler(controller.auditApprove),
-);
-extensionRequestsRouter.post(
-  "/extension-requests/:id/audit-reject",
-  requirePermission(permissions.edit),
-  asyncHandler(controller.auditReject),
-);
-extensionRequestsRouter.post(
   "/extension-requests/:id/cancel",
-  requirePermission(permissions.edit),
+  requirePermission(permissions.request),
   asyncHandler(controller.cancel),
 );

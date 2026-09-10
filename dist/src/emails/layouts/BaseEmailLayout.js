@@ -10,23 +10,8 @@ const renderLogoMarkup = (brand) => {
     `;
     }
     return `
-    <div
-      style="
-        align-items: center;
-        background: #07142d;
-        border-radius: 999px;
-        color: #ffffff;
-        display: inline-flex;
-        font-size: 12px;
-        font-weight: 800;
-        justify-content: center;
-        letter-spacing: 0.18em;
-        min-width: 88px;
-        padding: 11px 18px;
-        text-transform: uppercase;
-      "
-    >
-      ${escapeHtml(brand.senderName || brand.appName)}
+    <div style="color:#ffffff;font-size:16px;font-weight:800;letter-spacing:.16em;line-height:1.2;text-transform:uppercase;">
+      NIBOL BOLIVIA
     </div>
   `;
 };
@@ -39,7 +24,7 @@ export const renderBaseEmailLayout = ({ brand, contentHtml, previewText, }) => {
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>${escapeHtml(brand.appName)}</title>
       </head>
-      <body style="background: #edf2f7; color: #07142d; font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 28px 12px;">
+      <body style="background:#edf2f7;color:#07142d;font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:28px 12px;">
         <div style="display: none; max-height: 0; max-width: 0; opacity: 0; overflow: hidden;">
           ${escapeHtml(previewText ?? `Notificacion de ${brand.appName}`)}
         </div>
@@ -51,25 +36,16 @@ export const renderBaseEmailLayout = ({ brand, contentHtml, previewText, }) => {
                 width="100%"
                 cellspacing="0"
                 cellpadding="0"
-                style="background: #ffffff; border: 1px solid #d8e2ee; border-radius: 22px; border-collapse: separate; max-width: 640px; overflow: hidden;"
+                style="background:#ffffff;border:1px solid #d8e2ee;border-collapse:separate;max-width:680px;overflow:hidden;"
               >
                 <tr>
                   <td style="background: #d71920; font-size: 0; line-height: 0; padding: 0;">&nbsp;</td>
                 </tr>
                 <tr>
-                  <td style="background: linear-gradient(180deg, #07142d 0%, #0b1a36 100%); padding: 30px 32px 28px;">
-                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 22px;">
-                      <div>${renderLogoMarkup(brand)}</div>
-                      <div style="color: #f3f5f8; font-size: 11px; font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase;">
-                        Nibol Digital
-                      </div>
-                    </div>
-                    <div style="color: #ffffff; font-size: 28px; font-weight: 750; letter-spacing: -0.02em; line-height: 1.15;">
-                      ${escapeHtml(brand.appName)}
-                    </div>
-                    <div style="color: #c7d2e3; font-size: 13px; line-height: 1.6; margin-top: 8px;">
-                      Comunicacion automatica para operaciones, accesos y seguimiento corporativo.
-                    </div>
+                  <td style="background:#07142d;padding:30px 32px 28px;">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;margin-bottom:22px;"><tr><td>${renderLogoMarkup(brand)}</td><td align="right" style="color:#c7d2e3;font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;">Seguimiento de Hallazgos de Auditoría</td></tr></table>
+                    <div style="color:#ffffff;font-size:26px;font-weight:750;letter-spacing:-.02em;line-height:1.15;">NIBOL Bolivia</div>
+                    <div style="color:#c7d2e3;font-size:13px;line-height:1.6;margin-top:8px;">Comunicación corporativa de Auditoría Interna.</div>
                   </td>
                 </tr>
                 <tr>
@@ -85,7 +61,7 @@ export const renderBaseEmailLayout = ({ brand, contentHtml, previewText, }) => {
                       Si necesita ayuda, escribanos a
                       <a href="mailto:${escapeHtml(brand.supportEmail)}" style="color: ${brand.primaryColor}; font-weight: 700; text-decoration: none;">${escapeHtml(brand.supportEmail)}</a>.
                     </p>
-                    <p style="margin: 0;">Mensaje enviado por ${escapeHtml(brand.senderName || brand.appName)}.</p>
+                    <p style="margin:0;">Departamento de Auditoría · NIBOL Bolivia</p>
                   </td>
                 </tr>
               </table>

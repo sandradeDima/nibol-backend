@@ -6,6 +6,35 @@ export const escapeHtml = (value) => {
         .replaceAll('"', "&quot;")
         .replaceAll("'", "&#39;");
 };
+export const resolveEmailAppName = (value) => {
+    const candidate = value?.trim();
+    if (!candidate ||
+        /saas base project|starter template|base project|generic saas/i.test(candidate)) {
+        return "NIBOL Bolivia";
+    }
+    return candidate;
+};
+export const emailSemanticBadgeStyle = (value) => {
+    const normalized = value.trim().toLowerCase();
+    if (normalized.includes("alto") || normalized.includes("rechaz")) {
+        return "background:#fee2e2;color:#991b1b";
+    }
+    if (normalized.includes("medio") ||
+        normalized.includes("pendiente") ||
+        normalized.includes("devuelt") ||
+        normalized.includes("iniciad")) {
+        return "background:#fef3c7;color:#92400e";
+    }
+    if (normalized.includes("bajo") ||
+        normalized.includes("aprobad") ||
+        normalized.includes("concluid")) {
+        return "background:#dcfce7;color:#166534";
+    }
+    if (normalized.includes("avance") || normalized.includes("revisi")) {
+        return "background:#dbeafe;color:#1d4ed8";
+    }
+    return "background:#e7edf5;color:#334155";
+};
 export const toParagraphHtml = (value) => {
     return value
         .split(/\n+/)

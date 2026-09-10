@@ -1,10 +1,13 @@
 export const EXTENSION_REQUESTS_PERMISSION_RESOURCE = "extension_requests";
 
 export const EXTENSION_REQUESTS_PERMISSIONS = {
-  create: `${EXTENSION_REQUESTS_PERMISSION_RESOURCE}.create`,
-  delete: `${EXTENSION_REQUESTS_PERMISSION_RESOURCE}.delete`,
-  edit: `${EXTENSION_REQUESTS_PERMISSION_RESOURCE}.edit`,
-  view: `${EXTENSION_REQUESTS_PERMISSION_RESOURCE}.view`,
+  approve: "deadline_extensions.approve",
+  create: "deadline_extensions.request",
+  delete: "deadline_extensions.request",
+  edit: "deadline_extensions.request",
+  reject: "deadline_extensions.reject",
+  request: "deadline_extensions.request",
+  view: "deadline_extensions.view",
 } as const;
 
 export const EXTENSION_REQUEST_STATUS_VALUES = [
@@ -12,9 +15,6 @@ export const EXTENSION_REQUEST_STATUS_VALUES = [
   "SENT_TO_MANAGER",
   "MANAGER_APPROVED",
   "MANAGER_REJECTED",
-  "SENT_TO_AUDIT",
-  "AUDIT_APPROVED",
-  "AUDIT_REJECTED",
   "CANCELLED",
 ] as const;
 
@@ -24,12 +24,8 @@ export const EXTENSION_REQUEST_ENTITY_TYPES = {
 } as const;
 
 export const EXTENSION_REQUEST_ACTIVITY_ACTIONS = {
-  auditApprove: "deadline-extension.audit-approve",
-  auditReject: "deadline-extension.audit-reject",
   cancel: "deadline-extension.cancel",
   createForActionPlan: "deadline-extension.create-for-actionPlan",
-  createForObservation: "deadline-extension.create-for-observation",
-  sendToAudit: "deadline-extension.send-to-audit",
   sendToManager: "deadline-extension.send-to-manager",
   managerApprove: "deadline-extension.manager-approve",
   managerReject: "deadline-extension.manager-reject",
@@ -37,7 +33,7 @@ export const EXTENSION_REQUEST_ACTIVITY_ACTIONS = {
 } as const;
 
 export const EDITABLE_EXTENSION_REQUEST_STATUSES: ReadonlySet<string> = new Set(
-  ["DRAFT", "MANAGER_REJECTED", "AUDIT_REJECTED"] satisfies ReadonlyArray<
+  ["DRAFT", "MANAGER_REJECTED"] satisfies ReadonlyArray<
     (typeof EXTENSION_REQUEST_STATUS_VALUES)[number]
   >,
 );
@@ -45,13 +41,10 @@ export const EDITABLE_EXTENSION_REQUEST_STATUSES: ReadonlySet<string> = new Set(
 export const ACTIVE_EXTENSION_REQUEST_STATUSES: ReadonlySet<string> = new Set([
   "DRAFT",
   "SENT_TO_MANAGER",
-  "SENT_TO_AUDIT",
 ] satisfies ReadonlyArray<(typeof EXTENSION_REQUEST_STATUS_VALUES)[number]>);
 
 export const FINAL_EXTENSION_REQUEST_STATUSES: ReadonlySet<string> = new Set([
   "MANAGER_APPROVED",
   "MANAGER_REJECTED",
-  "AUDIT_APPROVED",
-  "AUDIT_REJECTED",
   "CANCELLED",
 ] satisfies ReadonlyArray<(typeof EXTENSION_REQUEST_STATUS_VALUES)[number]>);

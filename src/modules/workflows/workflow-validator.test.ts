@@ -192,3 +192,58 @@ test("requiere la ruta fallback cuando se declaran reglas de condición", () => 
     result.errors.some((issue) => issue.code === "CONDITION_FALLBACK_REQUIRED"),
   );
 });
+
+test("valida un subflujo publicado y bloquea la autorreferencia", () => {
+  const subflow = {
+    configurationJson: {
+      description: null,
+      name: "Revisión de evidencia",
+      nodeType: "SUBFLOW",
+      referencedProcessType: "EVIDENCE_REVIEW",
+      schemaVersion: 1,
+    },
+    description: null,
+    id: "subflow",
+    name: "Revisión de evidencia",
+    nodeKey: "subflow",
+    positionX: 160,
+    positionY: 0,
+    type: "SUBFLOW",
+  };
+  const graph = parse({
+    nodes: [start, subflow, end("approved", "approved", "APPROVED")],
+    transitions: [
+      transition("start-subflow", "start", "subflow", "DEFAULT", 0),
+      transition("subflow-end", "subflow", "approved", "DEFAULT", 0),
+    ],
+  });
+
+  const valid = validateWorkflowGraph(graph, options);
+  assert.equal(valid.isValid, true);
+
+  const selfReferencing = validateWorkflowGraph(
+    parse({
+      nodes: [
+        start,
+        {
+          ...subflow,
+          configurationJson: {
+            ...subflow.configurationJson,
+            referencedProcessType: "SPECIAL_REQUEST",
+          },
+        },
+        end("approved", "approved", "APPROVED"),
+      ],
+      transitions: [
+        transition("start-subflow", "start", "subflow", "DEFAULT", 0),
+        transition("subflow-end", "subflow", "approved", "DEFAULT", 0),
+      ],
+    }),
+    options,
+  );
+  assert.ok(
+    selfReferencing.errors.some(
+      (issue) => issue.code === "SUBFLOW_SELF_REFERENCE",
+    ),
+  );
+});

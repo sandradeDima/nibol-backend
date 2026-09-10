@@ -3,13 +3,25 @@ import { access as fsAccess, mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { Prisma } from "../../../generated/prisma/client.js";
+import {
+  NotificationDeliveryChannel,
+  NotificationDeliveryStatus,
+} from "../../../generated/prisma/client.js";
 
-import type { AuthorizationSummary } from "../../services/authorization-service.js";
+import {
+  authorizationService,
+  buildEvidenceScopeWhere,
+  buildObservationScopeWhere,
+  buildProgressEvaluationScopeWhere,
+  type AuthorizationSummary,
+} from "../../services/authorization-service.js";
+import { emailService } from "../../emails/EmailService.js";
 import { notificationService } from "../../services/notification-service.js";
 import { AppError } from "../../utils/app-error.js";
+import { env } from "../../utils/env.js";
+import { logger } from "../../utils/logger.js";
 import { prisma } from "../../utils/prisma.js";
 import { uploadsRootDir } from "../../utils/uploads.js";
-import { buildObservationAccessWhere } from "../observations/observations.service.js";
 import { recalculateObservationFromActionPlans } from "../remediation/remediation.service.js";
 import { workflowIntegrationService } from "../workflows/workflow-integration.service.js";
 import type {
@@ -21,12 +33,22 @@ import type {
   UpdateProgressEvaluationInput,
   UploadEvidenceInput,
 } from "./progress.validators.js";
+import { officialProgressByStatus } from "./progress.constants.js";
 
 type UploadFile = {
   buffer: Buffer;
   mimetype: string;
   originalName: string;
   size: number;
+};
+type PreparedFile = {
+  absolutePath: string;
+  checksum: string;
+  mimeType: string;
+  originalName: string;
+  relativePath: string;
+  sizeBytes: bigint;
+  storedName: string;
 };
 
 const allowedTypes: Record<string, Set<string>> = {
@@ -66,7 +88,9 @@ const evaluationInclude = {
       observationArea: {
         select: { area: { select: { id: true, name: true } }, id: true },
       },
+      progressPercent: true,
       responsibleUser: { select: userSelect },
+      status: true,
     },
   },
   evidenceFiles: {
@@ -99,9 +123,200 @@ type EvaluationRecord = Prisma.ProgressEvaluationGetPayload<{
 
 const evaluationAccessWhere = (
   access: AuthorizationSummary,
-): Prisma.ProgressEvaluationWhereInput => ({
-  actionPlan: { observation: buildObservationAccessWhere(access) },
-});
+): Prisma.ProgressEvaluationWhereInput =>
+  buildProgressEvaluationScopeWhere(access);
+
+export const canReviewEvidenceAsAuditor = (
+  access: AuthorizationSummary,
+): boolean =>
+  access.roleCode === "AUDITOR" &&
+  access.permissions.includes("evidence.review");
+
+type EvidenceNotificationRecipient = {
+  email: string;
+  id: string;
+  name: string;
+};
+
+type EvidenceNotificationDelivery = {
+  deliveryId: string;
+  message: string;
+  recipient: EvidenceNotificationRecipient;
+  targetUrl: string;
+  title: string;
+};
+
+const deliverEvidenceNotificationEmails = async (
+  deliveries: EvidenceNotificationDelivery[],
+) => {
+  await Promise.all(
+    deliveries.map(
+      async ({ deliveryId, message, recipient, targetUrl, title }) => {
+        if (!(await notificationService.claimEmailDelivery(deliveryId))) return;
+        const result = await emailService.sendTemplate({
+          template: "genericNotification",
+          to: recipient.email,
+          variables: {
+            actionLabel: "Revisar evidencia",
+            actionLink: `${env.FRONTEND_URL}${targetUrl}`,
+            message,
+            title,
+            userName: recipient.name,
+          },
+        });
+        await notificationService.completeEmailDelivery(deliveryId, result);
+      },
+    ),
+  );
+};
+
+const queueEvidenceNotifications = async (input: {
+  entityId: string;
+  eventType: string;
+  message: string;
+  operationKey: string;
+  recipients: EvidenceNotificationRecipient[];
+  targetUrl: string;
+  title: string;
+}): Promise<void> => {
+  const emailDeliveries: EvidenceNotificationDelivery[] = [];
+  await prisma.$transaction(async (tx) => {
+    for (const recipient of input.recipients) {
+      const notification = await notificationService.create(
+        {
+          dedupeKey: `${input.operationKey}:${recipient.id}:notification`,
+          entityId: input.entityId,
+          entityType: "EVIDENCE_FILE",
+          eventType: input.eventType,
+          message: input.message,
+          targetUrl: input.targetUrl,
+          title: input.title,
+          type: input.eventType === "EVIDENCE_APPROVED" ? "success" : "warning",
+          userId: recipient.id,
+        },
+        { db: tx },
+      );
+      await notificationService.createDelivery(
+        {
+          channel: NotificationDeliveryChannel.IN_APP,
+          dedupeKey: `${input.operationKey}:${recipient.id}:IN_APP`,
+          notificationId: notification.id,
+          recipientEmail: recipient.email,
+          recipientUserId: recipient.id,
+          status: NotificationDeliveryStatus.SENT,
+        },
+        { db: tx.notificationDelivery },
+      );
+      const delivery = await notificationService.createDelivery(
+        {
+          channel: NotificationDeliveryChannel.EMAIL,
+          dedupeKey: `${input.operationKey}:${recipient.id}:EMAIL`,
+          notificationId: notification.id,
+          recipientEmail: recipient.email,
+          recipientUserId: recipient.id,
+        },
+        { db: tx.notificationDelivery },
+      );
+      emailDeliveries.push({
+        deliveryId: delivery.id,
+        message: input.message,
+        recipient,
+        targetUrl: input.targetUrl,
+        title: input.title,
+      });
+    }
+  });
+  void deliverEvidenceNotificationEmails(emailDeliveries).catch((error) => {
+    logger.error("Evidence notification email delivery failed.", {
+      entityId: input.entityId,
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
+  });
+};
+
+const evidenceReviewSelect = {
+  createdAt: true,
+  id: true,
+  observation: {
+    select: {
+      auditReport: { select: { reportNumber: true } },
+      areaAssignments: {
+        select: { area: { select: { name: true } } },
+      },
+      id: true,
+      observationNumber: true,
+      title: true,
+    },
+  },
+  originalName: true,
+  reviewStatus: true,
+  submittedAt: true,
+  uploadedByUser: { select: userSelect },
+  uploadedByUserId: true,
+  workflowInstanceId: true,
+} as const;
+
+type EvidenceReviewRecord = Prisma.EvidenceFileGetPayload<{
+  select: typeof evidenceReviewSelect;
+}>;
+
+const evidenceReviewTargetUrl = (observationId: string, evidenceId: string) =>
+  `/observaciones/${observationId}?tab=evidence&evidenceId=${encodeURIComponent(evidenceId)}`;
+
+const evidenceObservationLabel = (evidence: EvidenceReviewRecord) =>
+  `${evidence.observation.auditReport.reportNumber} / OBS-${String(evidence.observation.observationNumber).padStart(3, "0")}`;
+
+const evidenceReviewNotification = (evidence: EvidenceReviewRecord) => {
+  const areaNames = Array.from(
+    new Set(
+      evidence.observation.areaAssignments.map((assignment) =>
+        assignment.area.name.trim(),
+      ),
+    ),
+  ).sort();
+  const observationLabel = evidenceObservationLabel(evidence);
+
+  return {
+    message: [
+      `Se ha registrado nueva evidencia para revisión correspondiente a ${observationLabel}.`,
+      `Título: ${evidence.observation.title}`,
+      `Áreas involucradas: ${areaNames.join(", ") || "No especificadas"}`,
+      `Enviado por: ${evidence.uploadedByUser.name}`,
+      `Fecha de carga: ${evidence.createdAt.toLocaleString("es-BO", { dateStyle: "medium", timeStyle: "short" })}`,
+    ].join("\n"),
+    title: `Evidencia pendiente de revisión – ${observationLabel}`,
+  };
+};
+
+const getActiveAuditors = () =>
+  prisma.user.findMany({
+    select: userSelect,
+    where: {
+      deletedAt: null,
+      isActive: true,
+      userRoles: {
+        some: {
+          role: { code: "AUDITOR", deletedAt: null },
+        },
+      },
+    },
+  });
+
+const getEvidenceReviewRecord = async (
+  id: string,
+  access: AuthorizationSummary,
+): Promise<EvidenceReviewRecord> => {
+  const evidence = await prisma.evidenceFile.findFirst({
+    select: evidenceReviewSelect,
+    where: {
+      deletedAt: null,
+      id,
+      ...buildEvidenceScopeWhere(access),
+    },
+  });
+  if (!evidence) throw new AppError("Evidence not found.", 404);
+  return evidence;
+};
 
 const formatEvaluation = (record: EvaluationRecord) => ({
   actionPlan: {
@@ -109,7 +324,7 @@ const formatEvaluation = (record: EvaluationRecord) => ({
     id: record.actionPlan.id,
     responsibleUser: record.actionPlan.responsibleUser,
   },
-  actionPlanStatus: record.actionPlanStatus,
+  evaluatedStatus: record.evaluatedStatus,
   comment: record.comment,
   evidence: record.evidenceFiles.map((file) => ({
     ...file,
@@ -130,7 +345,9 @@ const formatEvaluation = (record: EvaluationRecord) => ({
     id: record.actionPlan.observation.id,
     title: record.actionPlan.observation.title,
   },
-  progressPercent: record.progressPercent,
+  officialProgressPercent: record.actionPlan.progressPercent,
+  officialStatus: record.actionPlan.status,
+  reportedProgressPercent: record.reportedProgressPercent,
   reviewedAt: record.reviewedAt?.toISOString() ?? null,
   reviewedByUser: record.reviewedByUser,
   reviewComment: record.reviewComment,
@@ -159,9 +376,9 @@ const canEdit = (
   record: EvaluationRecord,
   access: AuthorizationSummary,
 ): boolean =>
-  access.isAdmin ||
-  (record.submittedByUserId === access.userId &&
-    ["DRAFT", "RETURNED"].includes(record.reviewStatus));
+  authorizationService.can(access, "action_plans.submit_to_audit") &&
+  record.submittedByUserId === access.userId &&
+  ["DRAFT", "RETURNED"].includes(record.reviewStatus);
 
 const maxFileSize = async () => {
   const parameter = await prisma.systemParameter.findFirst({
@@ -176,8 +393,9 @@ const maxFileSize = async () => {
 
 const prepareFiles = async (files: UploadFile[]) => {
   const limit = await maxFileSize();
-  return Promise.all(
-    files.map(async (file) => {
+  const prepared: PreparedFile[] = [];
+  try {
+    for (const file of files) {
       const originalName = path
         .basename(file.originalName)
         .replace(/[^a-zA-Z0-9.\-_\s()]/g, "_")
@@ -204,7 +422,7 @@ const prepareFiles = async (files: UploadFile[]) => {
       const absolutePath = path.join(uploadsRootDir, relativePath);
       await mkdir(path.dirname(absolutePath), { recursive: true });
       await writeFile(absolutePath, file.buffer);
-      return {
+      prepared.push({
         absolutePath,
         checksum: createHash("sha256").update(file.buffer).digest("hex"),
         mimeType: file.mimetype,
@@ -212,26 +430,27 @@ const prepareFiles = async (files: UploadFile[]) => {
         relativePath,
         sizeBytes: BigInt(file.size),
         storedName,
-      };
-    }),
-  );
+      });
+    }
+    return prepared;
+  } catch (error) {
+    await Promise.all(
+      prepared.map((file) => unlink(file.absolutePath).catch(() => undefined)),
+    );
+    throw error;
+  }
 };
 
 const refreshPlanFromLatestApproval = async (
   tx: Prisma.TransactionClient,
   actionPlanId: string,
+  officialStatus: "NOT_STARTED" | "STARTED" | "WITH_PROGRESS" | "CONCLUDED",
 ) => {
-  const latest = await tx.progressEvaluation.findFirst({
-    orderBy: [{ submittedAt: "desc" }, { id: "desc" }],
-    select: { actionPlanStatus: true, progressPercent: true },
-    where: { actionPlanId, deletedAt: null, reviewStatus: "APPROVED" },
-  });
-  if (!latest) return;
   const actionPlan = await tx.actionPlan.update({
     data: {
-      completedAt: latest.actionPlanStatus === "CONCLUDED" ? new Date() : null,
-      progressPercent: latest.progressPercent,
-      status: latest.actionPlanStatus,
+      completedAt: officialStatus === "CONCLUDED" ? new Date() : null,
+      progressPercent: officialProgressByStatus[officialStatus],
+      status: officialStatus,
     },
     select: { observationId: true },
     where: { id: actionPlanId },
@@ -250,7 +469,7 @@ const requireActionPlan = async (id: string, access: AuthorizationSummary) => {
     where: {
       deletedAt: null,
       id,
-      observation: buildObservationAccessWhere(access),
+      observation: buildObservationScopeWhere(access),
     },
   });
   if (!actionPlan) throw new AppError("No se encontró el plan de acción.", 404);
@@ -267,7 +486,7 @@ export const progressService = {
     const allowed =
       access.isAdmin ||
       actionPlan.responsibleUserId === access.userId ||
-      access.permissions.includes("progress_evaluations.submit");
+      authorizationService.can(access, "action_plans.submit_to_audit");
     if (!allowed)
       throw new AppError(
         "No tiene permisos para registrar avances en este plan de acción.",
@@ -350,7 +569,7 @@ export const progressService = {
 
   async reviewProgressEvaluation(
     id: string,
-    action: "approve" | "reject" | "return",
+    action: "approve" | "return",
     input: ReviewProgressEvaluationInput,
     access: AuthorizationSummary,
   ) {
@@ -361,12 +580,10 @@ export const progressService = {
         409,
       );
     const requiredPermissions = [
-      "progress_evaluations.review",
+      "action_plans.evaluate",
       ...(action === "approve"
-        ? ["progress_evaluations.approve"]
-        : action === "reject"
-          ? ["progress_evaluations.reject"]
-          : []),
+        ? ["action_plans.approve"]
+        : ["action_plans.return"]),
     ];
     if (
       !access.isAdmin &&
@@ -380,33 +597,24 @@ export const progressService = {
       );
     if (action !== "approve" && !input.comment)
       throw new AppError(
-        "Debe ingresar un comentario para devolver o rechazar la evaluación.",
+        "Debe ingresar un comentario para devolver la evaluación.",
         400,
       );
-    const next =
-      action === "approve"
-        ? "APPROVED"
-        : action === "return"
-          ? "RETURNED"
-          : "REJECTED";
+    const next = action === "approve" ? "APPROVED" : "RETURNED";
     await prisma.$transaction(async (tx) => {
       await tx.progressEvaluation.update({
         data: {
           reviewComment: input.comment,
           reviewedAt: new Date(),
           reviewedByUserId: access.userId,
+          evaluatedStatus: input.officialStatus,
           reviewStatus: next,
         },
         where: { id },
       });
       await tx.progressReviewHistory.create({
         data: {
-          action:
-            action === "approve"
-              ? "APPROVED"
-              : action === "return"
-                ? "RETURNED"
-                : "REJECTED",
+          action: action === "approve" ? "APPROVED" : "RETURNED",
           comment: input.comment,
           fromStatus: previous.reviewStatus,
           progressEvaluationId: id,
@@ -415,11 +623,15 @@ export const progressService = {
         },
       });
       if (action === "approve")
-        await refreshPlanFromLatestApproval(tx, previous.actionPlan.id);
+        await refreshPlanFromLatestApproval(
+          tx,
+          previous.actionPlan.id,
+          input.officialStatus,
+        );
     });
     if (previous.submittedByUser.id !== access.userId) {
       await notificationService.create({
-        message: `La evaluación de avance del plan de acción fue ${next === "APPROVED" ? "aprobada" : next === "RETURNED" ? "devuelta" : "rechazada"}.`,
+        message: `La evaluación de avance del plan de acción fue ${next === "APPROVED" ? "aprobada" : "devuelta"}.`,
         title: "Evaluación de avance revisada",
         type: next === "APPROVED" ? "success" : "warning",
         userId: previous.submittedByUser.id,
@@ -438,10 +650,7 @@ export const progressService = {
     const previous = await findEvaluation(id, access);
     if (!canEdit(previous, access))
       throw new AppError("No tiene permisos para enviar esta evaluación.", 403);
-    if (
-      previous.actionPlanStatus === "CONCLUDED" &&
-      previous.evidenceFiles.length === 0
-    )
+    if (previous.type === "FINALIZATION" && previous.evidenceFiles.length === 0)
       throw new AppError(
         "Una evaluación de finalización requiere al menos un archivo de evidencia.",
         400,
@@ -471,7 +680,7 @@ export const progressService = {
       });
     });
     const auditorId = previous.actionPlan.observation.auditorUserId;
-    if (auditorId !== access.userId) {
+    if (auditorId && auditorId !== access.userId) {
       await notificationService.create({
         message:
           "Hay una evaluación de avance pendiente para un plan de acción.",
@@ -496,12 +705,9 @@ export const progressService = {
       throw new AppError("You cannot edit this evaluation.", 403);
     await prisma.progressEvaluation.update({
       data: {
-        ...(input.actionPlanStatus !== undefined
-          ? { actionPlanStatus: input.actionPlanStatus }
-          : {}),
         ...(input.comment !== undefined ? { comment: input.comment } : {}),
-        ...(input.progressPercent !== undefined
-          ? { progressPercent: input.progressPercent }
+        ...(input.reportedProgressPercent !== undefined
+          ? { reportedProgressPercent: input.reportedProgressPercent }
           : {}),
         ...(input.type !== undefined ? { type: input.type } : {}),
       },
@@ -541,7 +747,7 @@ export const progressService = {
       where: {
         deletedAt: null,
         id: target.observationId,
-        ...buildObservationAccessWhere(access),
+        ...buildObservationScopeWhere(access),
       },
     });
     if (!observation) throw new AppError("Observation not found.", 404);
@@ -709,22 +915,30 @@ export const progressService = {
       where: {
         deletedAt: null,
         id: observationId,
-        ...buildObservationAccessWhere(access),
+        ...buildObservationScopeWhere(access),
       },
     });
     if (!observation) throw new AppError("Observation not found.", 404);
     const records = await prisma.evidenceFile.findMany({
       include: {
+        actionPlan: { select: { id: true, title: true } },
         observationArea: {
           select: { area: { select: { id: true, name: true } }, id: true },
         },
+        progressEvaluation: { select: { id: true } },
         uploadedByUser: { select: userSelect },
       },
       orderBy: { createdAt: "desc" },
-      where: { deletedAt: null, observationId },
+      where: {
+        deletedAt: null,
+        observationId,
+        ...buildEvidenceScopeWhere(access),
+      },
     });
     return records.map((record) => ({
       ...record,
+      actionPlanId: record.actionPlan?.id ?? null,
+      actionPlanTitle: record.actionPlan?.title ?? null,
       createdAt: record.createdAt.toISOString(),
       downloadPath: `/evidences/${record.id}/download`,
       observationArea: record.observationArea
@@ -734,30 +948,24 @@ export const progressService = {
           }
         : null,
       reviewedAt: record.reviewedAt?.toISOString() ?? null,
+      progressEvaluationId: record.progressEvaluation?.id ?? null,
       sizeBytes: Number(record.sizeBytes),
       submittedAt: record.submittedAt?.toISOString() ?? null,
     }));
   },
 
   async submitEvidenceForReview(id: string, access: AuthorizationSummary) {
-    const evidence = await prisma.evidenceFile.findFirst({
-      select: {
-        id: true,
-        reviewStatus: true,
-        uploadedByUserId: true,
-        workflowInstanceId: true,
-      },
-      where: {
-        deletedAt: null,
-        id,
-        observation: buildObservationAccessWhere(access),
-      },
-    });
-    if (!evidence) throw new AppError("Evidence not found.", 404);
+    const evidence = await getEvidenceReviewRecord(id, access);
     if (!access.isAdmin && evidence.uploadedByUserId !== access.userId)
       throw new AppError("You cannot submit this evidence.", 403);
+    if (evidence.reviewStatus === "PENDING") {
+      const record = (await this.getObservationEvidenceForIds([id], access))[0];
+      if (!record) throw new AppError("Evidence not found.", 404);
+      return record;
+    }
     if (!["DRAFT", "RETURNED"].includes(evidence.reviewStatus))
       throw new AppError("La evidencia no está disponible para envío.", 409);
+
     if (evidence.reviewStatus === "RETURNED" && evidence.workflowInstanceId) {
       const priorInstance = await prisma.workflowInstance.findUnique({
         select: { status: true },
@@ -767,12 +975,13 @@ export const progressService = {
         priorInstance &&
         ["CANCELLED", "COMPLETED", "REJECTED"].includes(priorInstance.status)
       ) {
-        await prisma.evidenceFile.update({
+        await prisma.evidenceFile.updateMany({
           data: { workflowInstanceId: null },
-          where: { id },
+          where: { id, workflowInstanceId: evidence.workflowInstanceId },
         });
       }
     }
+
     const workflow = await workflowIntegrationService.startForEntity({
       access: { ...access, ipAddress: null },
       actorUserId: access.userId,
@@ -780,22 +989,125 @@ export const progressService = {
       entityType: "evidence_file",
       processType: "EVIDENCE_REVIEW",
     });
-    if (!workflow.instanceId)
+    const fallbackRecipients = workflow.instanceId
+      ? []
+      : await getActiveAuditors();
+    if (!workflow.instanceId && fallbackRecipients.length === 0)
       throw new AppError(
-        "No existe un flujo publicado para revisar evidencias.",
+        "No hay usuarios activos con rol Auditor para revisar la evidencia.",
         409,
       );
-    await prisma.evidenceFile.update({
+    const submittedAt = new Date();
+    const updated = await prisma.evidenceFile.updateMany({
       data: {
         reviewComment: null,
         reviewStatus: "PENDING",
-        submittedAt: new Date(),
-        workflowInstanceId: workflow.instanceId,
+        submittedAt,
+        workflowInstanceId: workflow.instanceId || null,
       },
-      where: { id },
+      where: {
+        id,
+        reviewStatus: { in: ["DRAFT", "RETURNED"] },
+      },
     });
-    const [record] = await this.getObservationEvidenceForIds([id], access);
+    if (updated.count !== 1) {
+      const current = await getEvidenceReviewRecord(id, access);
+      if (current.reviewStatus === "PENDING") {
+        const record = (
+          await this.getObservationEvidenceForIds([id], access)
+        )[0];
+        if (!record) throw new AppError("Evidence not found.", 404);
+        return record;
+      }
+      throw new AppError("La evidencia no está disponible para envío.", 409);
+    }
+
+    if (!workflow.instanceId) {
+      const targetUrl = evidenceReviewTargetUrl(evidence.observation.id, id);
+      const notification = evidenceReviewNotification(evidence);
+      await queueEvidenceNotifications({
+        entityId: id,
+        eventType: "EVIDENCE_REVIEW_SUBMITTED",
+        message: notification.message,
+        operationKey: `evidence-review:${id}:${evidence.submittedAt?.getTime() ?? "initial"}`,
+        recipients: fallbackRecipients,
+        targetUrl,
+        title: notification.title,
+      });
+    }
+
+    const record = (await this.getObservationEvidenceForIds([id], access))[0];
+    if (!record) throw new AppError("Evidence not found.", 404);
     return record;
+  },
+
+  async reviewEvidence(
+    id: string,
+    action: "approve" | "return",
+    comment: string | null,
+    access: AuthorizationSummary,
+  ) {
+    if (!canReviewEvidenceAsAuditor(access))
+      throw new AppError(
+        "Solo un usuario con rol Auditor puede revisar evidencias.",
+        403,
+      );
+    const previous = await getEvidenceReviewRecord(id, access);
+    if (previous.reviewStatus !== "PENDING")
+      throw new AppError("La evidencia no está pendiente de revisión.", 409);
+    if (previous.workflowInstanceId)
+      throw new AppError(
+        "Esta evidencia debe revisarse desde el flujo publicado asignado.",
+        409,
+      );
+    const next = action === "approve" ? "APPROVED" : "RETURNED";
+    const reviewedAt = new Date();
+    const updated = await prisma.evidenceFile.updateMany({
+      data: {
+        reviewComment: action === "return" ? comment?.trim() || null : null,
+        reviewedAt,
+        reviewedByUserId: access.userId,
+        reviewStatus: next,
+      },
+      where: {
+        id,
+        reviewStatus: "PENDING",
+        workflowInstanceId: null,
+      },
+    });
+    if (updated.count !== 1)
+      throw new AppError("La evidencia ya fue revisada.", 409);
+
+    const targetUrl = evidenceReviewTargetUrl(previous.observation.id, id);
+    if (previous.uploadedByUser.id !== access.userId) {
+      await queueEvidenceNotifications({
+        entityId: id,
+        eventType:
+          next === "APPROVED" ? "EVIDENCE_APPROVED" : "EVIDENCE_RETURNED",
+        message:
+          next === "APPROVED"
+            ? `La evidencia “${previous.originalName}” fue aprobada por Auditoría.`
+            : `La evidencia “${previous.originalName}” fue devuelta por Auditoría${comment?.trim() ? `: ${comment.trim()}` : "."}`,
+        operationKey: `evidence-review:${id}:${previous.submittedAt?.getTime() ?? "initial"}:${next.toLowerCase()}`,
+        recipients: [previous.uploadedByUser],
+        targetUrl,
+        title:
+          next === "APPROVED"
+            ? "Evidencia aprobada"
+            : "Evidencia devuelta por Auditoría",
+      });
+    }
+
+    const record = (await this.getObservationEvidenceForIds([id], access))[0];
+    if (!record) throw new AppError("Evidence not found.", 404);
+    return {
+      current: record,
+      previous: {
+        id: previous.id,
+        observation: { id: previous.observation.id },
+        reviewStatus: previous.reviewStatus,
+      },
+    };
   },
 
   async getObservationEvidenceForIds(
@@ -804,19 +1116,23 @@ export const progressService = {
   ) {
     const records = await prisma.evidenceFile.findMany({
       include: {
+        actionPlan: { select: { id: true, title: true } },
         observationArea: {
           select: { area: { select: { id: true, name: true } }, id: true },
         },
+        progressEvaluation: { select: { id: true } },
         uploadedByUser: { select: userSelect },
       },
       where: {
         deletedAt: null,
         id: { in: ids },
-        observation: buildObservationAccessWhere(access),
+        ...buildEvidenceScopeWhere(access),
       },
     });
     return records.map((record) => ({
       ...record,
+      actionPlanId: record.actionPlan?.id ?? null,
+      actionPlanTitle: record.actionPlan?.title ?? null,
       createdAt: record.createdAt.toISOString(),
       downloadPath: `/evidences/${record.id}/download`,
       observationArea: record.observationArea
@@ -826,6 +1142,7 @@ export const progressService = {
           }
         : null,
       reviewedAt: record.reviewedAt?.toISOString() ?? null,
+      progressEvaluationId: record.progressEvaluation?.id ?? null,
       sizeBytes: Number(record.sizeBytes),
       submittedAt: record.submittedAt?.toISOString() ?? null,
     }));
@@ -837,7 +1154,7 @@ export const progressService = {
       where: {
         deletedAt: null,
         id,
-        observation: buildObservationAccessWhere(access),
+        ...buildEvidenceScopeWhere(access),
       },
     });
     if (!record) throw new AppError("Evidence not found.", 404);
@@ -864,7 +1181,7 @@ export const progressService = {
       where: {
         deletedAt: null,
         id,
-        observation: buildObservationAccessWhere(access),
+        ...buildEvidenceScopeWhere(access),
       },
     });
     if (!record) throw new AppError("Evidence not found.", 404);
@@ -891,7 +1208,7 @@ export const progressService = {
       where: {
         deletedAt: null,
         id: observationId,
-        ...buildObservationAccessWhere(access),
+        ...buildObservationScopeWhere(access),
       },
     });
     if (!observation) throw new AppError("Observation not found.", 404);
@@ -924,15 +1241,14 @@ export const progressService = {
     access: AuthorizationSummary,
   ) {
     const internal =
-      access.isAdmin ||
-      access.roles.some((role) => role.toLowerCase().includes("audit"));
+      access.dataScope === "ALL" || access.dataScope === "AUDIT_SCOPE";
     return prisma.observationComment.findMany({
       include: { authorUser: { select: userSelect } },
       orderBy: { createdAt: "desc" },
       where: {
         deletedAt: null,
         observationId,
-        observation: buildObservationAccessWhere(access),
+        observation: buildObservationScopeWhere(access),
         ...(!internal
           ? { visibility: { in: ["AREA_VISIBLE", "SYSTEM"] } }
           : {}),
@@ -946,7 +1262,11 @@ export const progressService = {
     access: AuthorizationSummary,
   ) {
     const record = await prisma.observationComment.findFirst({
-      where: { deletedAt: null, id },
+      where: {
+        deletedAt: null,
+        id,
+        observation: buildObservationScopeWhere(access),
+      },
     });
     if (!record) throw new AppError("Comment not found.", 404);
     if (!access.isAdmin && record.authorUserId !== access.userId)
@@ -964,7 +1284,11 @@ export const progressService = {
 
   async deleteComment(id: string, access: AuthorizationSummary) {
     const record = await prisma.observationComment.findFirst({
-      where: { deletedAt: null, id },
+      where: {
+        deletedAt: null,
+        id,
+        observation: buildObservationScopeWhere(access),
+      },
     });
     if (!record) throw new AppError("Comment not found.", 404);
     if (!access.isAdmin && record.authorUserId !== access.userId)

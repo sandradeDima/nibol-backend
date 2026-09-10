@@ -54,6 +54,9 @@ const getTaskListQuery = (request) => workflowTaskListQuerySchema.parse({
     workflowDefinitionId: getQueryValue(request.query.workflowDefinitionId),
 });
 export const workflowRuntimeController = {
+    async getStartOptions(request, response) {
+        sendSuccess(response, await workflowInstanceService.getStartOptions(getAccess(request)));
+    },
     async startInstance(request, response) {
         sendSuccess(response, await workflowInstanceService.startInstance(workflowInstanceStartSchema.parse(request.body), getAccess(request)), 201);
     },

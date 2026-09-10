@@ -1,11 +1,24 @@
 import type { Prisma } from "../../../generated/prisma/client.js";
 
-import type { AuthorizationSummary } from "../../services/authorization-service.js";
+import {
+  authorizationService,
+  buildActionPlanScopeWhere,
+  buildObservationAreaScopeWhere,
+  buildObservationScopeWhere,
+  buildRemediationPlanScopeWhere,
+  type AuthorizationSummary,
+} from "../../services/authorization-service.js";
 import { AppError } from "../../utils/app-error.js";
 import { prisma } from "../../utils/prisma.js";
 import { observationAggregationService } from "../observations/observation-aggregation.service.js";
-import { buildObservationAccessWhere } from "../observations/observations.service.js";
+import { observationDeadlineService } from "../observations/observation-deadline.service.js";
 import { workflowIntegrationService } from "../workflows/workflow-integration.service.js";
+import {
+  getActionPlanDeadlineStatus,
+  getEffectiveActionPlanDueDate,
+  getOfficialActionPlanProgress,
+  isApprovedDeadlineExtension,
+} from "../reports/reporting-definitions.js";
 import type {
   ActionPlanDetail,
   CreateActionPlanInput,
@@ -23,6 +36,14 @@ const userSelect = {
 } as const;
 const include = {
   _count: { select: { evidenceFiles: true, progressEvaluations: true } },
+  deadlineExtensionRequests: {
+    select: {
+      finalApprovedAt: true,
+      proposedDueDate: true,
+      status: true,
+    },
+    where: { deletedAt: null },
+  },
   observation: {
     select: {
       auditReport: { select: { reportNumber: true } },
@@ -52,42 +73,82 @@ const labels = {
   WITH_PROGRESS: "Con avance",
 } as const;
 
-const format = (record: ActionPlanRecord): ActionPlanDetail => ({
-  area: record.observationArea.area,
-  areaResponsible: record.observationArea.areaResponsible,
-  completedAt: record.completedAt?.toISOString() ?? null,
-  createdAt: record.createdAt.toISOString(),
-  currentDueDate: record.currentDueDate.toISOString(),
-  description: record.description,
-  evidenceCount: record._count.evidenceFiles,
-  id: record.id,
-  isOverdue:
-    record.status !== "CONCLUDED" &&
-    record.currentDueDate.getTime() < new Date().getTime(),
-  observation: {
-    displayCode: `${record.observation.auditReport.reportNumber} / OBS-${String(record.observation.observationNumber).padStart(3, "0")}`,
-    id: record.observation.id,
-    observationNumber: record.observation.observationNumber,
-    reportNumber: record.observation.auditReport.reportNumber,
-    title: record.observation.title,
-  },
-  observationAreaId: record.observationAreaId,
-  originalDueDate: record.originalDueDate.toISOString(),
-  processOwner: record.observationArea.processOwner,
-  progressEvaluationCount: record._count.progressEvaluations,
-  progressPercent: record.progressPercent,
-  responsibleUser: record.responsibleUser,
-  sortOrder: record.sortOrder,
-  status: record.status,
-  statusLabel: labels[record.status],
-  updatedAt: record.updatedAt.toISOString(),
-});
+const format = (record: ActionPlanRecord): ActionPlanDetail => {
+  const officialProgress = getOfficialActionPlanProgress(record.status);
+  const effectiveDueDate = getEffectiveActionPlanDueDate(record);
+  const deadlineStatus = getActionPlanDeadlineStatus(record);
+  return {
+    area: record.observationArea.area,
+    areaResponsible: record.observationArea.areaResponsible,
+    completedAt: record.completedAt?.toISOString() ?? null,
+    createdAt: record.createdAt.toISOString(),
+    currentDueDate: record.currentDueDate.toISOString(),
+    deadlineStatus,
+    description: record.description,
+    evidenceCount: record._count.evidenceFiles,
+    effectiveDueDate: effectiveDueDate.toISOString(),
+    id: record.id,
+    isOverdue: deadlineStatus === "VENCIDO",
+    observation: {
+      displayCode: `${record.observation.auditReport.reportNumber} / OBS-${String(record.observation.observationNumber).padStart(3, "0")}`,
+      id: record.observation.id,
+      observationNumber: record.observation.observationNumber,
+      reportNumber: record.observation.auditReport.reportNumber,
+      title: record.observation.title,
+    },
+    observationAreaId: record.observationAreaId,
+    originalDueDate: record.originalDueDate.toISOString(),
+    processOwner: record.observationArea.processOwner,
+    progressEvaluationCount: record._count.progressEvaluations,
+    officialProgressCode: officialProgress.code,
+    officialProgressPercent: officialProgress.percent,
+    progressPercent: officialProgress.percent,
+    reprogrammed: Boolean(
+      record.deadlineExtensionRequests.find(isApprovedDeadlineExtension),
+    ),
+    responsibleUser: record.responsibleUser,
+    sortOrder: record.sortOrder,
+    status: record.status,
+    statusLabel: labels[record.status],
+    updatedAt: record.updatedAt.toISOString(),
+  };
+};
 
 const accessWhere = (
   access: AuthorizationSummary,
-): Prisma.ActionPlanWhereInput => ({
-  observation: buildObservationAccessWhere(access),
-});
+): Prisma.ActionPlanWhereInput => buildActionPlanScopeWhere(access);
+
+const validateDueDate = async (observationId: string, dueDate: Date) => {
+  const observation = await prisma.observation.findUnique({
+    select: {
+      auditReport: { select: { reportDate: true } },
+      riskLevel: { select: { maxRemediationDays: true, name: true } },
+    },
+    where: { id: observationId },
+  });
+  if (!observation?.riskLevel)
+    throw new AppError(
+      "La observación no tiene un nivel de riesgo válido.",
+      400,
+    );
+  let maximumDate: Date;
+  try {
+    maximumDate = observationDeadlineService.calculate(
+      observation.auditReport.reportDate,
+      observation.riskLevel.maxRemediationDays,
+    );
+  } catch {
+    throw new AppError(
+      "El nivel de riesgo no tiene un plazo máximo configurado.",
+      400,
+    );
+  }
+  if (dueDate > maximumDate)
+    throw new AppError(
+      `La fecha seleccionada supera el plazo máximo permitido para el nivel de riesgo ${observation.riskLevel.name}.`,
+      400,
+    );
+};
 
 const find = async (
   id: string,
@@ -105,11 +166,16 @@ const validateAssignment = async (
   observationId: string,
   observationAreaId: string,
   responsibleUserId: string,
+  access: AuthorizationSummary,
 ) => {
   const [observationArea, user] = await Promise.all([
     prisma.observationArea.findFirst({
       select: { id: true },
-      where: { id: observationAreaId, observationId },
+      where: {
+        id: observationAreaId,
+        observationId,
+        ...buildObservationAreaScopeWhere(access),
+      },
     }),
     prisma.user.findFirst({
       select: { id: true },
@@ -126,6 +192,12 @@ const validateAssignment = async (
       "El ejecutor seleccionado no existe o está inactivo.",
       400,
     );
+  const executorRole = await prisma.userRole.findFirst({
+    select: { userId: true },
+    where: { userId: responsibleUserId, role: { code: "EXECUTOR" } },
+  });
+  if (!executorRole)
+    throw new AppError("El usuario seleccionado no es un ejecutor.", 400);
 };
 
 const remediationPlanInclude = {
@@ -161,11 +233,23 @@ const findRemediationPlan = async (
     where: {
       deletedAt: null,
       id,
-      observation: buildObservationAccessWhere(access),
+      observation: buildObservationScopeWhere(access),
     },
   });
   if (!record)
-    throw new AppError("No se encontró el plan de remediación.", 404);
+    throw new AppError("No se encontró el plan de acción recomendado.", 404);
+  if (access.dataScope === "AREA") {
+    const allowedArea = await prisma.observationArea.findFirst({
+      select: { id: true },
+      where: {
+        observationId: record.observationId,
+        areaId: record.area.id,
+        ...buildObservationAreaScopeWhere(access),
+      },
+    });
+    if (!allowedArea)
+      throw new AppError("No se encontró el plan de acción recomendado.", 404);
+  }
   return record;
 };
 
@@ -209,6 +293,11 @@ export const remediationService = {
     input: CreateRemediationPlanInput,
     access: AuthorizationSummary,
   ) {
+    if (!authorizationService.can(access, "recommended_action_plans.create"))
+      throw new AppError(
+        "No tiene permiso para crear planes recomendados.",
+        403,
+      );
     const [observationArea, owner] = await Promise.all([
       prisma.observationArea.findFirst({
         select: { id: true },
@@ -217,8 +306,9 @@ export const remediationService = {
           observation: {
             deletedAt: null,
             id: observationId,
-            ...buildObservationAccessWhere(access),
+            ...buildObservationScopeWhere(access),
           },
+          ...buildObservationAreaScopeWhere(access),
         },
       }),
       input.ownerUserId
@@ -228,6 +318,7 @@ export const remediationService = {
               deletedAt: null,
               id: input.ownerUserId,
               isActive: true,
+              userRoles: { some: { role: { code: "EXECUTOR" } } },
             },
           })
         : Promise.resolve(null),
@@ -267,19 +358,21 @@ export const remediationService = {
     observationId: string,
     access: AuthorizationSummary,
   ) {
+    if (!authorizationService.can(access, "recommended_action_plans.view"))
+      throw new AppError("No tiene permiso para ver planes recomendados.", 403);
     const observation = await prisma.observation.findFirst({
       select: { id: true },
       where: {
         deletedAt: null,
         id: observationId,
-        ...buildObservationAccessWhere(access),
+        ...buildObservationScopeWhere(access),
       },
     });
     if (!observation) throw new AppError("No se encontró la observación.", 404);
     const plans = await prisma.remediationPlan.findMany({
       include: remediationPlanInclude,
       orderBy: [{ area: { name: "asc" } }, { createdAt: "asc" }],
-      where: { deletedAt: null, observationId },
+      where: buildRemediationPlanScopeWhere(access, observationId),
     });
     return plans.map(formatRemediationPlan);
   },
@@ -289,13 +382,37 @@ export const remediationService = {
     input: UpdateRemediationPlanInput,
     access: AuthorizationSummary,
   ) {
+    const canAssignExecutor = authorizationService.can(
+      access,
+      "action_plans.assign_executor",
+    );
+    const canEdit = authorizationService.can(
+      access,
+      "recommended_action_plans.edit",
+    );
+    if (!canEdit && !canAssignExecutor)
+      throw new AppError(
+        "No tiene permiso para editar planes recomendados.",
+        403,
+      );
     const previous = await findRemediationPlan(id, access);
     if (previous.status !== "DRAFT" && previous.status !== "RETURNED")
       throw new AppError("El plan no está disponible para edición.", 409);
+    if (!canEdit && Object.keys(input).some((key) => key !== "ownerUserId")) {
+      throw new AppError(
+        "Solo puede reasignar el ejecutor del plan recomendado.",
+        403,
+      );
+    }
     if (input.ownerUserId) {
       const owner = await prisma.user.findFirst({
         select: { id: true },
-        where: { deletedAt: null, id: input.ownerUserId, isActive: true },
+        where: {
+          deletedAt: null,
+          id: input.ownerUserId,
+          isActive: true,
+          userRoles: { some: { role: { code: "EXECUTOR" } } },
+        },
       });
       if (!owner)
         throw new AppError("El responsable no existe o está inactivo.", 400);
@@ -321,10 +438,49 @@ export const remediationService = {
       data,
       where: { id },
     });
-    return formatRemediationPlan(await findRemediationPlan(id, access));
+    return {
+      current: formatRemediationPlan(await findRemediationPlan(id, access)),
+      previous: formatRemediationPlan(previous),
+    };
+  },
+
+  async deleteRemediationPlan(id: string, access: AuthorizationSummary) {
+    if (!authorizationService.can(access, "recommended_action_plans.delete"))
+      throw new AppError(
+        "No tiene permiso para eliminar planes recomendados.",
+        403,
+      );
+    const previous = await findRemediationPlan(id, access);
+    if (previous.status !== "DRAFT" && previous.status !== "RETURNED") {
+      throw new AppError("El plan no está disponible para eliminación.", 409);
+    }
+    const actionPlanCount = await prisma.actionPlan.count({
+      where: { deletedAt: null, remediationPlanId: id },
+    });
+    if (actionPlanCount > 0) {
+      throw new AppError(
+        "No se puede eliminar un plan recomendado con planes de acción asociados.",
+        409,
+      );
+    }
+    await prisma.remediationPlan.update({
+      data: { deletedAt: new Date() },
+      where: { id },
+    });
+    return previous;
   },
 
   async submitRemediationPlan(id: string, access: AuthorizationSummary) {
+    if (
+      !authorizationService.can(
+        access,
+        "recommended_action_plans.submit_to_audit",
+      )
+    )
+      throw new AppError(
+        "Solo Auditoría puede enviar planes recomendados.",
+        403,
+      );
     const previous = await findRemediationPlan(id, access);
     if (previous.status !== "DRAFT" && previous.status !== "RETURNED")
       throw new AppError("El plan no está disponible para envío.", 409);
@@ -363,7 +519,10 @@ export const remediationService = {
       },
       where: { id },
     });
-    return formatRemediationPlan(await findRemediationPlan(id, access));
+    return {
+      current: formatRemediationPlan(await findRemediationPlan(id, access)),
+      previous: formatRemediationPlan(previous),
+    };
   },
 
   async createActionPlan(
@@ -371,19 +530,29 @@ export const remediationService = {
     input: CreateActionPlanInput,
     access: AuthorizationSummary,
   ): Promise<ActionPlanDetail> {
+    if (!authorizationService.can(access, "action_plans.create"))
+      throw new AppError("No tiene permiso para crear planes de acción.", 403);
     const observation = await prisma.observation.findFirst({
       select: { id: true },
       where: {
         deletedAt: null,
         id: observationId,
-        ...buildObservationAccessWhere(access),
+        ...buildObservationScopeWhere(access),
       },
     });
     if (!observation) throw new AppError("No se encontró la observación.", 404);
+    await validateDueDate(observationId, input.dueDate);
+    if (
+      access.dataScope === "ASSIGNED" &&
+      input.responsibleUserId !== access.userId
+    ) {
+      throw new AppError("No puede asignar un plan a otro ejecutor.", 403);
+    }
     await validateAssignment(
       observationId,
       input.observationAreaId,
       input.responsibleUserId,
+      access,
     );
     const created = await prisma.$transaction(async (tx) => {
       const actionPlan = await tx.actionPlan.create({
@@ -423,6 +592,11 @@ export const remediationService = {
   },
 
   async deleteActionPlan(id: string, access: AuthorizationSummary) {
+    if (!authorizationService.can(access, "action_plans.delete"))
+      throw new AppError(
+        "No tiene permiso para eliminar planes de acción.",
+        403,
+      );
     const previous = await find(id, access);
     if (previous._count.progressEvaluations > 0)
       throw new AppError(
@@ -445,10 +619,10 @@ export const remediationService = {
       prisma.progressEvaluation.findMany({
         orderBy: { submittedAt: "desc" },
         select: {
-          actionPlanStatus: true,
+          evaluatedStatus: true,
           comment: true,
           id: true,
-          progressPercent: true,
+          reportedProgressPercent: true,
           reviewedAt: true,
           reviewedByUser: { select: userSelect },
           reviewStatus: true,
@@ -566,6 +740,11 @@ export const remediationService = {
   },
 
   async markActionPlanComplete(id: string, access: AuthorizationSummary) {
+    if (!authorizationService.can(access, "action_plans.evaluate"))
+      throw new AppError(
+        "No tiene permiso para concluir planes de acción.",
+        403,
+      );
     const previous = await find(id, access);
     if (previous.progressPercent < 100)
       throw new AppError(
@@ -605,21 +784,46 @@ export const remediationService = {
     access: AuthorizationSummary,
   ) {
     const previous = await find(id, access);
+    const isRecommendedPlan = Boolean(previous.remediationPlanId);
+    const canEditRecommendedPlan = authorizationService.can(
+      access,
+      "recommended_action_plans.edit",
+    );
     if (
-      (input.observationAreaId !== undefined ||
-        input.responsibleUserId !== undefined) &&
-      !access.isAdmin &&
-      !access.permissions.includes("action_plans.assign")
-    ) {
+      input.observationAreaId !== undefined &&
+      input.observationAreaId !== previous.observationAreaId
+    )
+      throw new AppError("El área del plan no puede cambiarse.", 403);
+    const hasAssignmentChange = input.responsibleUserId !== undefined;
+    const hasContentChange = Object.keys(input).some(
+      (key) => !["observationAreaId", "responsibleUserId"].includes(key),
+    );
+    if (
+      hasContentChange &&
+      (!authorizationService.can(access, "action_plans.edit") ||
+        (isRecommendedPlan && !canEditRecommendedPlan))
+    )
+      throw new AppError("No tiene permiso para editar este plan.", 403);
+    if (
+      hasAssignmentChange &&
+      !authorizationService.can(access, "action_plans.assign_executor")
+    )
       throw new AppError(
         "No tiene permisos para reasignar este plan de acción.",
         403,
       );
+    if (
+      input.responsibleUserId !== undefined &&
+      input.responsibleUserId !== access.userId &&
+      access.dataScope === "ASSIGNED"
+    ) {
+      throw new AppError("No puede cambiar el ejecutor del plan.", 403);
     }
     await validateAssignment(
       previous.observation.id,
       input.observationAreaId ?? previous.observationAreaId,
       input.responsibleUserId ?? previous.responsibleUser.id,
+      access,
     );
     const dueDateChanged =
       input.dueDate !== undefined &&
@@ -630,6 +834,8 @@ export const remediationService = {
         "Después de iniciar la ejecución debe usar una ampliación de plazo para cambiar la fecha límite.",
         409,
       );
+    if (dueDateChanged && input.dueDate)
+      await validateDueDate(previous.observation.id, input.dueDate);
     await prisma.actionPlan.update({
       data: {
         ...(input.description !== undefined
@@ -640,7 +846,7 @@ export const remediationService = {
             }
           : {}),
         ...(input.dueDate !== undefined
-          ? { currentDueDate: input.dueDate, originalDueDate: input.dueDate }
+          ? { currentDueDate: input.dueDate }
           : {}),
         ...(input.observationAreaId !== undefined
           ? { observationAreaId: input.observationAreaId }

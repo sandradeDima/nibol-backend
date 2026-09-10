@@ -1,11 +1,17 @@
 import type { Prisma } from "../../../generated/prisma/client.js";
 
-import type { AuthorizationSummary } from "../../services/authorization-service.js";
+import {
+  authorizationService,
+  buildActionPlanScopeWhere,
+  buildEvidenceScopeWhere,
+  buildExtensionRequestScopeWhere,
+  type AuthorizationSummary,
+} from "../../services/authorization-service.js";
 import { notificationService } from "../../services/notification-service.js";
 import { AppError } from "../../utils/app-error.js";
 import { prisma } from "../../utils/prisma.js";
-import { buildObservationAccessWhere } from "../observations/observations.service.js";
 import { workflowIntegrationService } from "../workflows/workflow-integration.service.js";
+import { workflowTaskService } from "../workflows/workflow-task.service.js";
 import { EDITABLE_EXTENSION_REQUEST_STATUSES } from "./extension-requests.constants.js";
 import type {
   CreateExtensionRequestInput,
@@ -13,6 +19,12 @@ import type {
   ReviewExtensionRequestInput,
   UpdateExtensionRequestInput,
 } from "./extension-requests.validators.js";
+
+const addDays = (date: Date, days: number) => {
+  const result = new Date(date);
+  result.setUTCDate(result.getUTCDate() + days);
+  return result;
+};
 
 const userSelect = {
   email: true,
@@ -50,7 +62,15 @@ const include = {
       },
     },
   },
-  auditReviewer: { select: userSelect },
+  classification: {
+    select: {
+      code: true,
+      description: true,
+      id: true,
+      maxAdditionalDays: true,
+      name: true,
+    },
+  },
   managerReviewer: { select: userSelect },
   observation: {
     select: {
@@ -90,10 +110,8 @@ const format = (record: ExtensionRecord) => ({
     createdAt: evidenceFile.createdAt.toISOString(),
     downloadPath: `/evidences/${evidenceFile.id}/download`,
   })),
-  auditComment: record.auditComment,
-  auditReviewedAt: record.auditReviewedAt?.toISOString() ?? null,
-  auditReviewer: record.auditReviewer,
   createdAt: record.createdAt.toISOString(),
+  classification: record.classification,
   finalApprovedAt: record.finalApprovedAt?.toISOString() ?? null,
   id: record.id,
   impactDays: Math.round(
@@ -124,13 +142,8 @@ const format = (record: ExtensionRecord) => ({
 
 const accessWhere = (
   access: AuthorizationSummary,
-): Prisma.DeadlineExtensionRequestWhereInput => ({
-  OR: [
-    { requestedByUserId: access.userId },
-    { observation: buildObservationAccessWhere(access) },
-    { actionPlan: { observation: buildObservationAccessWhere(access) } },
-  ],
-});
+): Prisma.DeadlineExtensionRequestWhereInput =>
+  buildExtensionRequestScopeWhere(access);
 
 const find = async (
   id: string,
@@ -149,10 +162,15 @@ const attachEvidence = async (
   requestId: string,
   observationId: string,
   evidenceIds: string[],
+  access: AuthorizationSummary,
 ) => {
   if (!evidenceIds.length) return;
   const count = await tx.evidenceFile.count({
-    where: { deletedAt: null, id: { in: evidenceIds }, observationId },
+    where: {
+      ...buildEvidenceScopeWhere(access),
+      id: { in: evidenceIds },
+      observationId,
+    },
   });
   if (count !== new Set(evidenceIds).size)
     throw new AppError("One or more evidence files are invalid.", 400);
@@ -165,46 +183,19 @@ const attachEvidence = async (
 };
 
 export const extensionRequestsService = {
-  async createForObservation(
-    observationId: string,
-    input: CreateExtensionRequestInput,
-    access: AuthorizationSummary,
-  ) {
-    const observation = await prisma.observation.findFirst({
-      select: { currentDueDate: true, id: true },
-      where: {
-        deletedAt: null,
-        id: observationId,
-        ...buildObservationAccessWhere(access),
+  async listClassifications(access: AuthorizationSummary) {
+    if (!authorizationService.can(access, "deadline_extensions.request"))
+      throw new AppError("No tiene permiso para solicitar ampliaciones.", 403);
+    return prisma.deadlineExtensionClassification.findMany({
+      orderBy: { name: "asc" },
+      select: {
+        code: true,
+        description: true,
+        maxAdditionalDays: true,
+        name: true,
       },
+      where: { active: true, maxAdditionalDays: { gt: 0 } },
     });
-    if (!observation) throw new AppError("Observation not found.", 404);
-    if (input.proposedDueDate <= observation.currentDueDate)
-      throw new AppError(
-        "The proposed date must be after the current due date.",
-        400,
-      );
-    const created = await prisma.$transaction(async (tx) => {
-      const request = await tx.deadlineExtensionRequest.create({
-        data: {
-          observationId,
-          previousDueDate: observation.currentDueDate,
-          proposedDueDate: input.proposedDueDate,
-          reason: input.reason,
-          requestedByUserId: access.userId,
-          targetType: "OBSERVATION",
-        },
-        select: { id: true },
-      });
-      await attachEvidence(
-        tx,
-        request.id,
-        observationId,
-        input.evidenceFileIds,
-      );
-      return request;
-    });
-    return format(await find(created.id, access));
   },
 
   async createForActionPlan(
@@ -218,23 +209,61 @@ export const extensionRequestsService = {
         id: true,
         observationAreaId: true,
         observationId: true,
+        responsibleUserId: true,
       },
       where: {
-        deletedAt: null,
+        ...buildActionPlanScopeWhere(access),
         id: actionPlanId,
-        observation: buildObservationAccessWhere(access),
       },
     });
+    if (!authorizationService.can(access, "deadline_extensions.request"))
+      throw new AppError("No tiene permiso para solicitar ampliaciones.", 403);
     if (!actionPlan) throw new AppError("Action plan not found.", 404);
+    if (!access.isAdmin && actionPlan.responsibleUserId !== access.userId)
+      throw new AppError(
+        "Solo el ejecutor asignado puede solicitar la ampliación.",
+        403,
+      );
+    const classification =
+      await prisma.deadlineExtensionClassification.findFirst({
+        select: { id: true, maxAdditionalDays: true },
+        where: { active: true, code: input.classificationCode },
+      });
+    if (!classification || classification.maxAdditionalDays <= 0)
+      throw new AppError(
+        "La clasificación de ampliación no está configurada.",
+        400,
+      );
+    const maxAllowedDate = addDays(
+      actionPlan.currentDueDate,
+      classification.maxAdditionalDays,
+    );
     if (input.proposedDueDate <= actionPlan.currentDueDate)
       throw new AppError(
         "The proposed date must be after the current due date.",
         400,
       );
+    if (input.proposedDueDate > maxAllowedDate)
+      throw new AppError(
+        "La nueva fecha supera el máximo permitido para la clasificación seleccionada.",
+        400,
+      );
+    const existing = await prisma.deadlineExtensionRequest.findFirst({
+      select: { id: true },
+      where: { actionPlanId, deletedAt: null },
+    });
+    if (existing)
+      throw new AppError(
+        "Este plan de acción ya utilizó su única ampliación.",
+        409,
+      );
     const created = await prisma.$transaction(async (tx) => {
       const request = await tx.deadlineExtensionRequest.create({
         data: {
           actionPlanId,
+          classificationId: classification.id,
+          maxAdditionalDays: classification.maxAdditionalDays,
+          maxAllowedDate,
           observationAreaId: actionPlan.observationAreaId,
           previousDueDate: actionPlan.currentDueDate,
           proposedDueDate: input.proposedDueDate,
@@ -249,6 +278,7 @@ export const extensionRequestsService = {
         request.id,
         actionPlan.observationId,
         input.evidenceFileIds,
+        access,
       );
       return request;
     });
@@ -312,22 +342,49 @@ export const extensionRequestsService = {
     input: UpdateExtensionRequestInput,
     access: AuthorizationSummary,
   ) {
+    if (!authorizationService.can(access, "deadline_extensions.request"))
+      throw new AppError("No tiene permiso para gestionar ampliaciones.", 403);
     const previous = await find(id, access);
     if (!EDITABLE_EXTENSION_REQUEST_STATUSES.has(previous.status))
       throw new AppError("This request is not editable.", 409);
     if (!access.isAdmin && previous.requestedByUserId !== access.userId)
       throw new AppError("You cannot edit this request.", 403);
-    if (
-      input.proposedDueDate &&
-      input.proposedDueDate <= previous.previousDueDate
-    )
+    const classification = input.classificationCode
+      ? await prisma.deadlineExtensionClassification.findFirst({
+          select: { id: true, maxAdditionalDays: true },
+          where: { active: true, code: input.classificationCode },
+        })
+      : previous.classification;
+    if (!classification || classification.maxAdditionalDays <= 0)
       throw new AppError(
-        "The proposed date must be after the current due date.",
+        "La clasificación de ampliación no está configurada.",
+        400,
+      );
+    const proposedDueDate = input.proposedDueDate ?? previous.proposedDueDate;
+    if (proposedDueDate <= previous.previousDueDate)
+      throw new AppError(
+        "La nueva fecha debe ser posterior a la fecha actual.",
+        400,
+      );
+    const maxAllowedDate = addDays(
+      previous.previousDueDate,
+      classification.maxAdditionalDays,
+    );
+    if (proposedDueDate > maxAllowedDate)
+      throw new AppError(
+        "La nueva fecha supera el máximo permitido para la clasificación seleccionada.",
         400,
       );
     await prisma.$transaction(async (tx) => {
       await tx.deadlineExtensionRequest.update({
         data: {
+          ...(input.classificationCode
+            ? {
+                classificationId: classification.id,
+                maxAdditionalDays: classification.maxAdditionalDays,
+                maxAllowedDate,
+              }
+            : {}),
           ...(input.proposedDueDate !== undefined
             ? { proposedDueDate: input.proposedDueDate }
             : {}),
@@ -357,6 +414,7 @@ export const extensionRequestsService = {
           id,
           targetObservationId,
           input.evidenceFileIds,
+          access,
         );
       }
     });
@@ -367,9 +425,36 @@ export const extensionRequestsService = {
   },
 
   async submit(id: string, access: AuthorizationSummary) {
+    if (!authorizationService.can(access, "deadline_extensions.request"))
+      throw new AppError("No tiene permiso para enviar ampliaciones.", 403);
     const previous = await find(id, access);
+    if (previous.status === "SENT_TO_MANAGER" && previous.workflowInstanceId)
+      return {
+        current: format(previous),
+        previous: format(previous),
+      };
     if (!EDITABLE_EXTENSION_REQUEST_STATUSES.has(previous.status))
       throw new AppError("This request cannot be submitted.", 409);
+    if (!access.isAdmin && previous.requestedByUserId !== access.userId)
+      throw new AppError(
+        "Solo el solicitante puede enviar la ampliación.",
+        403,
+      );
+    if (previous.status === "MANAGER_REJECTED" && previous.workflowInstanceId) {
+      const priorInstance = await prisma.workflowInstance.findUnique({
+        select: { status: true },
+        where: { id: previous.workflowInstanceId },
+      });
+      if (
+        priorInstance &&
+        ["CANCELLED", "COMPLETED", "REJECTED"].includes(priorInstance.status)
+      ) {
+        await prisma.deadlineExtensionRequest.updateMany({
+          data: { workflowInstanceId: null },
+          where: { id, workflowInstanceId: previous.workflowInstanceId },
+        });
+      }
+    }
     const workflow = await workflowIntegrationService.startForEntity({
       access: { ...access, ipAddress: null },
       actorUserId: access.userId,
@@ -377,15 +462,16 @@ export const extensionRequestsService = {
       entityType: "deadline_extension_request",
       processType: "DEADLINE_EXTENSION",
     });
-    await prisma.deadlineExtensionRequest.update({
-      data: {
-        status: "SENT_TO_MANAGER",
-        ...(workflow.instanceId
-          ? { workflowInstanceId: workflow.instanceId }
-          : {}),
+    const updated = await prisma.deadlineExtensionRequest.updateMany({
+      data: { status: "SENT_TO_MANAGER" },
+      where: {
+        id,
+        status: { in: ["DRAFT", "MANAGER_REJECTED"] },
       },
-      where: { id },
     });
+    if (updated.count !== 1 && !workflow.instanceId) {
+      throw new AppError("La solicitud ya fue enviada a revisión.", 409);
+    }
     return {
       current: format(await find(id, access)),
       previous: format(previous),
@@ -398,75 +484,85 @@ export const extensionRequestsService = {
     input: ReviewExtensionRequestInput,
     access: AuthorizationSummary,
   ) {
+    if (
+      !authorizationService.can(
+        access,
+        approved ? "deadline_extensions.approve" : "deadline_extensions.reject",
+      )
+    )
+      throw new AppError("No tiene permiso para revisar esta ampliación.", 403);
     const previous = await find(id, access);
+    const alreadyReviewedStatus = approved
+      ? "MANAGER_APPROVED"
+      : "MANAGER_REJECTED";
+    if (previous.status === alreadyReviewedStatus)
+      return {
+        current: format(previous),
+        previous: format(previous),
+      };
     if (previous.status !== "SENT_TO_MANAGER")
       throw new AppError("This request is not pending management review.", 409);
+    if (
+      !access.isAdmin &&
+      previous.observationArea?.areaResponsible.id !== access.userId
+    )
+      throw new AppError(
+        "Solo el responsable del área puede decidir esta ampliación.",
+        403,
+      );
     if (!approved && !input.comment)
       throw new AppError("A rejection comment is required.", 400);
-    await prisma.deadlineExtensionRequest.update({
-      data: {
-        managerComment: input.comment,
-        managerReviewedAt: new Date(),
-        managerReviewerId: access.userId,
-        status: approved ? "SENT_TO_AUDIT" : "MANAGER_REJECTED",
-      },
-      where: { id },
-    });
-    return {
-      current: format(await find(id, access)),
-      previous: format(previous),
-    };
-  },
-
-  async auditReview(
-    id: string,
-    approved: boolean,
-    input: ReviewExtensionRequestInput,
-    access: AuthorizationSummary,
-  ) {
-    const previous = await find(id, access);
-    if (previous.status !== "SENT_TO_AUDIT")
-      throw new AppError("This request is not pending audit review.", 409);
-    if (!approved && !input.comment)
-      throw new AppError("A rejection comment is required.", 400);
-    await prisma.$transaction(async (tx) => {
-      await tx.deadlineExtensionRequest.update({
-        data: {
-          auditComment: input.comment,
-          auditReviewedAt: new Date(),
-          auditReviewerId: access.userId,
-          finalApprovedAt: approved ? new Date() : null,
-          status: approved ? "AUDIT_APPROVED" : "AUDIT_REJECTED",
+    const workflowInstanceId = previous.workflowInstanceId;
+    const usedWorkflow = Boolean(workflowInstanceId);
+    if (workflowInstanceId) {
+      const task = await prisma.workflowTask.findFirst({
+        select: { id: true },
+        where: {
+          status: { in: ["PENDING", "IN_PROGRESS"] },
+          workflowInstanceId,
         },
-        where: { id },
       });
-      if (approved) {
-        if (previous.targetType === "OBSERVATION" && previous.observationId) {
-          await tx.observation.update({
-            data: { currentDueDate: previous.proposedDueDate },
-            where: { id: previous.observationId },
-          });
-        } else if (
-          previous.targetType === "ACTION_PLAN" &&
-          previous.actionPlanId
-        ) {
+      if (!task)
+        throw new AppError(
+          "La instancia de ampliación no tiene una tarea activa.",
+          409,
+        );
+      await workflowTaskService.actOnTask(
+        task.id,
+        approved ? "APPROVE" : "REJECT",
+        { comment: input.comment ?? undefined },
+        { ...access, ipAddress: null },
+      );
+    } else {
+      await prisma.$transaction(async (tx) => {
+        const updated = await tx.deadlineExtensionRequest.updateMany({
+          data: {
+            managerComment: input.comment,
+            managerReviewedAt: new Date(),
+            managerReviewerId: access.userId,
+            finalApprovedAt: approved ? new Date() : null,
+            status: approved ? "MANAGER_APPROVED" : "MANAGER_REJECTED",
+          },
+          where: { id, status: "SENT_TO_MANAGER" },
+        });
+        if (updated.count !== 1)
+          throw new AppError("La solicitud ya fue revisada.", 409);
+        if (approved && previous.actionPlanId)
           await tx.actionPlan.update({
             data: { currentDueDate: previous.proposedDueDate },
             where: { id: previous.actionPlanId },
           });
-        } else {
-          throw new AppError("Extension target is invalid.", 409);
-        }
-      }
-    });
-    if (previous.requestedByUserId !== access.userId) {
+      });
+    }
+    if (!usedWorkflow && previous.requestedByUserId !== access.userId)
       await notificationService.create({
-        message: `La solicitud de ampliación fue ${approved ? "aprobada" : "rechazada"}.`,
+        message: approved
+          ? `La ampliación fue aprobada hasta el ${previous.proposedDueDate.toISOString().slice(0, 10)}.`
+          : "La solicitud de ampliación fue rechazada.",
         title: "Solicitud de ampliación revisada",
         type: approved ? "success" : "warning",
         userId: previous.requestedByUserId,
       });
-    }
     return {
       current: format(await find(id, access)),
       previous: format(previous),
@@ -474,6 +570,8 @@ export const extensionRequestsService = {
   },
 
   async cancel(id: string, access: AuthorizationSummary) {
+    if (!authorizationService.can(access, "deadline_extensions.request"))
+      throw new AppError("No tiene permiso para cancelar ampliaciones.", 403);
     const previous = await find(id, access);
     if (!access.isAdmin && previous.requestedByUserId !== access.userId)
       throw new AppError("You cannot cancel this request.", 403);

@@ -24,7 +24,7 @@ export type RiskLevelRecord = {
   active: boolean;
   colorToken: string | null;
   createdAt: string;
-  defaultDeadlineDays: number | null;
+  maxRemediationDays: number | null;
   description: string | null;
   id: string;
   key: string;
@@ -82,7 +82,7 @@ export type ConfigurationBootstrap = {
     Pick<
       RiskLevelRecord,
       | "colorToken"
-      | "defaultDeadlineDays"
+      | "maxRemediationDays"
       | "id"
       | "key"
       | "name"

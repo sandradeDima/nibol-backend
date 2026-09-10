@@ -83,17 +83,64 @@ const log = async (
   ]);
 };
 
+const logRemediationPlan = async (
+  request: Request,
+  action: string,
+  current: { id: string; observationId: string; strategyText?: string } | null,
+  previous: { id: string; observationId: string; strategyText?: string } | null,
+) => {
+  const record = current ?? previous;
+  if (!record) return;
+  const actor = getRequestLogActorContext(request);
+  await Promise.all([
+    activityLogService.logUserAction({
+      ...actor,
+      action,
+      entityId: record.id,
+      entityType: "REMEDIATION_PLAN",
+      metadata: {
+        summary: `Plan recomendado: ${record.strategyText ?? "actualizado"}.`,
+      },
+    }),
+    auditLogService.create({
+      ...actor,
+      entityId: record.id,
+      entityType: "REMEDIATION_PLAN",
+      newValues: current,
+      oldValues: previous,
+    }),
+    entityActivityService.recordEntityChange({
+      action,
+      activityType: action
+        .toUpperCase()
+        .replaceAll(".", "_")
+        .replaceAll("-", "_"),
+      actorUserId: actor.userId,
+      entityId: record.id,
+      entityType: "REMEDIATION_PLAN",
+      newData: current,
+      observationId: record.observationId,
+      previousData: previous,
+      targetUrl: `/observaciones/${record.observationId}`,
+      title: "Plan recomendado actualizado",
+    }),
+  ]);
+};
+
 export const remediationController = {
   async createRemediationPlan(request: Request, response: Response) {
-    sendSuccess(
-      response,
-      await remediationService.createRemediationPlan(
-        observationId(request),
-        createRemediationPlanSchema.parse(request.body),
-        access(request),
-      ),
-      201,
+    const record = await remediationService.createRemediationPlan(
+      observationId(request),
+      createRemediationPlanSchema.parse(request.body),
+      access(request),
     );
+    await logRemediationPlan(
+      request,
+      "recommended_action_plans.create",
+      record,
+      null,
+    );
+    sendSuccess(response, record, 201);
   },
   async listRemediationPlans(request: Request, response: Response) {
     sendSuccess(
@@ -105,23 +152,31 @@ export const remediationController = {
     );
   },
   async submitRemediationPlan(request: Request, response: Response) {
-    sendSuccess(
-      response,
-      await remediationService.submitRemediationPlan(
-        remediationPlanId(request),
-        access(request),
-      ),
+    const result = await remediationService.submitRemediationPlan(
+      remediationPlanId(request),
+      access(request),
     );
+    await logRemediationPlan(
+      request,
+      "recommended_action_plans.submit_to_audit",
+      result.current,
+      result.previous,
+    );
+    sendSuccess(response, result.current);
   },
   async updateRemediationPlan(request: Request, response: Response) {
-    sendSuccess(
-      response,
-      await remediationService.updateRemediationPlan(
-        remediationPlanId(request),
-        updateRemediationPlanSchema.parse(request.body),
-        access(request),
-      ),
+    const result = await remediationService.updateRemediationPlan(
+      remediationPlanId(request),
+      updateRemediationPlanSchema.parse(request.body),
+      access(request),
     );
+    await logRemediationPlan(
+      request,
+      "recommended_action_plans.edit",
+      result.current,
+      result.previous,
+    );
+    sendSuccess(response, result.current);
   },
   async createActionPlan(request: Request, response: Response) {
     const record = await remediationService.createActionPlan(
@@ -131,6 +186,19 @@ export const remediationController = {
     );
     await log(request, "action_plans.create", record, null);
     sendSuccess(response, record, 201);
+  },
+  async deleteRemediationPlan(request: Request, response: Response) {
+    const record = await remediationService.deleteRemediationPlan(
+      remediationPlanId(request),
+      access(request),
+    );
+    await logRemediationPlan(
+      request,
+      "recommended_action_plans.delete",
+      null,
+      record,
+    );
+    sendSuccess(response, { deleted: true, id: record.id });
   },
   async deleteActionPlan(request: Request, response: Response) {
     const record = await remediationService.deleteActionPlan(

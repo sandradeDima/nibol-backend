@@ -68,6 +68,7 @@ export const JsonNull = runtime.JsonNull;
  */
 export const AnyNull = runtime.AnyNull;
 export const ModelName = {
+    DeadlineExtensionClassification: 'DeadlineExtensionClassification',
     User: 'User',
     Role: 'Role',
     Permission: 'Permission',
@@ -126,6 +127,16 @@ export const TransactionIsolationLevel = runtime.makeStrictEnum({
     RepeatableRead: 'RepeatableRead',
     Serializable: 'Serializable'
 });
+export const DeadlineExtensionClassificationScalarFieldEnum = {
+    id: 'id',
+    code: 'code',
+    name: 'name',
+    description: 'description',
+    maxAdditionalDays: 'maxAdditionalDays',
+    active: 'active',
+    createdAt: 'createdAt',
+    updatedAt: 'updatedAt'
+};
 export const UserScalarFieldEnum = {
     id: 'id',
     name: 'name',
@@ -142,6 +153,7 @@ export const UserScalarFieldEnum = {
 };
 export const RoleScalarFieldEnum = {
     id: 'id',
+    code: 'code',
     name: 'name',
     description: 'description',
     createdAt: 'createdAt',
@@ -221,6 +233,7 @@ export const NotificationDeliveryScalarFieldEnum = {
     channel: 'channel',
     recipientUserId: 'recipientUserId',
     recipientEmail: 'recipientEmail',
+    payloadJson: 'payloadJson',
     status: 'status',
     attempts: 'attempts',
     lastAttemptAt: 'lastAttemptAt',
@@ -252,6 +265,11 @@ export const EntityActivityScalarFieldEnum = {
 export const ScheduledJobExecutionScalarFieldEnum = {
     id: 'id',
     jobName: 'jobName',
+    runType: 'runType',
+    cadenceKey: 'cadenceKey',
+    periodKey: 'periodKey',
+    dedupeKey: 'dedupeKey',
+    scheduledFor: 'scheduledFor',
     startedAt: 'startedAt',
     finishedAt: 'finishedAt',
     status: 'status',
@@ -312,7 +330,7 @@ export const RiskLevelScalarFieldEnum = {
     description: 'description',
     colorToken: 'colorToken',
     severityOrder: 'severityOrder',
-    defaultDeadlineDays: 'defaultDeadlineDays',
+    maxRemediationDays: 'maxRemediationDays',
     active: 'active',
     createdAt: 'createdAt',
     updatedAt: 'updatedAt',
@@ -409,6 +427,7 @@ export const ObservationScalarFieldEnum = {
     id: 'id',
     auditReportId: 'auditReportId',
     observationNumber: 'observationNumber',
+    deletedObservationNumber: 'deletedObservationNumber',
     mainObservationId: 'mainObservationId',
     title: 'title',
     description: 'description',
@@ -423,6 +442,7 @@ export const ObservationScalarFieldEnum = {
     category: 'category',
     progressPercent: 'progressPercent',
     currentStage: 'currentStage',
+    sentAt: 'sentAt',
     createdAt: 'createdAt',
     updatedAt: 'updatedAt',
     deletedAt: 'deletedAt'
@@ -488,16 +508,16 @@ export const DeadlineExtensionRequestScalarFieldEnum = {
     actionPlanId: 'actionPlanId',
     observationAreaId: 'observationAreaId',
     requestedByUserId: 'requestedByUserId',
+    classificationId: 'classificationId',
     previousDueDate: 'previousDueDate',
     proposedDueDate: 'proposedDueDate',
+    maxAdditionalDays: 'maxAdditionalDays',
+    maxAllowedDate: 'maxAllowedDate',
     reason: 'reason',
     status: 'status',
     managerReviewerId: 'managerReviewerId',
     managerReviewedAt: 'managerReviewedAt',
     managerComment: 'managerComment',
-    auditReviewerId: 'auditReviewerId',
-    auditReviewedAt: 'auditReviewedAt',
-    auditComment: 'auditComment',
     finalApprovedAt: 'finalApprovedAt',
     createdAt: 'createdAt',
     updatedAt: 'updatedAt',
@@ -548,8 +568,8 @@ export const ProgressEvaluationScalarFieldEnum = {
     actionPlanId: 'actionPlanId',
     submittedByUserId: 'submittedByUserId',
     type: 'type',
-    progressPercent: 'progressPercent',
-    actionPlanStatus: 'actionPlanStatus',
+    reportedProgressPercent: 'reportedProgressPercent',
+    evaluatedStatus: 'evaluatedStatus',
     comment: 'comment',
     reviewStatus: 'reviewStatus',
     reviewedByUserId: 'reviewedByUserId',
@@ -564,6 +584,7 @@ export const ProgressEvaluationScalarFieldEnum = {
 export const EvidenceFileScalarFieldEnum = {
     id: 'id',
     observationId: 'observationId',
+    observationAreaId: 'observationAreaId',
     context: 'context',
     actionPlanId: 'actionPlanId',
     progressEvaluationId: 'progressEvaluationId',
@@ -575,6 +596,12 @@ export const EvidenceFileScalarFieldEnum = {
     sizeBytes: 'sizeBytes',
     checksum: 'checksum',
     description: 'description',
+    reviewStatus: 'reviewStatus',
+    submittedAt: 'submittedAt',
+    reviewedAt: 'reviewedAt',
+    reviewedByUserId: 'reviewedByUserId',
+    reviewComment: 'reviewComment',
+    workflowInstanceId: 'workflowInstanceId',
     createdAt: 'createdAt',
     deletedAt: 'deletedAt'
 };
@@ -738,6 +765,12 @@ export const NullableJsonNullValueInput = {
 export const JsonNullValueInput = {
     JsonNull: JsonNull
 };
+export const DeadlineExtensionClassificationOrderByRelevanceFieldEnum = {
+    id: 'id',
+    code: 'code',
+    name: 'name',
+    description: 'description'
+};
 export const NullsOrder = {
     first: 'first',
     last: 'last'
@@ -752,6 +785,7 @@ export const UserOrderByRelevanceFieldEnum = {
 };
 export const RoleOrderByRelevanceFieldEnum = {
     id: 'id',
+    code: 'code',
     name: 'name',
     description: 'description'
 };
@@ -799,14 +833,6 @@ export const NotificationOrderByRelevanceFieldEnum = {
     targetUrl: 'targetUrl',
     dedupeKey: 'dedupeKey'
 };
-export const NotificationDeliveryOrderByRelevanceFieldEnum = {
-    id: 'id',
-    notificationId: 'notificationId',
-    dedupeKey: 'dedupeKey',
-    recipientUserId: 'recipientUserId',
-    recipientEmail: 'recipientEmail',
-    errorMessage: 'errorMessage'
-};
 export const JsonNullValueFilter = {
     DbNull: DbNull,
     JsonNull: JsonNull,
@@ -815,6 +841,14 @@ export const JsonNullValueFilter = {
 export const QueryMode = {
     default: 'default',
     insensitive: 'insensitive'
+};
+export const NotificationDeliveryOrderByRelevanceFieldEnum = {
+    id: 'id',
+    notificationId: 'notificationId',
+    dedupeKey: 'dedupeKey',
+    recipientUserId: 'recipientUserId',
+    recipientEmail: 'recipientEmail',
+    errorMessage: 'errorMessage'
 };
 export const EntityActivityOrderByRelevanceFieldEnum = {
     id: 'id',
@@ -835,6 +869,10 @@ export const EntityActivityOrderByRelevanceFieldEnum = {
 export const ScheduledJobExecutionOrderByRelevanceFieldEnum = {
     id: 'id',
     jobName: 'jobName',
+    runType: 'runType',
+    cadenceKey: 'cadenceKey',
+    periodKey: 'periodKey',
+    dedupeKey: 'dedupeKey',
     errorMessage: 'errorMessage',
     triggeredByUserId: 'triggeredByUserId'
 };
@@ -976,11 +1014,10 @@ export const DeadlineExtensionRequestOrderByRelevanceFieldEnum = {
     actionPlanId: 'actionPlanId',
     observationAreaId: 'observationAreaId',
     requestedByUserId: 'requestedByUserId',
+    classificationId: 'classificationId',
     reason: 'reason',
     managerReviewerId: 'managerReviewerId',
     managerComment: 'managerComment',
-    auditReviewerId: 'auditReviewerId',
-    auditComment: 'auditComment',
     workflowInstanceId: 'workflowInstanceId'
 };
 export const DeadlineExtensionAttachmentOrderByRelevanceFieldEnum = {
@@ -1023,6 +1060,7 @@ export const ProgressEvaluationOrderByRelevanceFieldEnum = {
 export const EvidenceFileOrderByRelevanceFieldEnum = {
     id: 'id',
     observationId: 'observationId',
+    observationAreaId: 'observationAreaId',
     actionPlanId: 'actionPlanId',
     progressEvaluationId: 'progressEvaluationId',
     uploadedByUserId: 'uploadedByUserId',
@@ -1031,7 +1069,10 @@ export const EvidenceFileOrderByRelevanceFieldEnum = {
     relativePath: 'relativePath',
     mimeType: 'mimeType',
     checksum: 'checksum',
-    description: 'description'
+    description: 'description',
+    reviewedByUserId: 'reviewedByUserId',
+    reviewComment: 'reviewComment',
+    workflowInstanceId: 'workflowInstanceId'
 };
 export const ObservationCommentOrderByRelevanceFieldEnum = {
     id: 'id',

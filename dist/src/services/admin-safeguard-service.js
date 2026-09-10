@@ -1,10 +1,11 @@
-import { ADMIN_ROLE_NAME, CRITICAL_ADMIN_PERMISSIONS, } from "../permissions/definitions.js";
+import { ADMIN_ROLE_CODE, ADMIN_ROLE_NAME, CRITICAL_ADMIN_PERMISSIONS, } from "../permissions/definitions.js";
 import { AppError } from "../utils/app-error.js";
 import { prisma } from "../utils/prisma.js";
 const getRole = async (roleId) => {
     return prisma.role.findUnique({
         select: {
             id: true,
+            code: true,
             name: true,
         },
         where: {
@@ -12,19 +13,19 @@ const getRole = async (roleId) => {
         },
     });
 };
-const isAdminRole = (roleName) => {
-    return roleName === ADMIN_ROLE_NAME;
+const isAdminRole = (roleCode) => {
+    return roleCode === ADMIN_ROLE_CODE;
 };
 export const adminSafeguardService = {
     async assertRoleDeletionAllowed(roleId) {
         const role = await getRole(roleId);
-        if (isAdminRole(role?.name)) {
+        if (isAdminRole(role?.code)) {
             throw new AppError("Admin role cannot be deleted.", 400);
         }
     },
     async assertRoleNameUpdateAllowed(roleId, nextRoleName) {
         const role = await getRole(roleId);
-        if (!isAdminRole(role?.name)) {
+        if (!isAdminRole(role?.code)) {
             return;
         }
         if (nextRoleName !== ADMIN_ROLE_NAME) {
@@ -33,7 +34,7 @@ export const adminSafeguardService = {
     },
     async assertUserRoleRemovalAllowed(userId, roleId) {
         const role = await getRole(roleId);
-        if (!isAdminRole(role?.name)) {
+        if (!isAdminRole(role?.code)) {
             return;
         }
         const adminCount = await prisma.userRole.count({
@@ -67,7 +68,7 @@ export const adminSafeguardService = {
             },
             where: {
                 deletedAt: null,
-                name: ADMIN_ROLE_NAME,
+                code: ADMIN_ROLE_CODE,
             },
         });
         if (!adminRole) {
@@ -80,7 +81,7 @@ export const adminSafeguardService = {
     },
     async assertRolePermissionUpdateAllowed(roleId, nextPermissions) {
         const role = await getRole(roleId);
-        if (!isAdminRole(role?.name)) {
+        if (!isAdminRole(role?.code)) {
             return;
         }
         const nextPermissionSet = new Set(nextPermissions);

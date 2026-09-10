@@ -17,14 +17,29 @@ export const reportTypeSchema = z.enum([
     "RESPONSIBLES",
     "RISKS",
 ]);
-export const reportPeriodFieldSchema = z.enum(["createdAt", "currentDueDate"]);
+export const reportPeriodFieldSchema = z.enum([
+    "createdAt",
+    "currentDueDate",
+    "originalDueDate",
+    "reportDate",
+]);
+export const reportDeadlineStatusSchema = z.enum(["VIGENTE", "VENCIDO"]);
+export const reportProgressStatusSchema = z.enum([
+    "NOT_STARTED",
+    "STARTED",
+    "WITH_PROGRESS",
+    "CONCLUDED",
+]);
 export const reportFiltersSchema = z.object({
     activeOnly: booleanFilter,
     areaId: z.uuid().optional(),
+    auditReportId: z.uuid().optional(),
     dateFrom: dateFilter,
     dateTo: dateFilter,
+    deadlineStatus: reportDeadlineStatusSchema.optional(),
     dueSoon: booleanFilter,
     dueSoonDays: z.coerce.number().int().min(1).max(90).default(7),
+    executorId: z.uuid().optional(),
     hasEvidence: booleanFilter,
     hasExtension: booleanFilter,
     hasPlan: booleanFilter,
@@ -32,6 +47,9 @@ export const reportFiltersSchema = z.object({
     periodField: reportPeriodFieldSchema.default("createdAt"),
     progressMax: z.coerce.number().int().min(0).max(100).optional(),
     progressMin: z.coerce.number().int().min(0).max(100).optional(),
+    progressStatus: reportProgressStatusSchema.optional(),
+    processOwnerId: z.uuid().optional(),
+    reprogrammed: booleanFilter,
     responsibleUserId: z.uuid().optional(),
     riskLevelId: z.uuid().optional(),
     search: z.string().trim().max(191).default(""),

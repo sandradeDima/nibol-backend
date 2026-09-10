@@ -73,7 +73,7 @@ const deadlineExtensionAdapter = {
     },
     async validateStart({ entityId, db }) {
         const request = (await this.getEntity(entityId, db));
-        if (!["DRAFT", "MANAGER_REJECTED", "AUDIT_REJECTED"].includes(request.status)) {
+        if (!["DRAFT", "MANAGER_REJECTED"].includes(request.status)) {
             throw new AppError("La solicitud de ampliación no está disponible para envío.", 409);
         }
         const observation = request.observation ?? request.actionPlan?.observation;
@@ -98,6 +98,7 @@ const deadlineExtensionAdapter = {
             areaId: request.observationArea?.areaId ?? null,
             custom: {
                 actionPlanId: request.actionPlan?.id ?? null,
+                areaResponsibleUserId: request.observationArea?.areaResponsibleUserId ?? null,
                 observationId: observation.id,
                 recordOwnerUserId: responsibleUserId ?? actorUserId,
             },
@@ -115,57 +116,47 @@ const deadlineExtensionAdapter = {
     },
     async applyDecision({ action, actorUserId, comment, db, entityId }) {
         const request = await database(db).deadlineExtensionRequest.findFirst({
-            select: { managerReviewerId: true, status: true },
+            select: {
+                actionPlanId: true,
+                proposedDueDate: true,
+                status: true,
+            },
             where: { deletedAt: null, id: entityId },
         });
-        if (!request)
-            throw new AppError("No se encontró la solicitud de ampliación.", 404);
-        const isManagerReview = request.status === "SENT_TO_MANAGER";
-        const now = new Date();
+        if (!request || request.status !== "SENT_TO_MANAGER")
+            return;
         if (action === "REQUEST_CORRECTION" || action === "OBSERVE") {
-            if (!isManagerReview && request.status !== "SENT_TO_AUDIT")
-                return;
             await db.deadlineExtensionRequest.update({
-                data: isManagerReview
-                    ? {
-                        managerComment: comment?.trim() || null,
-                        managerReviewedAt: now,
-                        managerReviewerId: actorUserId,
-                        status: "DRAFT",
-                    }
-                    : {
-                        auditComment: comment?.trim() || null,
-                        auditReviewedAt: now,
-                        auditReviewerId: actorUserId,
-                        status: "DRAFT",
-                    },
+                data: {
+                    managerComment: comment?.trim() || null,
+                    managerReviewedAt: new Date(),
+                    managerReviewerId: actorUserId,
+                    status: "DRAFT",
+                },
                 where: { id: entityId },
             });
             return;
         }
-        if (!isManagerReview && request.status !== "SENT_TO_AUDIT")
-            return;
+        const approved = action === "APPROVE" || action === "COMPLETE";
         await db.deadlineExtensionRequest.update({
-            data: isManagerReview
-                ? {
-                    managerComment: comment?.trim() || null,
-                    managerReviewedAt: now,
-                    managerReviewerId: actorUserId,
-                    status: action === "REJECT" ? "MANAGER_REJECTED" : "SENT_TO_AUDIT",
-                }
-                : {
-                    auditComment: comment?.trim() || null,
-                    auditReviewedAt: now,
-                    auditReviewerId: actorUserId,
-                    status: action === "REJECT" ? "AUDIT_REJECTED" : "SENT_TO_AUDIT",
-                },
+            data: {
+                managerComment: comment?.trim() || null,
+                managerReviewedAt: new Date(),
+                managerReviewerId: actorUserId,
+                finalApprovedAt: approved ? new Date() : null,
+                status: approved ? "MANAGER_APPROVED" : "MANAGER_REJECTED",
+            },
             where: { id: entityId },
         });
+        if (approved && request.actionPlanId)
+            await db.actionPlan.update({
+                data: { currentDueDate: request.proposedDueDate },
+                where: { id: request.actionPlanId },
+            });
     },
     async applyCompletion({ actorUserId, db, entityId, finalResult }) {
         const request = await db.deadlineExtensionRequest.findFirst({
             select: {
-                auditReviewerId: true,
                 actionPlanId: true,
                 finalApprovedAt: true,
                 observationId: true,
@@ -178,7 +169,7 @@ const deadlineExtensionAdapter = {
         if (!request)
             throw new AppError("No se encontró la solicitud de ampliación.", 404);
         if (["APPROVED", "CLOSED"].includes(finalResult)) {
-            if (request.status === "AUDIT_APPROVED" && request.finalApprovedAt)
+            if (request.status === "MANAGER_APPROVED" && request.finalApprovedAt)
                 return;
             const current = request.actionPlanId
                 ? (await db.actionPlan.findUnique({
@@ -209,20 +200,20 @@ const deadlineExtensionAdapter = {
             }
             await db.deadlineExtensionRequest.update({
                 data: {
-                    auditReviewerId: request.auditReviewerId ?? actorUserId ?? null,
-                    auditReviewedAt: new Date(),
+                    managerReviewerId: actorUserId ?? null,
+                    managerReviewedAt: new Date(),
                     finalApprovedAt: new Date(),
-                    status: "AUDIT_APPROVED",
+                    status: "MANAGER_APPROVED",
                 },
                 where: { id: entityId },
             });
             return;
         }
         if (["REJECTED", "EXPIRED"].includes(finalResult)) {
-            if (request.status === "AUDIT_REJECTED")
+            if (request.status === "MANAGER_REJECTED")
                 return;
             await db.deadlineExtensionRequest.update({
-                data: { finalApprovedAt: null, status: "AUDIT_REJECTED" },
+                data: { finalApprovedAt: null, status: "MANAGER_REJECTED" },
                 where: { id: entityId },
             });
         }
@@ -261,24 +252,12 @@ const observationClosureAdapter = {
         const update = (await this.getEntity(entityId, db));
         if (update.actionPlan.observation.status.isFinal)
             throw new AppError("La observación ya está cerrada.", 409);
-        if (update.progressPercent !== 100)
+        if (update.reportedProgressPercent !== 100)
             throw new AppError("El cierre requiere 100% de avance.", 400);
-        if (update.actionPlanStatus !== "CONCLUDED")
-            throw new AppError("La evaluación final debe proponer el plan como concluido.", 400);
         if (update.evidenceFiles.length === 0)
             throw new AppError("El cierre requiere evidencia.", 400);
         if (!["DRAFT", "RETURNED"].includes(update.reviewStatus))
             throw new AppError("El cierre no está disponible para envío.", 409);
-        const otherOpenPlans = await database(db).actionPlan.count({
-            where: {
-                deletedAt: null,
-                id: { not: update.actionPlan.id },
-                observationId: update.actionPlan.observation.id,
-                status: { not: "CONCLUDED" },
-            },
-        });
-        if (otherOpenPlans > 0)
-            throw new AppError("Todos los demás planes de acción deben estar concluidos antes del cierre.", 409);
     },
     async buildRuntimeContext({ entityId, db, actorUserId }) {
         const update = (await this.getEntity(entityId, db));
@@ -338,17 +317,17 @@ const observationClosureAdapter = {
                     reviewComment: comment?.trim() || null,
                     reviewedAt: new Date(),
                     reviewedByUserId: actorUserId,
-                    reviewStatus: "REJECTED",
+                    reviewStatus: "RETURNED",
                 },
                 where: { id: entityId },
             });
             await db.progressReviewHistory.create({
                 data: {
-                    action: "REJECTED",
+                    action: "RETURNED",
                     comment: comment?.trim() || null,
                     fromStatus: update.reviewStatus,
                     progressEvaluationId: entityId,
-                    toStatus: "REJECTED",
+                    toStatus: "RETURNED",
                     userId: actorUserId,
                 },
             });
@@ -357,6 +336,7 @@ const observationClosureAdapter = {
             update.reviewStatus !== "APPROVED") {
             await db.progressEvaluation.update({
                 data: {
+                    evaluatedStatus: "CONCLUDED",
                     reviewedAt: new Date(),
                     reviewedByUserId: actorUserId,
                     reviewStatus: "APPROVED",
@@ -378,8 +358,8 @@ const observationClosureAdapter = {
         const update = await db.progressEvaluation.findUnique({
             select: {
                 actionPlan: { select: { id: true, observationId: true } },
-                actionPlanStatus: true,
-                progressPercent: true,
+                evaluatedStatus: true,
+                reportedProgressPercent: true,
                 reviewStatus: true,
             },
             where: { id: entityId },
@@ -390,8 +370,14 @@ const observationClosureAdapter = {
             await db.actionPlan.update({
                 data: {
                     completedAt: new Date(),
-                    progressPercent: update.progressPercent,
-                    status: update.actionPlanStatus,
+                    progressPercent: update.evaluatedStatus === "CONCLUDED"
+                        ? 100
+                        : update.evaluatedStatus === "WITH_PROGRESS"
+                            ? 60
+                            : update.evaluatedStatus === "STARTED"
+                                ? 20
+                                : 0,
+                    status: update.evaluatedStatus ?? "NOT_STARTED",
                 },
                 where: { id: update.actionPlan.id },
             });
@@ -403,7 +389,7 @@ const observationClosureAdapter = {
                 },
             });
             if (openPlans > 0)
-                throw new AppError("No se puede cerrar la observación mientras existan planes de acción abiertos.", 409);
+                return;
             const closedStatusId = await getObservationStatusId(db, "CONCLUIDO");
             if (!closedStatusId)
                 throw new AppError("El catálogo no contiene el estado CONCLUIDO.", 500);
@@ -418,9 +404,9 @@ const observationClosureAdapter = {
                 });
         }
         else if (["REJECTED", "EXPIRED"].includes(finalResult) &&
-            update.reviewStatus !== "REJECTED") {
+            update.reviewStatus !== "RETURNED") {
             await db.progressEvaluation.update({
-                data: { reviewStatus: "REJECTED" },
+                data: { reviewStatus: "RETURNED" },
                 where: { id: entityId },
             });
         }
@@ -446,7 +432,7 @@ const remediationPlanAdapter = {
             where: { deletedAt: null, id: entityId },
         });
         if (!plan)
-            throw new AppError("No se encontró el plan de remediación.", 404);
+            throw new AppError("No se encontró el plan de acción recomendado.", 404);
         return plan;
     },
     async validateStart({ entityId, db }) {
@@ -480,7 +466,7 @@ const remediationPlanAdapter = {
             where: { id: entityId },
         });
         if (!plan)
-            throw new AppError("No se encontró el plan de remediación.", 404);
+            throw new AppError("No se encontró el plan de acción recomendado.", 404);
         if (action === "REQUEST_CORRECTION" || action === "OBSERVE") {
             await db.remediationPlan.update({
                 data: {
@@ -521,7 +507,7 @@ const remediationPlanAdapter = {
             where: { id: entityId },
         });
         if (!plan)
-            throw new AppError("No se encontró el plan de remediación.", 404);
+            throw new AppError("No se encontró el plan de acción recomendado.", 404);
         if (["APPROVED", "CLOSED"].includes(finalResult)) {
             if (plan.status === "APPROVED" && plan.approvedAt)
                 return;
@@ -549,8 +535,107 @@ const remediationPlanAdapter = {
         ? `/observaciones/${context.custom.observationId}`
         : "/observaciones",
 };
+const evidenceReviewAdapter = {
+    processType: "EVIDENCE_REVIEW",
+    async getEntity(entityId, db) {
+        const evidence = await database(db).evidenceFile.findFirst({
+            include: {
+                actionPlan: {
+                    select: {
+                        currentDueDate: true,
+                        responsibleUserId: true,
+                        observationArea: { select: { areaId: true } },
+                    },
+                },
+                observation: {
+                    select: {
+                        auditorUserId: true,
+                        currentDueDate: true,
+                        id: true,
+                        riskLevel: { select: { key: true } },
+                        status: { select: { key: true } },
+                    },
+                },
+            },
+            where: { deletedAt: null, id: entityId },
+        });
+        if (!evidence)
+            throw new AppError("No se encontró la evidencia.", 404);
+        return evidence;
+    },
+    async validateStart({ entityId, db }) {
+        const evidence = (await this.getEntity(entityId, db));
+        if (!["DRAFT", "RETURNED"].includes(evidence.reviewStatus)) {
+            throw new AppError("La evidencia no está disponible para revisión.", 409);
+        }
+    },
+    async buildRuntimeContext({ entityId, db, actorUserId }) {
+        const evidence = (await this.getEntity(entityId, db));
+        const responsibleUserId = evidence.actionPlan?.responsibleUserId ??
+            evidence.observation.auditorUserId;
+        return createContext({
+            areaId: evidence.actionPlan?.observationArea.areaId ?? null,
+            custom: {
+                evidenceId: entityId,
+                evidenceContext: evidence.context,
+                evidenceName: evidence.originalName,
+                observationId: evidence.observation.id,
+                recordOwnerUserId: responsibleUserId,
+            },
+            dueDate: evidence.actionPlan?.currentDueDate ??
+                evidence.observation.currentDueDate,
+            evidenceCount: 1,
+            observationStatus: evidence.observation.status.key,
+            processType: "EVIDENCE_REVIEW",
+            requesterUserId: evidence.uploadedByUserId || actorUserId,
+            requestType: evidence.context,
+            responsibleUserId,
+            riskLevel: evidence.observation.riskLevel.key,
+        });
+    },
+    async applyDecision({ action, actorUserId, comment, db, entityId }) {
+        if (!["OBSERVE", "REQUEST_CORRECTION", "REJECT"].includes(action))
+            return;
+        await db.evidenceFile.update({
+            data: {
+                reviewComment: comment?.trim() || null,
+                reviewedAt: new Date(),
+                reviewedByUserId: actorUserId,
+                reviewStatus: action === "REJECT" ? "REJECTED" : "RETURNED",
+            },
+            where: { id: entityId },
+        });
+    },
+    async applyCompletion({ actorUserId, db, entityId, finalResult }) {
+        if (["APPROVED", "CLOSED"].includes(finalResult)) {
+            await db.evidenceFile.update({
+                data: {
+                    reviewComment: null,
+                    reviewedAt: new Date(),
+                    reviewedByUserId: actorUserId ?? null,
+                    reviewStatus: "APPROVED",
+                },
+                where: { id: entityId },
+            });
+        }
+        else if (["REJECTED", "EXPIRED"].includes(finalResult)) {
+            await db.evidenceFile.update({
+                data: {
+                    reviewedAt: new Date(),
+                    reviewedByUserId: actorUserId ?? null,
+                    reviewStatus: "REJECTED",
+                },
+                where: { id: entityId },
+            });
+        }
+    },
+    getEntityLink: (_entityId, context) => context?.custom.observationId
+        ? `/observaciones/${context.custom.observationId}?tab=evidence&evidenceId=${encodeURIComponent(_entityId)}`
+        : "/observaciones",
+};
 const adapters = new Map([
     [deadlineExtensionAdapter.processType, deadlineExtensionAdapter],
+    [evidenceReviewAdapter.processType, evidenceReviewAdapter],
     [observationClosureAdapter.processType, observationClosureAdapter],
     [remediationPlanAdapter.processType, remediationPlanAdapter],
 ]);

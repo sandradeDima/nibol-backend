@@ -1,9 +1,9 @@
 import { renderBaseEmailLayout } from "../layouts/BaseEmailLayout.js";
-import { escapeHtml, greeting, joinTextBlocks } from "../utils.js";
+import { escapeHtml, greeting, joinTextBlocks, resolveEmailAppName, } from "../utils.js";
 export const invitationEmailTemplate = {
     name: "invitation",
     render: ({ brand, variables }) => {
-        const appName = variables.appName?.trim() || brand.appName;
+        const appName = resolveEmailAppName(variables.appName ?? brand.appName);
         const roleLine = variables.roleName
             ? `<p style="margin: 0 0 16px;">Su acceso quedara habilitado con el rol <strong>${escapeHtml(variables.roleName)}</strong>.</p>`
             : "";

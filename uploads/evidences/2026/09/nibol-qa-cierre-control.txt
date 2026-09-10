@@ -1,0 +1,3 @@
+NIBOL QA evidence
+Evidencia final para probar la ruta de cierre.
+Report: NIBOL-QA-2026-001

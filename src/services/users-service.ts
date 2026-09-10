@@ -5,7 +5,7 @@ import path from "node:path";
 import bcrypt from "bcryptjs";
 import { Prisma } from "../../generated/prisma/client.js";
 
-import { ADMIN_ROLE_NAME } from "../permissions/definitions.js";
+import { ADMIN_ROLE_CODE } from "../permissions/definitions.js";
 import { resendVerificationEmailToUser } from "../modules/auth/verification-email.js";
 import { activityLogService } from "./activity-log-service.js";
 import { auditLogService } from "./audit-log-service.js";
@@ -110,7 +110,7 @@ const getAdminRoleId = async (): Promise<string | null> => {
     },
     where: {
       deletedAt: null,
-      name: ADMIN_ROLE_NAME,
+      code: ADMIN_ROLE_CODE,
     },
   });
 

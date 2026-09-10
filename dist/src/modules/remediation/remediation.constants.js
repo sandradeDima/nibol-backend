@@ -27,6 +27,13 @@ export const REMEDIATION_ACTIVITY_ACTIONS = {
     updateActionPlan: "actionPlan.update",
     updatePlan: "remediation-plan.update",
 };
+export const RECOMMENDED_ACTION_PLAN_PERMISSIONS = {
+    create: "recommended_action_plans.create",
+    delete: "recommended_action_plans.delete",
+    edit: "recommended_action_plans.edit",
+    submit: "recommended_action_plans.submit_to_audit",
+    view: "recommended_action_plans.view",
+};
 export const PLAN_EDITABLE_STATUSES = new Set([
     "DRAFT",
     "RETURNED",
@@ -34,12 +41,4 @@ export const PLAN_EDITABLE_STATUSES = new Set([
 export const PLAN_PROGRESS_EVALUATION_STATUSES = new Set([
     "APPROVED",
 ]);
-export const SYSTEM_WIDE_ROLE_NAMES = new Set([
-    "admin",
-    "sistema",
-    "sistemas",
-    "system",
-    "systems",
-]);
-export const AUDIT_ROLE_MARKERS = ["audit", "auditor", "auditoria"];
 //# sourceMappingURL=remediation.constants.js.map

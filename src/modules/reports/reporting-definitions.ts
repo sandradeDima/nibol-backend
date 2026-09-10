@@ -1,14 +1,144 @@
 import type { Prisma } from "../../../generated/prisma/client.js";
 
-import type { AuthorizationSummary } from "../../services/authorization-service.js";
 import {
-  AUDIT_ROLE_MARKERS,
-  SYSTEM_WIDE_ROLE_NAMES,
-} from "../remediation/remediation.constants.js";
+  buildObservationScopeWhere as buildScopedObservationWhere,
+  type AuthorizationSummary,
+} from "../../services/authorization-service.js";
+import { officialProgressByStatus } from "../progress/progress.constants.js";
 
 export const REPORT_DEFAULT_DUE_SOON_DAYS = 7;
 export const REPORT_MAX_DUE_SOON_DAYS = 90;
 export const REPORT_RESOLUTION_LOOKBACK_MONTHS = 12;
+
+export const OFFICIAL_ACTION_PLAN_STATUSES = [
+  "NOT_STARTED",
+  "STARTED",
+  "WITH_PROGRESS",
+  "CONCLUDED",
+] as const;
+
+export type OfficialActionPlanStatus =
+  (typeof OFFICIAL_ACTION_PLAN_STATUSES)[number];
+export type DeadlineStatus = "VIGENTE" | "VENCIDO";
+
+export const officialActionPlanStatusMeta: Record<
+  OfficialActionPlanStatus,
+  { code: "NI" | "I" | "CA" | "CO"; label: string; percent: number }
+> = {
+  CONCLUDED: {
+    code: "CO",
+    label: "Concluido",
+    percent: officialProgressByStatus.CONCLUDED,
+  },
+  NOT_STARTED: {
+    code: "NI",
+    label: "No iniciado",
+    percent: officialProgressByStatus.NOT_STARTED,
+  },
+  STARTED: {
+    code: "I",
+    label: "Iniciado",
+    percent: officialProgressByStatus.STARTED,
+  },
+  WITH_PROGRESS: {
+    code: "CA",
+    label: "Con avance",
+    percent: officialProgressByStatus.WITH_PROGRESS,
+  },
+};
+
+const toOfficialActionPlanStatus = (value: string): OfficialActionPlanStatus =>
+  OFFICIAL_ACTION_PLAN_STATUSES.includes(value as OfficialActionPlanStatus)
+    ? (value as OfficialActionPlanStatus)
+    : "NOT_STARTED";
+
+export const getOfficialActionPlanProgress = (status: string) => {
+  const normalized = toOfficialActionPlanStatus(status);
+  return {
+    ...officialActionPlanStatusMeta[normalized],
+    key: normalized,
+  };
+};
+
+export const isApprovedDeadlineExtension = (
+  extension?: {
+    finalApprovedAt?: Date | null;
+    status?: string | null;
+  } | null,
+): boolean => extension?.status === "MANAGER_APPROVED";
+
+export const getEffectiveActionPlanDueDate = (plan: {
+  currentDueDate: Date;
+  deadlineExtensionRequests?: Array<{
+    proposedDueDate: Date;
+    status: string;
+    finalApprovedAt?: Date | null;
+  }>;
+}): Date => {
+  const approvedExtension = plan.deadlineExtensionRequests?.find(
+    isApprovedDeadlineExtension,
+  );
+  return approvedExtension?.proposedDueDate ?? plan.currentDueDate;
+};
+
+export const getDateOnlyKey = (value: Date): string =>
+  value.toISOString().slice(0, 10);
+
+export const getBusinessDateKey = (
+  now = new Date(),
+  timeZone = "UTC",
+): string => {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      day: "2-digit",
+      month: "2-digit",
+      timeZone,
+      year: "numeric",
+    })
+      .formatToParts(now)
+      .reduce<Record<string, string>>((result, part) => {
+        result[part.type] = part.value;
+        return result;
+      }, {});
+    return `${parts.year}-${parts.month}-${parts.day}`;
+  } catch {
+    return getDateOnlyKey(now);
+  }
+};
+
+export const getActionPlanDeadlineStatus = (
+  plan: {
+    currentDueDate: Date;
+    status: string;
+    deadlineExtensionRequests?: Array<{
+      proposedDueDate: Date;
+      status: string;
+      finalApprovedAt?: Date | null;
+    }>;
+  },
+  now = new Date(),
+  timeZone = "UTC",
+): DeadlineStatus => {
+  const effectiveDueDate = getEffectiveActionPlanDueDate(plan);
+  if (plan.status === "CONCLUDED") return "VIGENTE";
+  return getDateOnlyKey(effectiveDueDate) < getBusinessDateKey(now, timeZone)
+    ? "VENCIDO"
+    : "VIGENTE";
+};
+
+export const isActionPlanOverdue = (
+  plan: {
+    currentDueDate: Date;
+    status: string;
+    deadlineExtensionRequests?: Array<{
+      proposedDueDate: Date;
+      status: string;
+      finalApprovedAt?: Date | null;
+    }>;
+  },
+  now = new Date(),
+  timeZone = "UTC",
+): boolean => getActionPlanDeadlineStatus(plan, now, timeZone) === "VENCIDO";
 
 export const CLOSED_OBSERVATION_STATUS_KEYS = new Set(["CONCLUIDO"]);
 
@@ -18,29 +148,10 @@ export const OPEN_OBSERVATION_STATUS_KEYS = new Set([
   "CON_AVANCE",
 ]);
 
-export const normalizeBusinessRole = (value: string): string => {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim()
-    .toLowerCase();
-};
-
 export const hasGlobalBusinessAccess = (
   access: AuthorizationSummary,
 ): boolean => {
-  if (access.isAdmin) {
-    return true;
-  }
-
-  return access.roles.some((role) => {
-    const normalized = normalizeBusinessRole(role);
-
-    return (
-      SYSTEM_WIDE_ROLE_NAMES.has(normalized) ||
-      AUDIT_ROLE_MARKERS.some((marker) => normalized.includes(marker))
-    );
-  });
+  return access.dataScope === "ALL" || access.dataScope === "AUDIT_SCOPE";
 };
 
 export const buildObservationVisibilityCondition = (
@@ -50,44 +161,7 @@ export const buildObservationVisibilityCondition = (
     return undefined;
   }
 
-  return {
-    OR: [
-      { auditorUserId: access.userId },
-      {
-        areaAssignments: {
-          some: {
-            OR: [
-              { areaResponsibleUserId: access.userId },
-              { processOwnerUserId: access.userId },
-              {
-                area: {
-                  active: true,
-                  deletedAt: null,
-                  managerUserId: access.userId,
-                },
-              },
-            ],
-          },
-        },
-      },
-      {
-        actionPlans: {
-          some: {
-            deletedAt: null,
-            responsibleUserId: access.userId,
-          },
-        },
-      },
-      {
-        remediationPlans: {
-          some: {
-            deletedAt: null,
-            ownerUserId: access.userId,
-          },
-        },
-      },
-    ],
-  };
+  return buildScopedObservationWhere(access);
 };
 
 export const buildObservationScopeWhere = (

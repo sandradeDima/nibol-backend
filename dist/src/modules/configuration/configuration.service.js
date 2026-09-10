@@ -1,13 +1,8 @@
+import { isDeadlineReminderParameterKey } from "../../jobs/deadline-monitor/deadline-reminder.constants.js";
+import { buildObservationScopeWhere, } from "../../services/authorization-service.js";
 import { AppError } from "../../utils/app-error.js";
 import { prisma } from "../../utils/prisma.js";
 import { CONFIGURATION_CATALOG_TYPES } from "./configuration.constants.js";
-const SYSTEM_WIDE_ROLE_NAMES = new Set([
-    "admin",
-    "sistema",
-    "sistemas",
-    "system",
-    "systems",
-]);
 const configurationPrisma = prisma;
 const userSummarySelect = {
     email: true,
@@ -38,7 +33,7 @@ const riskLevelRecordSelect = {
     active: true,
     colorToken: true,
     createdAt: true,
-    defaultDeadlineDays: true,
+    maxRemediationDays: true,
     description: true,
     id: true,
     key: true,
@@ -98,52 +93,18 @@ const accessibleObservationSelect = {
         },
     },
 };
-const normalizeRoleName = (value) => {
-    return value
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .trim()
-        .toLowerCase();
-};
 const hasGlobalObservationAccess = (access) => {
-    if (access.isAdmin) {
-        return true;
-    }
-    if (access.permissions.includes("observations.create") ||
+    return (access.dataScope === "ALL" ||
+        access.dataScope === "AUDIT_SCOPE" ||
+        access.permissions.includes("observations.create") ||
         access.permissions.includes("observations.edit") ||
-        access.permissions.includes("observations.delete")) {
-        return true;
-    }
-    return access.roles.some((role) => SYSTEM_WIDE_ROLE_NAMES.has(normalizeRoleName(role)));
+        access.permissions.includes("observations.delete"));
 };
 const buildObservationVisibilityCondition = (access) => {
     if (hasGlobalObservationAccess(access)) {
         return undefined;
     }
-    return {
-        OR: [
-            {
-                auditorUserId: access.userId,
-            },
-            {
-                areaAssignments: {
-                    some: {
-                        OR: [
-                            { areaResponsibleUserId: access.userId },
-                            { processOwnerUserId: access.userId },
-                            {
-                                area: {
-                                    active: true,
-                                    deletedAt: null,
-                                    managerUserId: access.userId,
-                                },
-                            },
-                        ],
-                    },
-                },
-            },
-        ],
-    };
+    return buildObservationScopeWhere(access);
 };
 const mapUserSummary = (user) => {
     if (!user) {
@@ -172,7 +133,7 @@ const mapRiskLevel = (record) => {
         active: record.active,
         colorToken: record.colorToken,
         createdAt: record.createdAt.toISOString(),
-        defaultDeadlineDays: record.defaultDeadlineDays,
+        maxRemediationDays: record.maxRemediationDays,
         description: record.description,
         id: record.id,
         key: record.key,
@@ -232,7 +193,23 @@ const createEmptyCatalogGroups = () => {
         tipo_observacion: [],
     };
 };
-const ensureSystemParameterValueIsValid = (valueType, value) => {
+const ensureSystemParameterValueIsValid = (valueType, value, key) => {
+    if (key && isDeadlineReminderParameterKey(key)) {
+        const expectsBoolean = key.endsWith("_enabled");
+        if ((expectsBoolean && valueType !== "boolean") || (!expectsBoolean && valueType !== "number")) {
+            throw new AppError("El tipo de este parámetro de recordatorio no puede cambiarse.", 400);
+        }
+        const parsed = Number(value);
+        if (key.endsWith("_cutoff_day") && (!Number.isInteger(parsed) || parsed < 1 || parsed > 28)) {
+            throw new AppError("El día de corte debe ser un entero entre 1 y 28.", 400);
+        }
+        if (key.endsWith("_cadence_months") && (!Number.isInteger(parsed) || parsed < 1)) {
+            throw new AppError("La frecuencia debe ser un entero positivo.", 400);
+        }
+        if (key.endsWith("_upcoming_window_days") && (!Number.isInteger(parsed) || parsed < 1)) {
+            throw new AppError("La ventana debe ser un entero positivo.", 400);
+        }
+    }
     switch (valueType) {
         case "string":
             return;
@@ -649,8 +626,8 @@ const buildRiskLevelsOrderBy = (sortBy, sortDirection) => {
     switch (sortBy) {
         case "createdAt":
             return { createdAt: sortDirection };
-        case "defaultDeadlineDays":
-            return { defaultDeadlineDays: sortDirection };
+        case "maxRemediationDays":
+            return { maxRemediationDays: sortDirection };
         case "key":
             return { key: sortDirection };
         case "name":
@@ -902,7 +879,7 @@ export const configurationService = {
             data: {
                 active: input.active,
                 colorToken: input.colorToken,
-                defaultDeadlineDays: input.defaultDeadlineDays,
+                maxRemediationDays: input.maxRemediationDays,
                 description: input.description,
                 key: input.key,
                 name: input.name,
@@ -913,7 +890,7 @@ export const configurationService = {
         return mapRiskLevel(record);
     },
     async createSystemParameter(input) {
-        ensureSystemParameterValueIsValid(input.valueType, input.value);
+        ensureSystemParameterValueIsValid(input.valueType, input.value, input.key);
         await assertSystemParameterKeyAvailable(input.key);
         const record = await configurationPrisma.systemParameter.create({
             data: {
@@ -1067,7 +1044,7 @@ export const configurationService = {
                 catalogs,
                 riskLevels: riskLevels.map((record) => ({
                     colorToken: record.colorToken,
-                    defaultDeadlineDays: record.defaultDeadlineDays,
+                    maxRemediationDays: record.maxRemediationDays,
                     id: record.id,
                     key: record.key,
                     name: record.name,
@@ -1121,7 +1098,7 @@ export const configurationService = {
             catalogs,
             riskLevels: riskLevels.map((record) => ({
                 colorToken: record.colorToken,
-                defaultDeadlineDays: record.defaultDeadlineDays,
+                maxRemediationDays: record.maxRemediationDays,
                 id: record.id,
                 key: record.key,
                 name: record.name,
@@ -1367,7 +1344,7 @@ export const configurationService = {
             data: {
                 active: input.active,
                 colorToken: input.colorToken,
-                defaultDeadlineDays: input.defaultDeadlineDays,
+                maxRemediationDays: input.maxRemediationDays,
                 deletedAt: null,
                 description: input.description,
                 key: input.key,
@@ -1386,7 +1363,7 @@ export const configurationService = {
     },
     async updateSystemParameter(id, input) {
         const previous = await findSystemParameterRecordOrThrow(id);
-        ensureSystemParameterValueIsValid(input.valueType, input.value);
+        ensureSystemParameterValueIsValid(input.valueType, input.value, input.key);
         await assertSystemParameterKeyAvailable(input.key, id);
         const record = await configurationPrisma.systemParameter.update({
             data: {

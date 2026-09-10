@@ -278,6 +278,13 @@ const approvalNodeConfigurationSchema = configurationBaseSchema
   })
   .strict();
 
+const subflowNodeConfigurationSchema = configurationBaseSchema
+  .extend({
+    nodeType: z.literal("SUBFLOW"),
+    referencedProcessType: z.string().trim().min(1).max(100),
+  })
+  .strict();
+
 const rejectionNodeConfigurationSchema = configurationBaseSchema
   .extend({
     behavior: z.enum([
@@ -398,6 +405,7 @@ export const workflowNodeConfigurationSchema = z.discriminatedUnion(
     startNodeConfigurationSchema,
     stageNodeConfigurationSchema,
     approvalNodeConfigurationSchema,
+    subflowNodeConfigurationSchema,
     rejectionNodeConfigurationSchema,
     conditionNodeConfigurationSchema,
     slaNodeConfigurationSchema,
@@ -541,6 +549,8 @@ const simulationDateSchema = z
 export const workflowSimulationContextSchema = z
   .object({
     areaId: nullableSimulationTextSchema,
+    allPlansValidated: z.boolean().nullable().optional(),
+    areaPlanRequired: z.boolean().nullable().optional(),
     currentNodeKey: nullableSimulationTextSchema,
     daysOverdue: z.number().finite().nullable().optional(),
     dueDate: simulationDateSchema,

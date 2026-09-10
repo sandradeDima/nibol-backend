@@ -12,5 +12,4 @@ export type ProgressEvaluationReviewStatusValue =
   | "DRAFT"
   | "SENT_TO_AUDIT"
   | "APPROVED"
-  | "RETURNED"
-  | "REJECTED";
+  | "RETURNED";

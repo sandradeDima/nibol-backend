@@ -1,14 +1,12 @@
 export const progressEvaluationTypeValues = [
     "ADVANCE",
     "FINALIZATION",
-    "CORRECTION",
 ];
 export const progressEvaluationStatusValues = [
     "DRAFT",
     "SENT_TO_AUDIT",
     "APPROVED",
     "RETURNED",
-    "REJECTED",
 ];
 export const commentVisibilityValues = [
     "INTERNAL_AUDIT",
@@ -19,8 +17,13 @@ export const progressReviewActionValues = [
     "SENT",
     "APPROVED",
     "RETURNED",
-    "REJECTED",
 ];
+export const officialProgressByStatus = {
+    CONCLUDED: 100,
+    NOT_STARTED: 0,
+    STARTED: 20,
+    WITH_PROGRESS: 60,
+};
 export const PROGRESS_ENTITY_TYPES = {
     comment: "observation_comment",
     evidence: "evidence_file",
@@ -34,7 +37,6 @@ export const PROGRESS_ACTIVITY_ACTIONS = {
     deleteComment: "observation-comment.delete",
     deleteEvidence: "evidence-file.delete",
     downloadEvidence: "evidence-file.download",
-    rejectProgressEvaluation: "progress-evaluation.reject",
     returnProgressEvaluation: "progress-evaluation.return",
     sendProgressEvaluationToAudit: "progress-evaluation.send-to-audit",
     updateComment: "observation-comment.update",

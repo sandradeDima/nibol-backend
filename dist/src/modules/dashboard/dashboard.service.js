@@ -1,18 +1,16 @@
+import { buildActionPlanScopeWhere, buildExtensionRequestScopeWhere, buildObservationAreaScopeWhere, buildObservationScopeWhere, buildProgressEvaluationScopeWhere, } from "../../services/authorization-service.js";
 import { prisma } from "../../utils/prisma.js";
-import { buildObservationAccessWhere } from "../observations/observations.service.js";
+import { getActionPlanDeadlineStatus, getBusinessDateKey, getDateOnlyKey, getEffectiveActionPlanDueDate, getOfficialActionPlanProgress, isApprovedDeadlineExtension, } from "../reports/reporting-definitions.js";
 const DAY = 86_400_000;
 const userSelect = { email: true, id: true, name: true };
 const viewerProfile = (access) => {
-    const roles = access.roles.join(" ").toLowerCase();
-    if (access.isAdmin)
+    if (access.roleCode === "SYSTEM_ADMIN")
         return "ADMIN";
-    if (/sistema|system/.test(roles))
-        return "SYSTEMS";
-    if (/audit/.test(roles))
+    if (access.roleCode === "AUDITOR")
         return "AUDIT";
-    if (/geren|manager|jef/.test(roles))
+    if (access.roleCode === "PROCESS_OWNER")
         return "MANAGEMENT";
-    if (/responsable|ejecutor/.test(roles))
+    if (access.roleCode === "AREA_RESPONSIBLE" || access.roleCode === "EXECUTOR")
         return "EXECUTOR";
     return "GENERAL";
 };
@@ -52,17 +50,46 @@ const observationInclude = {
     riskLevel: { select: { colorToken: true, key: true, name: true } },
     status: { select: { isFinal: true, key: true, name: true } },
 };
-const actionPlanInclude = {
+const buildObservationInclude = (access) => ({
+    ...observationInclude,
+    areaAssignments: {
+        ...observationInclude.areaAssignments,
+        where: buildObservationAreaScopeWhere(access),
+    },
+});
+const actionPlanSelect = {
+    completedAt: true,
+    currentDueDate: true,
+    deadlineExtensionRequests: {
+        select: {
+            finalApprovedAt: true,
+            proposedDueDate: true,
+            status: true,
+        },
+        where: { deletedAt: null },
+    },
+    description: true,
+    id: true,
+    originalDueDate: true,
     observation: {
         select: {
             auditReport: { select: { reportNumber: true } },
             id: true,
             observationNumber: true,
+            riskLevel: { select: { colorToken: true, key: true, name: true } },
             title: true,
         },
     },
-    observationArea: { select: { area: { select: { id: true, name: true } } } },
+    observationArea: {
+        select: {
+            area: { select: { id: true, name: true } },
+            processOwner: { select: userSelect },
+        },
+    },
+    progressPercent: true,
     responsibleUser: { select: userSelect },
+    status: true,
+    updatedAt: true,
 };
 const observationRow = (record, now) => ({
     area: record.areaAssignments[0]?.area ?? { id: "", name: "Sin área" },
@@ -78,22 +105,28 @@ const observationRow = (record, now) => ({
     title: record.title,
     updatedAt: record.updatedAt.toISOString(),
 });
-const actionPlanRow = (record, now) => {
-    const overdue = record.status !== "CONCLUDED" &&
-        record.currentDueDate.getTime() < now.getTime();
+const actionPlanRow = (record, now, timeZone) => {
+    const officialProgress = getOfficialActionPlanProgress(record.status);
+    const effectiveDueDate = getEffectiveActionPlanDueDate(record);
+    const deadlineStatus = getActionPlanDeadlineStatus(record, now, timeZone);
     return {
         area: record.observationArea.area,
-        dueDate: record.currentDueDate.toISOString(),
+        deadlineStatus,
+        dueDate: effectiveDueDate.toISOString(),
+        effectiveDueDate: effectiveDueDate.toISOString(),
         href: `/planes-accion/${record.id}`,
         id: record.id,
-        isOverdue: overdue,
-        progressPercent: record.progressPercent,
+        isOverdue: deadlineStatus === "VENCIDO",
+        officialProgressCode: officialProgress.code,
+        officialProgressPercent: officialProgress.percent,
+        progressPercent: officialProgress.percent,
+        reprogrammed: Boolean(record.deadlineExtensionRequests.find(isApprovedDeadlineExtension)),
         responsibleUser: record.responsibleUser,
         status: {
-            key: overdue ? "OVERDUE" : record.status,
-            name: overdue ? "Vencido" : statusLabel(record.status),
+            key: record.status,
+            name: officialProgress.label,
         },
-        title: record.title,
+        title: record.description,
         updatedAt: record.updatedAt.toISOString(),
         observation: {
             code: displayCode(record.observation),
@@ -119,20 +152,20 @@ const distribution = (records, getKey, getLabel) => {
 const load = async (access) => {
     const now = new Date();
     const days = await reminderDays();
-    const observationWhere = {
-        deletedAt: null,
-        ...buildObservationAccessWhere(access),
-    };
-    const [observations, actionPlans, evaluations, extensions] = await Promise.all([
+    const observationWhere = buildObservationScopeWhere(access);
+    const [observations, actionPlans, evaluations, extensions, setting] = await Promise.all([
         prisma.observation.findMany({
-            include: observationInclude,
+            include: buildObservationInclude(access),
             orderBy: { updatedAt: "desc" },
             where: observationWhere,
         }),
         prisma.actionPlan.findMany({
-            include: actionPlanInclude,
             orderBy: { currentDueDate: "asc" },
-            where: { deletedAt: null, observation: observationWhere },
+            select: actionPlanSelect,
+            where: {
+                ...buildActionPlanScopeWhere(access),
+                observation: { deletedAt: null },
+            },
         }),
         prisma.progressEvaluation.findMany({
             include: {
@@ -154,8 +187,7 @@ const load = async (access) => {
             },
             orderBy: { updatedAt: "desc" },
             where: {
-                actionPlan: { observation: observationWhere },
-                deletedAt: null,
+                ...buildProgressEvaluationScopeWhere(access),
             },
         }),
         prisma.deadlineExtensionRequest.findMany({
@@ -185,28 +217,36 @@ const load = async (access) => {
             },
             orderBy: { updatedAt: "desc" },
             where: {
-                deletedAt: null,
-                OR: [
-                    { observation: observationWhere },
-                    { actionPlan: { observation: observationWhere } },
-                ],
+                ...buildExtensionRequestScopeWhere(access),
             },
         }),
+        prisma.setting.findFirst({
+            select: { timezone: true },
+            where: { deletedAt: null },
+        }),
     ]);
-    return { actionPlans, days, evaluations, extensions, now, observations };
+    return {
+        actionPlans,
+        days,
+        evaluations,
+        extensions,
+        now,
+        observations,
+        timeZone: setting?.timezone || "UTC",
+    };
 };
 const buildReviewRows = (data) => [
     ...data.evaluations
         .filter((item) => item.reviewStatus === "SENT_TO_AUDIT")
         .map((item) => ({
         areaName: item.actionPlan.observationArea.area.name,
-        href: `/observaciones/${item.actionPlan.observation.id}#colaboracion`,
+        href: `/observaciones/${item.actionPlan.observation.id}?tab=plans`,
         id: item.id,
         kind: "PROGRESS",
         responsibleName: item.submittedByUser.name,
         status: { key: item.reviewStatus, name: "Pendiente de Auditoría" },
-        subtitle: `${displayCode(item.actionPlan.observation)} · ${item.progressPercent}%`,
-        title: item.actionPlan.title,
+        subtitle: `${displayCode(item.actionPlan.observation)} · ${item.actionPlan.progressPercent}%`,
+        title: item.actionPlan.description,
         updatedAt: item.updatedAt.toISOString(),
     })),
     ...data.extensions
@@ -226,7 +266,7 @@ const buildReviewRows = (data) => [
                     : "Pendiente de Auditoría",
             },
             subtitle: `${displayCode(observation)} · +${Math.round((item.proposedDueDate.getTime() - item.previousDueDate.getTime()) / DAY)} días`,
-            title: item.actionPlan?.title ?? observation.title,
+            title: item.actionPlan?.description ?? observation.title,
             updatedAt: item.updatedAt.toISOString(),
         };
     }),
@@ -243,12 +283,12 @@ const latestRows = (data) => [
         title: displayCode(item),
     })),
     ...data.evaluations.slice(0, 6).map((item) => ({
-        description: `Evaluación ${statusLabel(item.reviewStatus).toLowerCase()} para ${item.actionPlan.title}.`,
-        href: `/observaciones/${item.actionPlan.observation.id}#colaboracion`,
+        description: `Evaluación ${statusLabel(item.reviewStatus).toLowerCase()} para el plan de acción.`,
+        href: `/observaciones/${item.actionPlan.observation.id}?tab=plans`,
         id: item.id,
         kind: "PROGRESS",
         timestamp: item.updatedAt.toISOString(),
-        title: `${displayCode(item.actionPlan.observation)} · ${item.progressPercent}%`,
+        title: `${displayCode(item.actionPlan.observation)} · ${item.actionPlan.progressPercent}%`,
     })),
 ]
     .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
@@ -260,8 +300,22 @@ const common = async (access) => {
     const overdue = open.filter((item) => item.currentDueDate < data.now);
     const upcomingObservations = open.filter((item) => item.currentDueDate >= data.now && item.currentDueDate <= dueThreshold);
     const openPlans = data.actionPlans.filter((item) => item.status !== "CONCLUDED");
-    const upcomingPlans = openPlans.filter((item) => item.currentDueDate >= data.now && item.currentDueDate <= dueThreshold);
-    const overduePlans = openPlans.filter((item) => item.currentDueDate < data.now);
+    const planRowsById = new Map(data.actionPlans.map((item) => [
+        item.id,
+        actionPlanRow(item, data.now, data.timeZone),
+    ]));
+    const todayKey = getBusinessDateKey(data.now, data.timeZone);
+    const planDueSoonEnd = new Date(`${todayKey}T00:00:00.000Z`);
+    planDueSoonEnd.setUTCDate(planDueSoonEnd.getUTCDate() + data.days);
+    const planDueSoonEndKey = getDateOnlyKey(planDueSoonEnd);
+    const upcomingPlans = openPlans.filter((item) => {
+        const row = planRowsById.get(item.id);
+        const dueDateKey = getDateOnlyKey(new Date(row.effectiveDueDate));
+        return (row.deadlineStatus === "VIGENTE" &&
+            dueDateKey >= todayKey &&
+            dueDateKey <= planDueSoonEndKey);
+    });
+    const overduePlans = openPlans.filter((item) => planRowsById.get(item.id)?.deadlineStatus === "VENCIDO");
     const averageProgress = data.observations.length
         ? Math.round(data.observations.reduce((sum, item) => sum + item.progressPercent, 0) /
             data.observations.length)
@@ -276,9 +330,56 @@ const common = async (access) => {
         .map((item) => observationRow(item, data.now));
     const planRows = upcomingPlans
         .slice(0, 10)
-        .map((item) => actionPlanRow(item, data.now));
+        .map((item) => planRowsById.get(item.id));
+    const planReporting = {
+        charts: {
+            byArea: distribution(data.actionPlans, (item) => item.observationArea.area.id, (item) => item.observationArea.area.name),
+            byDeadline: [
+                {
+                    key: "VIGENTE",
+                    label: "Vigentes",
+                    value: data.actionPlans.length - overduePlans.length,
+                },
+                { key: "VENCIDO", label: "Vencidos", value: overduePlans.length },
+            ],
+            byExecutor: distribution(data.actionPlans, (item) => item.responsibleUser.id, (item) => item.responsibleUser.name),
+            byProcessOwner: distribution(data.actionPlans, (item) => item.observationArea.processOwner?.id ?? "unassigned", (item) => item.observationArea.processOwner?.name ?? "Sin asignar"),
+            byProgress: ["NOT_STARTED", "STARTED", "WITH_PROGRESS", "CONCLUDED"].map((status) => ({
+                key: status,
+                label: getOfficialActionPlanProgress(status).label,
+                value: data.actionPlans.filter((item) => item.status === status)
+                    .length,
+            })),
+            byReprogrammed: [
+                {
+                    key: "SI",
+                    label: "Sí",
+                    value: data.actionPlans.filter((item) => item.deadlineExtensionRequests.some(isApprovedDeadlineExtension)).length,
+                },
+                {
+                    key: "NO",
+                    label: "No",
+                    value: data.actionPlans.filter((item) => !item.deadlineExtensionRequests.some(isApprovedDeadlineExtension)).length,
+                },
+            ],
+            byRisk: distribution(data.actionPlans, (item) => item.observation.riskLevel.key, (item) => item.observation.riskLevel.name),
+        },
+        summary: {
+            conAvance: data.actionPlans.filter((item) => item.status === "WITH_PROGRESS").length,
+            concluido: data.actionPlans.filter((item) => item.status === "CONCLUDED")
+                .length,
+            iniciado: data.actionPlans.filter((item) => item.status === "STARTED")
+                .length,
+            noIniciado: data.actionPlans.filter((item) => item.status === "NOT_STARTED").length,
+            reprogramados: data.actionPlans.filter((item) => item.deadlineExtensionRequests.some(isApprovedDeadlineExtension)).length,
+            total: data.actionPlans.length,
+            vencidos: overduePlans.length,
+            vigentes: data.actionPlans.length - overduePlans.length,
+        },
+    };
     return {
         averageProgress,
+        actionPlanReporting: planReporting,
         byArea,
         byRisk,
         byStatus,
@@ -330,6 +431,7 @@ export const dashboardService = {
             }
         }
         return {
+            actionPlanReporting: value.actionPlanReporting,
             charts: {
                 currentVsOverdue: [
                     {
@@ -382,6 +484,7 @@ export const dashboardService = {
         const value = await common(access);
         const reviews = buildReviewRows(value.data);
         return {
+            actionPlanReporting: value.actionPlanReporting,
             charts: {
                 currentVsOverdue: [
                     {

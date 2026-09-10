@@ -31,8 +31,10 @@ export type ActionPlanDetail = {
   completedAt: string | null;
   createdAt: string;
   currentDueDate: string;
+  deadlineStatus: "VIGENTE" | "VENCIDO";
   description: string;
   evidenceCount: number;
+  effectiveDueDate: string;
   id: string;
   isOverdue: boolean;
   observation: {
@@ -52,6 +54,9 @@ export type ActionPlanDetail = {
   };
   progressEvaluationCount: number;
   progressPercent: number;
+  officialProgressCode: "NI" | "I" | "CA" | "CO";
+  officialProgressPercent: number;
+  reprogrammed: boolean;
   responsibleUser: {
     email: string;
     id: string;

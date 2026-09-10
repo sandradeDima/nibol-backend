@@ -126,7 +126,7 @@ const getPreviousApprover = async (db, instanceId) => {
         orderBy: { createdAt: "desc" },
         select: { performedBy: { select: { email: true, id: true, name: true } } },
         where: {
-            instanceId,
+            workflowInstanceId: instanceId,
             performedById: { not: null },
         },
     });

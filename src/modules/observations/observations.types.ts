@@ -44,19 +44,20 @@ export type ObservationListItem = {
   risks: Array<{ id: string; name: string }>;
   riskLevel: {
     colorToken: string | null;
-    defaultDeadlineDays: number | null;
+    maxRemediationDays: number | null;
     id: string;
     key: string;
     name: string;
   };
   status: { id: string; isFinal: boolean; key: string; name: string };
+  sentAt: string | null;
   title: string;
   updatedAt: string;
 };
 
 export type ObservationDetail = ObservationListItem & {
   auditRecommendation: string;
-  auditorUser: UserSummary;
+  auditorUser: UserSummary | null;
   category: string | null;
   currentStage: string | null;
   description: string;
@@ -85,7 +86,7 @@ export type ObservationFormOptions = {
   risks: Array<{ description: string | null; id: string; name: string }>;
   riskLevels: Array<{
     colorToken: string | null;
-    defaultDeadlineDays: number | null;
+    maxRemediationDays: number | null;
     id: string;
     key: string;
     name: string;

@@ -223,7 +223,7 @@ const resolveFallback = async (
     case "ADMINISTRATOR": {
       const adminRole = await db.role.findFirst({
         select: { id: true },
-        where: { deletedAt: null, name: "Admin" },
+        where: { deletedAt: null, code: "SYSTEM_ADMIN" },
       });
       return adminRole
         ? roleResolution("FALLBACK_ADMINISTRATOR", adminRole.id, true, reason)

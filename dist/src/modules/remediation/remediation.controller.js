@@ -5,7 +5,7 @@ import { AppError } from "../../utils/app-error.js";
 import { getRequestLogActorContext } from "../../utils/request-context.js";
 import { sendPaginated, sendSuccess } from "../../utils/response.js";
 import { remediationService } from "./remediation.service.js";
-import { actionPlanIdParamSchema, createActionPlanSchema, listActionPlansQuerySchema, observationActionPlanParamsSchema, updateActionPlanSchema, } from "./remediation.validators.js";
+import { actionPlanIdParamSchema, createActionPlanSchema, createRemediationPlanSchema, listActionPlansQuerySchema, observationActionPlanParamsSchema, remediationPlanIdParamSchema, updateActionPlanSchema, updateRemediationPlanSchema, } from "./remediation.validators.js";
 const value = (input) => typeof input === "string" ? input : undefined;
 const access = (request) => {
     if (!request.authorizationSummary)
@@ -14,6 +14,7 @@ const access = (request) => {
 };
 const actionPlanId = (request) => actionPlanIdParamSchema.parse({ id: value(request.params.id) }).id;
 const observationId = (request) => observationActionPlanParamsSchema.parse({ id: value(request.params.id) }).id;
+const remediationPlanId = (request) => remediationPlanIdParamSchema.parse({ id: value(request.params.id) }).id;
 const log = async (request, action, current, previous) => {
     const record = current ?? previous;
     if (!record)
@@ -25,7 +26,7 @@ const log = async (request, action, current, previous) => {
             action,
             entityId: record.id,
             entityType: "ACTION_PLAN",
-            metadata: { summary: `Plan de acción: ${record.title}.` },
+            metadata: { summary: `Plan de acción: ${record.description}.` },
         }),
         auditLogService.create({
             ...actor,
@@ -47,15 +48,77 @@ const log = async (request, action, current, previous) => {
             observationId: record.observation.id,
             previousData: previous,
             targetUrl: `/planes-accion/${record.id}`,
-            title: `Plan de acción: ${record.title}`,
+            title: "Plan de acción actualizado",
+        }),
+    ]);
+};
+const logRemediationPlan = async (request, action, current, previous) => {
+    const record = current ?? previous;
+    if (!record)
+        return;
+    const actor = getRequestLogActorContext(request);
+    await Promise.all([
+        activityLogService.logUserAction({
+            ...actor,
+            action,
+            entityId: record.id,
+            entityType: "REMEDIATION_PLAN",
+            metadata: {
+                summary: `Plan recomendado: ${record.strategyText ?? "actualizado"}.`,
+            },
+        }),
+        auditLogService.create({
+            ...actor,
+            entityId: record.id,
+            entityType: "REMEDIATION_PLAN",
+            newValues: current,
+            oldValues: previous,
+        }),
+        entityActivityService.recordEntityChange({
+            action,
+            activityType: action
+                .toUpperCase()
+                .replaceAll(".", "_")
+                .replaceAll("-", "_"),
+            actorUserId: actor.userId,
+            entityId: record.id,
+            entityType: "REMEDIATION_PLAN",
+            newData: current,
+            observationId: record.observationId,
+            previousData: previous,
+            targetUrl: `/observaciones/${record.observationId}`,
+            title: "Plan recomendado actualizado",
         }),
     ]);
 };
 export const remediationController = {
+    async createRemediationPlan(request, response) {
+        const record = await remediationService.createRemediationPlan(observationId(request), createRemediationPlanSchema.parse(request.body), access(request));
+        await logRemediationPlan(request, "recommended_action_plans.create", record, null);
+        sendSuccess(response, record, 201);
+    },
+    async listRemediationPlans(request, response) {
+        sendSuccess(response, await remediationService.listRemediationPlans(observationId(request), access(request)));
+    },
+    async submitRemediationPlan(request, response) {
+        const result = await remediationService.submitRemediationPlan(remediationPlanId(request), access(request));
+        await logRemediationPlan(request, "recommended_action_plans.submit_to_audit", result.current, result.previous);
+        sendSuccess(response, result.current);
+    },
+    async updateRemediationPlan(request, response) {
+        const result = await remediationService.updateRemediationPlan(remediationPlanId(request), updateRemediationPlanSchema.parse(request.body), access(request));
+        await logRemediationPlan(request, "recommended_action_plans.edit", result.current, result.previous);
+        sendSuccess(response, result.current);
+    },
     async createActionPlan(request, response) {
         const record = await remediationService.createActionPlan(observationId(request), createActionPlanSchema.parse(request.body), access(request));
         await log(request, "action_plans.create", record, null);
         sendSuccess(response, record, 201);
+    },
+    async deleteRemediationPlan(request, response) {
+        const record = await remediationService.deleteRemediationPlan(remediationPlanId(request), access(request));
+        await logRemediationPlan(request, "recommended_action_plans.delete", null, record);
+        sendSuccess(response, { deleted: true, id: record.id });
     },
     async deleteActionPlan(request, response) {
         const record = await remediationService.deleteActionPlan(actionPlanId(request), access(request));

@@ -53,12 +53,16 @@ const actionPlanSelect = {
             auditReport: { select: { reportNumber: true } },
             auditorUser: { select: userSelect },
             id: true,
+            observationArea: {
+                select: {
+                    area: { select: { managerUser: { select: userSelect }, name: true } },
+                },
+            },
             observationNumber: true,
         },
     },
     responsibleUser: { select: userSelect },
     status: true,
-    title: true,
 };
 const parseBoolean = (value, fallback) => {
     if (value === undefined)
@@ -112,12 +116,8 @@ const getAuditRecipients = async () => {
             userRoles: {
                 some: {
                     role: {
+                        code: "AUDITOR",
                         deletedAt: null,
-                        OR: [
-                            { name: { contains: "audit" } },
-                            { name: { contains: "auditor" } },
-                            { name: { contains: "auditoria" } },
-                        ],
                     },
                 },
             },
@@ -353,13 +353,13 @@ const notifyActionPlan = async (context, actionPlan, auditRecipients, now) => {
     const event = {
         actionRequired: isOverdue
             ? "Actualice el plan de acción y coordine la regularización del plazo."
-            : "Revise el plan de remediación y registre el avance comprometido.",
+            : "Revise el plan de acción recomendado y registre el avance comprometido.",
         areaName: actionPlan.observationArea.area.name,
         code,
         currentStatus: actionPlan.status,
         description: isOverdue
-            ? `El plan de acción “${actionPlan.title}” se encuentra vencido.`
-            : `El plan de acción “${actionPlan.title}” vencerá el ${dateLabel(dueDate)}.`,
+            ? "El plan de acción se encuentra vencido."
+            : `El plan de acción vencerá el ${dateLabel(dueDate)}.`,
         dueDate: dateLabel(dueDate),
         entityId: actionPlan.id,
         entityType: "actionPlan",
@@ -414,7 +414,7 @@ const recordOverdueActivity = async (context, observations, actionPlans) => {
                 activityType: "OVERDUE_DETECTED",
                 actorType: "SYSTEM",
                 dedupeKey: `overdue-detected:${actionPlan.id}:${new Date().toISOString().slice(0, 10)}`,
-                description: `El monitor automático detectó que el plan de acción “${actionPlan.title}” está vencido.`,
+                description: "El monitor automático detectó que un plan de acción está vencido.",
                 entityId: actionPlan.id,
                 entityType: "ACTION_PLAN",
                 observationId: actionPlan.observation.id,
@@ -525,7 +525,7 @@ const processPendingExtensions = async (context, auditRecipients, now) => {
                             title: true,
                         },
                     },
-                    title: true,
+                    description: true,
                 },
             },
             id: true,
@@ -551,13 +551,13 @@ const processPendingExtensions = async (context, auditRecipients, now) => {
         },
         where: {
             deletedAt: null,
-            status: { in: ["SENT_TO_MANAGER", "SENT_TO_AUDIT"] },
+            status: "SENT_TO_MANAGER",
             updatedAt: { lte: threshold },
         },
     });
     for (const request of requests) {
         context.summary.processedCount += 1;
-        const managerReview = request.status === "SENT_TO_MANAGER";
+        const managerReview = true;
         const observation = request.observation ?? request.actionPlan?.observation;
         if (!observation)
             continue;
@@ -568,31 +568,29 @@ const processPendingExtensions = async (context, auditRecipients, now) => {
             ? context.parameters.notify_area_manager
                 ? [area?.managerUser ?? null]
                 : []
-            : context.parameters.notify_audit_team
-                ? auditRecipients
-                : []);
+            : []);
         const event = {
             actionRequired: managerReview
                 ? "Revise la solicitud y apruebe o rechace la ampliación propuesta."
-                : "Revise la solicitud de ampliación en la bandeja de Auditoría.",
+                : "Revise la solicitud de ampliación en la bandeja del responsable del área.",
             areaName: area?.name ?? "Sin área",
             code,
             currentStatus: managerReview
                 ? "Pendiente de Gerencia"
-                : "Pendiente de Auditoría",
-            description: `La ampliación de plazo para ${request.actionPlan?.title ?? observation.title} lleva más de ${context.parameters.pending_extension_reminder_hours} horas pendiente.`,
+                : "Pendiente del área",
+            description: `La ampliación de plazo para ${request.actionPlan?.description ?? observation.title} lleva más de ${context.parameters.pending_extension_reminder_hours} horas pendiente.`,
             dueDate: dateLabel(request.proposedDueDate),
             entityId: request.id,
             entityType: "deadline_extension_request",
             eventType: managerReview
                 ? AUTOMATIC_NOTIFICATION_TYPES.pendingExtensionManagerReview
-                : AUTOMATIC_NOTIFICATION_TYPES.pendingExtensionAuditReview,
+                : AUTOMATIC_NOTIFICATION_TYPES.pendingExtensionManagerReview,
             observationId: observation.id,
             priority: NotificationPriority.HIGH,
             targetUrl: `${env.FRONTEND_URL}/ampliaciones-plazo/${request.id}`,
             title: managerReview
                 ? "Ampliación pendiente de aprobación"
-                : "Ampliación pendiente en Auditoría",
+                : "Ampliación pendiente de aprobación",
         };
         for (const recipient of recipients) {
             try {

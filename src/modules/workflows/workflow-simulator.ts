@@ -107,8 +107,11 @@ const getDecision = (
   request: WorkflowSimulationRequest,
   node: WorkflowGraphNode,
   fallback: string,
+  forceFallback = false,
 ): { decision: string; wasDefaulted: boolean } => {
-  const configured = request.nodeDecisions[node.nodeKey];
+  const configured = forceFallback
+    ? undefined
+    : request.nodeDecisions[node.nodeKey];
   return configured
     ? { decision: configured, wasDefaulted: false }
     : { decision: fallback, wasDefaulted: true };
@@ -258,6 +261,7 @@ const chooseNextTransition = (
   node: WorkflowGraphNode,
   request: WorkflowSimulationRequest,
   context: WorkflowSimulationContext,
+  repeatedDecisionNode: boolean,
 ): {
   evaluations: ConditionGroupEvaluation[];
   selectedDecision?: string;
@@ -285,7 +289,12 @@ const chooseNextTransition = (
       };
     }
     case "APPROVAL": {
-      const selectedDecision = getDecision(request, node, "APPROVE");
+      const selectedDecision = getDecision(
+        request,
+        node,
+        "APPROVE",
+        repeatedDecisionNode,
+      );
       const normalized = selectedDecision.decision.toUpperCase();
       if (!configuration.allowedActions.includes(normalized as never)) {
         return {
@@ -302,14 +311,23 @@ const chooseNextTransition = (
         selected: choice.transition,
         selectedDecision: normalized,
         warnings: selectedDecision.wasDefaulted
-          ? ["Se aplicó APPROVE como decisión simulada predeterminada."]
+          ? [
+              repeatedDecisionNode
+                ? "Se aplicó APPROVE después de un retorno controlado para modelar la nueva decisión humana."
+                : "Se aplicó APPROVE como decisión simulada predeterminada.",
+            ]
           : choice.usedFallback
             ? ["Se utilizó la salida DEFAULT para la decisión simulada."]
             : [],
       };
     }
     case "STAGE": {
-      const selectedDecision = getDecision(request, node, "COMPLETE");
+      const selectedDecision = getDecision(
+        request,
+        node,
+        "COMPLETE",
+        repeatedDecisionNode,
+      );
       const normalized = selectedDecision.decision.toUpperCase();
       if (!configuration.allowedActions.includes(normalized as never)) {
         return {
@@ -326,7 +344,11 @@ const chooseNextTransition = (
         selected: choice.transition,
         selectedDecision: normalized,
         warnings: selectedDecision.wasDefaulted
-          ? ["Se aplicó COMPLETE como acción simulada predeterminada."]
+          ? [
+              repeatedDecisionNode
+                ? "Se aplicó COMPLETE después de un retorno controlado para modelar la nueva acción humana."
+                : "Se aplicó COMPLETE como acción simulada predeterminada.",
+            ]
           : choice.usedFallback
             ? ["Se utilizó la salida DEFAULT para la acción simulada."]
             : [],
@@ -376,6 +398,7 @@ export const simulateWorkflowGraph = ({
   let resolvedAssignments = 0;
   let projectedNotifications = 0;
   let projectedTimers = 0;
+  const visitedDecisionNodes = new Set<string>();
 
   if (validation.errors.length > 0 || !start) {
     errors.push({
@@ -464,7 +487,17 @@ export const simulateWorkflowGraph = ({
       projectedNotifications += 1;
     }
 
-    const next = chooseNextTransition(graph, node, request, context);
+    const isDecisionNode = node.type === "APPROVAL" || node.type === "STAGE";
+    const repeatedDecisionNode =
+      isDecisionNode && visitedDecisionNodes.has(node.nodeKey);
+    const next = chooseNextTransition(
+      graph,
+      node,
+      request,
+      context,
+      repeatedDecisionNode,
+    );
+    if (isDecisionNode) visitedDecisionNodes.add(node.nodeKey);
     step.evaluationDetails = next.evaluations;
     evaluatedConditions += next.evaluations.reduce(
       (total, evaluation) => total + evaluation.results.length,

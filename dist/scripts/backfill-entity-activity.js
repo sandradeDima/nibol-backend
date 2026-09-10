@@ -49,7 +49,7 @@ const backfill = async () => {
         });
     }
     const actionPlans = await prisma.actionPlan.findMany({
-        select: { id: true, observationId: true, status: true, title: true },
+        select: { description: true, id: true, observationId: true, status: true },
         where: { deletedAt: null },
     });
     for (const actionPlan of actionPlans) {
@@ -58,7 +58,7 @@ const backfill = async () => {
             activityType: "ACTION_PLAN_CREATED",
             actorType: "SYSTEM",
             dedupeKey: `backfill:ACTION_PLAN_CREATED:${actionPlan.id}`,
-            description: `Registro histórico inferido del plan de acción “${actionPlan.title}” en estado ${actionPlan.status}.`,
+            description: `Registro histórico inferido del plan de acción “${actionPlan.description}” en estado ${actionPlan.status}.`,
             entityId: actionPlan.id,
             entityType: "ACTION_PLAN",
             metadata: { ...inferred, currentStatus: actionPlan.status },

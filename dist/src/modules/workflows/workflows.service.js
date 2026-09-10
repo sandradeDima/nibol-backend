@@ -487,21 +487,30 @@ const getWorkflowDefinition = async (db, workflowId) => {
     return mapWorkflowDefinition(definition);
 };
 const getWorkflowVersionForClone = async (db, workflowId, sourceVersionId) => {
-    const version = await db.workflowVersion.findFirst({
-        select: {
-            ...workflowCloneSelect,
-            changeDescription: true,
-            id: true,
-            status: true,
-            versionNumber: true,
-            workflowDefinitionId: true,
-        },
-        where: {
-            workflowDefinitionId: workflowId,
-            ...(sourceVersionId ? { id: sourceVersionId } : {}),
-        },
-        ...(sourceVersionId ? {} : { orderBy: { versionNumber: "desc" } }),
-    });
+    const select = {
+        ...workflowCloneSelect,
+        changeDescription: true,
+        id: true,
+        status: true,
+        versionNumber: true,
+        workflowDefinitionId: true,
+    };
+    const baseWhere = {
+        workflowDefinitionId: workflowId,
+        ...(sourceVersionId ? { id: sourceVersionId } : {}),
+    };
+    const version = sourceVersionId
+        ? await db.workflowVersion.findFirst({ select, where: baseWhere })
+        : ((await db.workflowVersion.findFirst({
+            orderBy: { versionNumber: "desc" },
+            select,
+            where: { ...baseWhere, status: "PUBLISHED" },
+        })) ??
+            (await db.workflowVersion.findFirst({
+                orderBy: { versionNumber: "desc" },
+                select,
+                where: baseWhere,
+            })));
     if (!version) {
         throw new AppError("La versión origen no existe dentro del workflow.", 404);
     }
@@ -679,6 +688,8 @@ export const buildDefinitionWhere = (query) => {
 };
 const CONDITION_FIELD_LABELS = {
     areaId: "Área",
+    allPlansValidated: "Todos los planes están validados",
+    areaPlanRequired: "Requiere plan de acción del área",
     daysOverdue: "Días vencidos",
     dueDate: "Fecha límite",
     evidenceCount: "Cantidad de evidencias",
@@ -686,7 +697,7 @@ const CONDITION_FIELD_LABELS = {
     observationStatus: "Estado de observación",
     previousDecision: "Decisión anterior",
     processType: "Tipo de proceso",
-    remediationPlanStatus: "Estado del plan de remediación",
+    remediationPlanStatus: "Estado del plan de acción recomendado",
     requestType: "Tipo de solicitud",
     requestedExtensionDays: "Días de ampliación solicitados",
     responsibleUserId: "Usuario responsable",
@@ -1217,7 +1228,7 @@ export const workflowService = {
             WORKFLOW_PERMISSIONS.validate,
             WORKFLOW_PERMISSIONS.viewVersions,
         ]);
-        const [users, roles, areas, riskLevels, observationStatuses] = await prisma.$transaction([
+        const [users, roles, areas, riskLevels, observationStatuses, processes] = await prisma.$transaction([
             prisma.user.findMany({
                 orderBy: [{ name: "asc" }, { email: "asc" }],
                 select: {
@@ -1285,6 +1296,15 @@ export const workflowService = {
                     deletedAt: null,
                 },
             }),
+            prisma.catalog.findMany({
+                orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+                select: { key: true, name: true },
+                where: {
+                    active: true,
+                    deletedAt: null,
+                    type: WORKFLOW_PROCESS_TYPE_CATALOG,
+                },
+            }),
         ]);
         return {
             areas,
@@ -1313,6 +1333,7 @@ export const workflowService = {
                     .replace(/([a-z])([A-Z])/g, "$1 $2")
                     .replace(/^./, (character) => character.toUpperCase()),
             })),
+            processes: processes.flatMap((process) => process.key ? [{ key: process.key, name: process.name }] : []),
             roles,
             users,
         };

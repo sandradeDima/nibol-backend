@@ -1,4 +1,5 @@
 import {
+  ADMIN_ROLE_CODE,
   ADMIN_ROLE_NAME,
   CRITICAL_ADMIN_PERMISSIONS,
 } from "../permissions/definitions.js";
@@ -9,6 +10,7 @@ const getRole = async (roleId: string) => {
   return prisma.role.findUnique({
     select: {
       id: true,
+      code: true,
       name: true,
     },
     where: {
@@ -17,15 +19,15 @@ const getRole = async (roleId: string) => {
   });
 };
 
-const isAdminRole = (roleName: string | null | undefined): boolean => {
-  return roleName === ADMIN_ROLE_NAME;
+const isAdminRole = (roleCode: string | null | undefined): boolean => {
+  return roleCode === ADMIN_ROLE_CODE;
 };
 
 export const adminSafeguardService = {
   async assertRoleDeletionAllowed(roleId: string): Promise<void> {
     const role = await getRole(roleId);
 
-    if (isAdminRole(role?.name)) {
+    if (isAdminRole(role?.code)) {
       throw new AppError("Admin role cannot be deleted.", 400);
     }
   },
@@ -36,7 +38,7 @@ export const adminSafeguardService = {
   ): Promise<void> {
     const role = await getRole(roleId);
 
-    if (!isAdminRole(role?.name)) {
+    if (!isAdminRole(role?.code)) {
       return;
     }
 
@@ -51,7 +53,7 @@ export const adminSafeguardService = {
   ): Promise<void> {
     const role = await getRole(roleId);
 
-    if (!isAdminRole(role?.name)) {
+    if (!isAdminRole(role?.code)) {
       return;
     }
 
@@ -95,7 +97,7 @@ export const adminSafeguardService = {
       },
       where: {
         deletedAt: null,
-        name: ADMIN_ROLE_NAME,
+        code: ADMIN_ROLE_CODE,
       },
     });
 
@@ -116,7 +118,7 @@ export const adminSafeguardService = {
   ): Promise<void> {
     const role = await getRole(roleId);
 
-    if (!isAdminRole(role?.name)) {
+    if (!isAdminRole(role?.code)) {
       return;
     }
 

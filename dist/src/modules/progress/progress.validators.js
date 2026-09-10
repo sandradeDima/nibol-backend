@@ -8,45 +8,33 @@ const nullableText = z
     .union([z.string(), z.null(), z.undefined()])
     .transform((value) => value?.trim() || null);
 const evaluationFields = {
-    actionPlanStatus: z.enum([
-        "NOT_STARTED",
-        "STARTED",
-        "WITH_PROGRESS",
-        "CONCLUDED",
-    ]),
     comment: z.string().trim().min(1).max(20_000),
-    progressPercent: z.coerce.number().int().min(0).max(100),
-    type: z.enum(["ADVANCE", "FINALIZATION", "CORRECTION"]).default("ADVANCE"),
+    reportedProgressPercent: z.coerce.number().int().min(0).max(100),
+    type: z.enum(["ADVANCE", "FINALIZATION"]).default("ADVANCE"),
 };
-const consistentEvaluation = (value, context) => {
-    if (value.actionPlanStatus === "NOT_STARTED" &&
-        (value.progressPercent ?? 0) > 0)
-        context.addIssue({
-            code: "custom",
-            message: "Un plan con avance no puede permanecer como No iniciado.",
-        });
-    if (value.actionPlanStatus === "CONCLUDED" && value.progressPercent !== 100)
-        context.addIssue({
-            code: "custom",
-            message: "Un plan concluido debe registrar 100% de avance.",
-        });
-};
-export const createProgressEvaluationSchema = z
-    .object(evaluationFields)
-    .superRefine(consistentEvaluation);
+export const createProgressEvaluationSchema = z.object(evaluationFields);
 export const updateProgressEvaluationSchema = z
     .object(evaluationFields)
     .partial()
     .refine((value) => Object.keys(value).length > 0, {
     message: "Debe modificar al menos un campo.",
-})
-    .superRefine(consistentEvaluation);
+});
 export const reviewProgressEvaluationSchema = z.object({
+    comment: nullableText.optional().transform((value) => value ?? null),
+    officialStatus: z.enum([
+        "NOT_STARTED",
+        "STARTED",
+        "WITH_PROGRESS",
+        "CONCLUDED",
+    ]),
+});
+export const reviewEvidenceSchema = z.object({
     comment: nullableText.optional().transform((value) => value ?? null),
 });
 export const uploadEvidenceSchema = z.object({
     context: z.enum(["FINDING", "ACTION_PLAN", "PROGRESS_EVALUATION", "CLOSURE"]),
     description: nullableText,
+    observationAreaId: z.uuid().optional(),
 });
 export const createCommentSchema = z.object({
     actionPlanId: z.uuid().nullable().optional(),
@@ -73,7 +61,7 @@ export const listProgressEvaluationsQuerySchema = z.object({
     page: z.coerce.number().int().positive().default(1),
     perPage: z.coerce.number().int().positive().max(100).default(20),
     reviewStatus: z
-        .enum(["DRAFT", "SENT_TO_AUDIT", "APPROVED", "RETURNED", "REJECTED"])
+        .enum(["DRAFT", "SENT_TO_AUDIT", "APPROVED", "RETURNED"])
         .optional(),
     search: z.string().trim().default(""),
 });

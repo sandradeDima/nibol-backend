@@ -2,32 +2,38 @@ import { Router } from "express";
 
 import { asyncHandler } from "../../middleware/async-handler.js";
 import {
-  requireAllPermissions,
+  requireAnyPermission,
   requirePermission,
 } from "../../middleware/authorization-middleware.js";
 import { remediationController } from "./remediation.controller.js";
+import { RECOMMENDED_ACTION_PLAN_PERMISSIONS as recommended } from "./remediation.constants.js";
 
 export const remediationRouter = Router();
 
 remediationRouter.get(
   "/observations/:id/remediation-plans",
-  requirePermission("action_plans.view"),
+  requirePermission(recommended.view),
   asyncHandler(remediationController.listRemediationPlans),
 );
 remediationRouter.post(
   "/observations/:id/remediation-plans",
-  requirePermission("action_plans.create"),
+  requirePermission(recommended.create),
   asyncHandler(remediationController.createRemediationPlan),
 );
 remediationRouter.patch(
   "/remediation-plans/:id",
-  requirePermission("action_plans.edit"),
+  requireAnyPermission([recommended.edit, "action_plans.assign_executor"]),
   asyncHandler(remediationController.updateRemediationPlan),
 );
 remediationRouter.post(
   "/remediation-plans/:id/submit",
-  requirePermission("progress_evaluations.submit"),
+  requirePermission(recommended.submit),
   asyncHandler(remediationController.submitRemediationPlan),
+);
+remediationRouter.delete(
+  "/remediation-plans/:id",
+  requirePermission(recommended.delete),
+  asyncHandler(remediationController.deleteRemediationPlan),
 );
 
 remediationRouter.get(
@@ -42,7 +48,7 @@ remediationRouter.get(
 );
 remediationRouter.post(
   "/observations/:id/action-plans",
-  requireAllPermissions(["action_plans.create", "action_plans.assign"]),
+  requirePermission("action_plans.create"),
   asyncHandler(remediationController.createActionPlan),
 );
 remediationRouter.patch(
@@ -57,6 +63,6 @@ remediationRouter.delete(
 );
 remediationRouter.post(
   "/action-plans/:id/complete",
-  requirePermission("action_plans.complete"),
+  requirePermission("action_plans.evaluate"),
   asyncHandler(remediationController.markActionPlanComplete),
 );

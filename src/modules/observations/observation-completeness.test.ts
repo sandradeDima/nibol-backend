@@ -8,8 +8,11 @@ import {
 } from "./observation-completeness.service.js";
 
 const access = {
+  dataScope: "ALL" as const,
   isAdmin: true,
   permissions: [],
+  roleCode: "SYSTEM_ADMIN" as const,
+  roleName: "Administrador del sistema",
   roles: ["Admin"],
   userId: "00000000-0000-4000-8000-000000000001",
 };
@@ -43,6 +46,17 @@ test("completeness identifies missing action plan and finding evidence", () => {
     "ACTION_PLAN_MISSING",
     "FINDING_EVIDENCE_MISSING",
   ]);
+});
+
+test("overdue action points to the plan tab", () => {
+  const items = buildObservationActionItems(
+    { ...context(), currentDueDate: new Date("2026-08-01T00:00:00.000Z") },
+    access,
+    new Date("2026-08-14T00:00:00.000Z"),
+  );
+  const overdue = items.find((item) => item.code === "OVERDUE");
+  assert.equal(overdue?.actionType, "REQUEST_EXTENSION");
+  assert.equal(overdue?.actionUrl?.endsWith("?tab=plans"), true);
 });
 
 test("completeness exposes friendly per-area ownership actions", () => {

@@ -5,6 +5,7 @@ export const actionPlanIdParamSchema = z.object({ id: z.uuid() });
 export const extensionRequestIdParamSchema = z.object({ id: z.uuid() });
 
 const fields = {
+  classificationCode: z.string().trim().min(1).max(64),
   evidenceFileIds: z.array(z.uuid()).max(20).default([]),
   proposedDueDate: z.coerce.date(),
   reason: z.string().trim().min(3).max(20_000),
@@ -18,7 +19,9 @@ export const updateExtensionRequestSchema = z
   });
 export const reviewExtensionRequestSchema = z.object({
   comment: z
-    .union([z.string(), z.null(), z.undefined()])
+    .string()
+    .nullable()
+    .optional()
     .transform((value) => value?.trim() || null),
 });
 export const listExtensionRequestsQuerySchema = z.object({
@@ -34,9 +37,6 @@ export const listExtensionRequestsQuerySchema = z.object({
       "SENT_TO_MANAGER",
       "MANAGER_APPROVED",
       "MANAGER_REJECTED",
-      "SENT_TO_AUDIT",
-      "AUDIT_APPROVED",
-      "AUDIT_REJECTED",
       "CANCELLED",
     ])
     .optional(),

@@ -8,7 +8,8 @@ import { prisma } from "../utils/prisma.js";
 import { AppError } from "../utils/app-error.js";
 import { env } from "../utils/env.js";
 import { sendPaginated, sendSuccess } from "../utils/response.js";
-import { deadlineMonitorService } from "../jobs/deadline-monitor/deadline-monitor.service.js";
+import { deadlineReminderService } from "../jobs/deadline-monitor/deadline-reminder.service.js";
+import { DEADLINE_REMINDER_ROLES, } from "../jobs/deadline-monitor/deadline-reminder.constants.js";
 import { DEADLINE_MONITOR_PARAMETER_DEFAULTS } from "../jobs/deadline-monitor/deadline-monitor.constants.js";
 import { workflowTimerService } from "../modules/workflows/workflow-timer.service.js";
 const paginationSchema = z.object({
@@ -17,6 +18,33 @@ const paginationSchema = z.object({
 });
 const ruleUpdateSchema = z.object({
     value: z.string().trim().min(1).max(10_000),
+});
+const deadlineReminderRoleSchema = z.enum(DEADLINE_REMINDER_ROLES);
+const dateKeySchema = z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Use una fecha con formato AAAA-MM-DD.")
+    .refine((value) => {
+    try {
+        const date = new Date(`${value}T12:00:00.000Z`);
+        return date.toISOString().slice(0, 10) === value;
+    }
+    catch {
+        return false;
+    }
+}, "La fecha no es válida.");
+const deadlineReminderPolicySchema = z.object({
+    cadenceMonths: z.coerce.number().int().min(1).max(24),
+    cutoffDay: z.coerce.number().int().min(1).max(28),
+    enabled: z.boolean(),
+    upcomingWindowDays: z.coerce.number().int().min(1).max(365),
+});
+const deadlineReminderRunSchema = z.object({
+    cutoffDateKey: dateKeySchema.optional(),
+    role: deadlineReminderRoleSchema.optional(),
+});
+const deadlineReminderPreviewSchema = z.object({
+    cutoffDateKey: dateKeySchema.optional(),
+    role: deadlineReminderRoleSchema,
 });
 const getQueryValue = (value) => {
     if (typeof value === "string")
@@ -31,17 +59,12 @@ const getUserId = (request) => {
         throw new AppError("Authentication required.", 401);
     return userId;
 };
-const isSystemOperator = (roles, isAdmin) => {
-    if (isAdmin)
-        return true;
-    return roles.some((role) => /^(sistemas?|systems?)$/i.test(role.trim()));
-};
 const requireSystemOperator = async (request, response, next) => {
     try {
         const userId = getUserId(request);
         const summary = await authorizationService.getUserAuthorizationSummary(userId);
         request.authorizationSummary = summary;
-        if (!isSystemOperator(summary.roles, summary.isAdmin)) {
+        if (summary.dataScope !== "ALL") {
             response.status(403).json({
                 success: false,
                 message: "Acceso restringido a Admin o Sistemas.",
@@ -68,6 +91,18 @@ const hasValidCronSecret = (provided) => {
     return expected.length === actual.length && timingSafeEqual(expected, actual);
 };
 export const automaticJobsRouter = Router();
+automaticJobsRouter.post("/internal/jobs/deadline-reminders", asyncHandler(async (request, response) => {
+    if (!env.CRON_SECRET) {
+        throw new AppError("CRON_SECRET is not configured.", 503);
+    }
+    if (!hasValidCronSecret(extractCronSecret(request))) {
+        throw new AppError("Invalid cron credentials.", 401);
+    }
+    sendSuccess(response, await deadlineReminderService.run({
+        mode: "SCHEDULED",
+        triggeredBy: "CRON",
+    }));
+}));
 automaticJobsRouter.post("/internal/jobs/deadline-monitor", asyncHandler(async (request, response) => {
     if (!env.CRON_SECRET) {
         throw new AppError("CRON_SECRET is not configured.", 503);
@@ -75,8 +110,10 @@ automaticJobsRouter.post("/internal/jobs/deadline-monitor", asyncHandler(async (
     if (!hasValidCronSecret(extractCronSecret(request))) {
         throw new AppError("Invalid cron credentials.", 401);
     }
-    const result = await deadlineMonitorService.run({ triggeredBy: "CRON" });
-    sendSuccess(response, result);
+    sendSuccess(response, await deadlineReminderService.run({
+        mode: "SCHEDULED",
+        triggeredBy: "CRON",
+    }));
 }));
 automaticJobsRouter.post("/internal/jobs/workflow-timers", asyncHandler(async (request, response) => {
     if (!env.CRON_SECRET) {
@@ -87,20 +124,80 @@ automaticJobsRouter.post("/internal/jobs/workflow-timers", asyncHandler(async (r
     }
     sendSuccess(response, await workflowTimerService.run({ triggeredBy: "CRON" }));
 }));
+automaticJobsRouter.get("/automatic-jobs/deadline-reminders/config", requireSystemOperator, asyncHandler(async (_request, response) => {
+    sendSuccess(response, await deadlineReminderService.getConfiguration());
+}));
+automaticJobsRouter.patch("/automatic-jobs/deadline-reminders/policies/:role", requireSystemOperator, asyncHandler(async (request, response) => {
+    const role = deadlineReminderRoleSchema.parse(request.params.role);
+    const payload = deadlineReminderPolicySchema.parse(request.body);
+    const userId = getUserId(request);
+    const result = await deadlineReminderService.updatePolicy(role, payload);
+    await auditLogService.create({
+        entityId: role,
+        entityType: "deadline_reminder_policy",
+        newValues: result.current,
+        oldValues: result.previous,
+        userId,
+    });
+    sendSuccess(response, result.current);
+}));
+automaticJobsRouter.post("/automatic-jobs/deadline-reminders/preview", requireSystemOperator, asyncHandler(async (request, response) => {
+    const payload = deadlineReminderPreviewSchema.parse(request.body);
+    sendSuccess(response, await deadlineReminderService.preview(payload.cutoffDateKey
+        ? { cutoffDateKey: payload.cutoffDateKey, role: payload.role }
+        : { role: payload.role }));
+}));
+automaticJobsRouter.post("/automatic-jobs/deadline-reminders/run", requireSystemOperator, asyncHandler(async (request, response) => {
+    const payload = deadlineReminderRunSchema.parse(request.body ?? {});
+    const userId = getUserId(request);
+    const result = await deadlineReminderService.run({
+        mode: "MANUAL",
+        triggeredBy: "USER",
+        triggeredByUserId: userId,
+        ...(payload.cutoffDateKey
+            ? { cutoffDateKey: payload.cutoffDateKey }
+            : {}),
+        ...(payload.role ? { role: payload.role } : {}),
+    });
+    await auditLogService.create({
+        entityId: result.jobName,
+        entityType: "scheduled_job_execution",
+        newValues: {
+            lockSkipped: result.lockSkipped,
+            mode: "MANUAL",
+            role: payload.role ?? null,
+            status: result.status,
+        },
+        userId,
+    });
+    sendSuccess(response, result);
+}));
+automaticJobsRouter.get("/automatic-jobs/deadline-reminders/executions", requireSystemOperator, asyncHandler(async (request, response) => {
+    const pagination = paginationSchema.parse({
+        page: getQueryValue(request.query.page),
+        perPage: getQueryValue(request.query.perPage),
+    });
+    const result = await deadlineReminderService.listExecutions(pagination.page, pagination.perPage);
+    sendPaginated(response, result.data, result.pagination);
+}));
+automaticJobsRouter.get("/automatic-jobs/deadline-reminders/latest", requireSystemOperator, asyncHandler(async (_request, response) => {
+    sendSuccess(response, await deadlineReminderService.getLatestExecution());
+}));
 automaticJobsRouter.get("/automatic-jobs/executions", requireSystemOperator, asyncHandler(async (request, response) => {
     const pagination = paginationSchema.parse({
         page: getQueryValue(request.query.page),
         perPage: getQueryValue(request.query.perPage),
     });
-    const result = await deadlineMonitorService.listExecutions(pagination.page, pagination.perPage);
+    const result = await deadlineReminderService.listExecutions(pagination.page, pagination.perPage);
     sendPaginated(response, result.data, result.pagination);
 }));
 automaticJobsRouter.get("/automatic-jobs/latest", requireSystemOperator, asyncHandler(async (_request, response) => {
-    sendSuccess(response, await deadlineMonitorService.getLatestExecution());
+    sendSuccess(response, await deadlineReminderService.getLatestExecution());
 }));
 automaticJobsRouter.post("/automatic-jobs/deadline-monitor/run", requireSystemOperator, asyncHandler(async (request, response) => {
     const userId = getUserId(request);
-    const result = await deadlineMonitorService.run({
+    const result = await deadlineReminderService.run({
+        mode: "MANUAL",
         triggeredBy: "USER",
         triggeredByUserId: userId,
     });

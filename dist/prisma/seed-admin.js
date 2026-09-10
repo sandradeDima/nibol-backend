@@ -2,12 +2,12 @@ import "dotenv/config";
 import bcrypt from "bcryptjs";
 import { v5 as uuidv5 } from "uuid";
 import { getAdminSeedIds, resolveAdminSeedConfigs, SEED_NAMESPACE, } from "./admin-seed-config.js";
-import { ADMIN_ROLE_NAME, ALL_PERMISSION_NAMES, } from "../src/permissions/definitions.js";
+import { ADMIN_ROLE_CODE, ADMIN_ROLE_NAME, ALL_PERMISSION_NAMES, } from "../src/permissions/definitions.js";
 import { logger } from "../src/utils/logger.js";
 import { prisma } from "../src/utils/prisma.js";
 const adminSeeds = resolveAdminSeedConfigs(process.env);
 const ids = {
-    adminRole: uuidv5("role:admin", SEED_NAMESPACE),
+    adminRole: uuidv5(`role:${ADMIN_ROLE_CODE}`, SEED_NAMESPACE),
 };
 const adminPermissions = ALL_PERMISSION_NAMES.map((name) => ({
     description: `${name} permission.`,
@@ -24,18 +24,21 @@ const recreateAdmin = async () => {
     const summary = await prisma.$transaction(async (tx) => {
         const role = await tx.role.upsert({
             create: {
+                code: ADMIN_ROLE_CODE,
                 description: "Full access to the application.",
                 id: ids.adminRole,
                 name: ADMIN_ROLE_NAME,
             },
             update: {
+                code: ADMIN_ROLE_CODE,
                 deletedAt: null,
                 description: "Full access to the application.",
             },
             where: {
-                name: ADMIN_ROLE_NAME,
+                code: ADMIN_ROLE_CODE,
             },
         });
+        await tx.rolePermission.deleteMany({ where: { roleId: role.id } });
         for (const permission of adminPermissions) {
             await tx.permission.upsert({
                 create: {
@@ -51,18 +54,11 @@ const recreateAdmin = async () => {
                     name: permission.name,
                 },
             });
-            await tx.rolePermission.upsert({
-                create: {
+            await tx.rolePermission.create({
+                data: {
                     id: uuidv5(`role-permission:${role.id}:${permission.id}`, SEED_NAMESPACE),
                     permissionId: permission.id,
                     roleId: role.id,
-                },
-                update: {},
-                where: {
-                    roleId_permissionId: {
-                        permissionId: permission.id,
-                        roleId: role.id,
-                    },
                 },
             });
         }
@@ -131,18 +127,12 @@ const recreateAdmin = async () => {
                     },
                 });
             }
-            await tx.userRole.upsert({
-                create: {
+            await tx.userRole.deleteMany({ where: { userId: user.id } });
+            await tx.userRole.create({
+                data: {
                     id: uuidv5(`user-role:${user.id}:${role.id}`, SEED_NAMESPACE),
                     roleId: role.id,
                     userId: user.id,
-                },
-                update: {},
-                where: {
-                    userId_roleId: {
-                        roleId: role.id,
-                        userId: user.id,
-                    },
                 },
             });
             admins.push({

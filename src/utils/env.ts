@@ -8,19 +8,24 @@ const envSchema = z.object({
   APP_NAME: z
     .string()
     .min(1)
-    .default("NIBOL | Sistema de Seguimiento de Riesgos"),
+    .default("NIBOL Bolivia | Seguimiento de Auditoría"),
   BETTER_AUTH_SECRET: z.string().min(32).default(DEVELOPMENT_AUTH_SECRET),
   BETTER_AUTH_URL: z.string().url().default("http://localhost:4000"),
   CRON_SECRET: z.string().min(32).optional(),
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
+  DEADLINE_REMINDER_INTERVAL_MS: z.coerce
+    .number()
+    .int()
+    .min(60_000)
+    .default(86_400_000),
   FRONTEND_URL: z.string().url().default("http://localhost:3000"),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   NODE_ENV: z
     .enum(["development", "test", "production"])
     .default("development"),
   PORT: z.coerce.number().int().positive().default(4000),
-  SMTP_FROM_EMAIL: z.email().default("no-reply@example.com"),
-  SMTP_FROM_NAME: z.string().min(1).default("NIBOL"),
+  SMTP_FROM_EMAIL: z.email().default("no-reply@nibol.com.bo"),
+  SMTP_FROM_NAME: z.string().min(1).default("NIBOL Bolivia"),
   SMTP_HOST: z.string().min(1).optional(),
   SMTP_PASSWORD: z.string().min(1).optional(),
   SMTP_PASS: z.string().min(1).optional(),

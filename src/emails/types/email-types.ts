@@ -48,6 +48,56 @@ export type AutomationNotificationEmailVariables = {
   userName: string;
 };
 
+export type ObservationAssignmentEmailVariables = {
+  appName?: string;
+  maxPeriods: string;
+  platformLink: string;
+  reports: Array<{
+    areaNames: string[];
+    observations: Array<{
+      area?: string;
+      code?: string;
+      description: string;
+      dueDate?: string;
+      number: number;
+      risk: string;
+      title: string;
+    }>;
+    reportNumber: string;
+    reportTitle: string;
+  }>;
+  total: number;
+  userName: string;
+};
+
+export type DeadlineReminderEmailVariables = {
+  appName?: string;
+  cutoffDate: string;
+  dueToday: number;
+  overdue: number;
+  plans: Array<{
+    area: string;
+    deadlineStatus: string;
+    description: string;
+    effectiveDueDate: string;
+    executor?: string;
+    officialProgress: string;
+    officialProgressPercent: number;
+    observation: string;
+    plan: string;
+    reprogrammed: boolean;
+    report: string;
+    risk: string;
+    bucket: "OVERDUE" | "DUE_TODAY" | "UPCOMING";
+  }>;
+  platformLink: string;
+  reprogrammed: number;
+  roleCadence: string;
+  subject: string;
+  upcoming: number;
+  userName: string;
+};
+
 export type WelcomeEmailVariables = {
   appName?: string;
   loginLink?: string;
@@ -56,6 +106,8 @@ export type WelcomeEmailVariables = {
 
 export interface EmailTemplateVariablesMap {
   automationNotification: AutomationNotificationEmailVariables;
+  deadlineReminder: DeadlineReminderEmailVariables;
+  observationAssignment: ObservationAssignmentEmailVariables;
   emailVerification: EmailVerificationEmailVariables;
   genericNotification: GenericNotificationEmailVariables;
   invitation: InvitationEmailVariables;

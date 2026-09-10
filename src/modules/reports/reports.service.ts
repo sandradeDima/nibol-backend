@@ -2,7 +2,13 @@
 
 import type { Prisma } from "../../../generated/prisma/client.js";
 
-import type { AuthorizationSummary } from "../../services/authorization-service.js";
+import {
+  buildActionPlanScopeWhere,
+  buildEvidenceScopeWhere,
+  buildExtensionRequestScopeWhere,
+  buildObservationAreaScopeWhere,
+  type AuthorizationSummary,
+} from "../../services/authorization-service.js";
 import { prisma } from "../../utils/prisma.js";
 import {
   buildObservationAttentionWhere,
@@ -11,6 +17,13 @@ import {
 } from "../observations/observation-completeness.service.js";
 import {
   buildObservationScopeWhere,
+  getActionPlanDeadlineStatus,
+  getBusinessDateKey,
+  getDateOnlyKey,
+  getEffectiveActionPlanDueDate,
+  getOfficialActionPlanProgress,
+  isApprovedDeadlineExtension,
+  OFFICIAL_ACTION_PLAN_STATUSES,
   getDaysBetween,
   getObservationStatusGroup,
   getRiskGroupLabel,
@@ -23,8 +36,10 @@ import {
 import type {
   AuditReportData,
   ReportAreaSummary,
+  ReportActionPlanRow,
   ReportChartItem,
   ReportDashboardData,
+  ReportOptions,
   ReportObservationRow,
   ReportPreviewData,
 } from "./reports.types.js";
@@ -47,6 +62,7 @@ const reportsPrisma = prisma as typeof prisma & {
   progressEvaluation: any;
   remediationPlan: any;
   systemParameter: any;
+  setting: any;
   user: any;
   workflowInstance: any;
   workflowTransitionLog: any;
@@ -111,6 +127,14 @@ const observationReportSelect = {
   title: true,
   updatedAt: true,
 } as const;
+
+const buildObservationReportSelect = (access: AuthorizationSummary) => ({
+  ...observationReportSelect,
+  areaAssignments: {
+    ...observationReportSelect.areaAssignments,
+    where: buildObservationAreaScopeWhere(access),
+  },
+});
 
 const dateRange = (
   dateFrom?: string,
@@ -244,6 +268,778 @@ const getConfiguredDueSoonDays = async (): Promise<number> => {
   }
 };
 
+const getReportingTimeZone = async (): Promise<string> => {
+  try {
+    const setting = await reportsPrisma.setting.findFirst({
+      select: { timezone: true },
+      where: { deletedAt: null },
+    });
+    return setting?.timezone || "UTC";
+  } catch {
+    return "UTC";
+  }
+};
+
+const approvedExtensionWhere = {
+  deletedAt: null,
+  status: "MANAGER_APPROVED" as const,
+};
+
+const effectiveDueDateWhere = (
+  range: Prisma.DateTimeFilter,
+): Prisma.ActionPlanWhereInput => ({
+  OR: [
+    {
+      currentDueDate: range,
+      deadlineExtensionRequests: { none: approvedExtensionWhere },
+    },
+    {
+      deadlineExtensionRequests: {
+        some: { ...approvedExtensionWhere, proposedDueDate: range },
+      },
+    },
+  ],
+});
+
+const actionPlanReportSelect = {
+  completedAt: true,
+  createdAt: true,
+  currentDueDate: true,
+  deadlineExtensionRequests: {
+    orderBy: { updatedAt: "desc" },
+    select: {
+      finalApprovedAt: true,
+      proposedDueDate: true,
+      status: true,
+    },
+    where: { deletedAt: null },
+  },
+  description: true,
+  id: true,
+  originalDueDate: true,
+  observation: {
+    select: {
+      auditReport: {
+        select: { id: true, reportNumber: true, reportDate: true, title: true },
+      },
+      id: true,
+      observationNumber: true,
+      riskLevel: {
+        select: {
+          colorToken: true,
+          id: true,
+          key: true,
+          name: true,
+        },
+      },
+      title: true,
+    },
+  },
+  observationArea: {
+    select: {
+      area: { select: areaSummarySelect },
+      areaResponsible: { select: userSummarySelect },
+      processOwner: { select: userSummarySelect },
+    },
+  },
+  progressEvaluations: {
+    orderBy: { submittedAt: "desc" },
+    select: { reportedProgressPercent: true },
+    take: 1,
+    where: { deletedAt: null },
+  },
+  progressPercent: true,
+  responsibleUser: { select: userSummarySelect },
+  status: true,
+  title: true,
+  updatedAt: true,
+} as const;
+
+const toDateAtUtc = (value: string): Date => new Date(`${value}T00:00:00.000Z`);
+
+const actionPlanDateFilter = (
+  periodField: ReportFilters["periodField"],
+  dateFrom?: string,
+  dateTo?: string,
+): Record<string, unknown> | undefined => {
+  const period = dateRange(dateFrom, dateTo);
+  if (!period) return undefined;
+  if (periodField === "reportDate") {
+    return { observation: { auditReport: { reportDate: period } } };
+  }
+  return { [periodField ?? "createdAt"]: period };
+};
+
+const buildActionPlanWhere = (
+  filters: ReportFilters,
+  access: AuthorizationSummary,
+  now = new Date(),
+  timeZone = "UTC",
+): Prisma.ActionPlanWhereInput => {
+  const today = toDateAtUtc(getBusinessDateKey(now, timeZone));
+  const conditions: Prisma.ActionPlanWhereInput[] = [
+    buildActionPlanScopeWhere(access),
+    { observation: { deletedAt: null } },
+  ];
+  const period =
+    filters.periodField === "currentDueDate"
+      ? undefined
+      : actionPlanDateFilter(
+          filters.periodField,
+          filters.dateFrom,
+          filters.dateTo,
+        );
+
+  if (period) conditions.push(period as Prisma.ActionPlanWhereInput);
+  const effectivePeriod =
+    filters.periodField === "currentDueDate"
+      ? dateRange(filters.dateFrom, filters.dateTo)
+      : undefined;
+  if (effectivePeriod) conditions.push(effectiveDueDateWhere(effectivePeriod));
+  if (filters.auditReportId)
+    conditions.push({ observation: { auditReportId: filters.auditReportId } });
+  if (filters.areaId)
+    conditions.push({ observationArea: { areaId: filters.areaId } });
+  if (filters.processOwnerId)
+    conditions.push({
+      observationArea: { processOwnerUserId: filters.processOwnerId },
+    });
+  if (filters.executorId || filters.responsibleUserId) {
+    const executorId = filters.executorId ?? filters.responsibleUserId;
+    if (executorId) conditions.push({ responsibleUserId: executorId });
+  }
+  if (filters.riskLevelId)
+    conditions.push({ observation: { riskLevelId: filters.riskLevelId } });
+  if (filters.statusId)
+    conditions.push({ observation: { statusId: filters.statusId } });
+  if (filters.progressStatus)
+    conditions.push({ status: filters.progressStatus });
+  if (filters.activeOnly) conditions.push({ status: { not: "CONCLUDED" } });
+  if (filters.progressMin !== undefined)
+    conditions.push({ progressPercent: { gte: filters.progressMin } });
+  if (filters.progressMax !== undefined)
+    conditions.push({ progressPercent: { lte: filters.progressMax } });
+  if (filters.hasEvidence !== undefined) {
+    conditions.push(
+      filters.hasEvidence
+        ? { evidenceFiles: { some: { deletedAt: null } } }
+        : { evidenceFiles: { none: { deletedAt: null } } },
+    );
+  }
+  if (filters.hasExtension !== undefined) {
+    conditions.push(
+      filters.hasExtension
+        ? { deadlineExtensionRequests: { some: { deletedAt: null } } }
+        : { deadlineExtensionRequests: { none: { deletedAt: null } } },
+    );
+  }
+  if (filters.reprogrammed !== undefined) {
+    conditions.push(
+      filters.reprogrammed
+        ? { deadlineExtensionRequests: { some: approvedExtensionWhere } }
+        : {
+            deadlineExtensionRequests: {
+              none: approvedExtensionWhere,
+            },
+          },
+    );
+  }
+  if (filters.search) {
+    conditions.push({
+      OR: [
+        { title: { contains: filters.search } },
+        { description: { contains: filters.search } },
+        { observation: { title: { contains: filters.search } } },
+        {
+          observation: {
+            auditReport: { reportNumber: { contains: filters.search } },
+          },
+        },
+        { observationArea: { area: { name: { contains: filters.search } } } },
+        {
+          observationArea: {
+            processOwner: { name: { contains: filters.search } },
+          },
+        },
+        { responsibleUser: { name: { contains: filters.search } } },
+      ],
+    });
+  }
+
+  const deadlineStatus =
+    filters.deadlineStatus ??
+    (filters.overdue === true ? "VENCIDO" : undefined);
+  if (deadlineStatus === "VENCIDO") {
+    conditions.push({
+      AND: [
+        { status: { not: "CONCLUDED" } },
+        effectiveDueDateWhere({ lt: today }),
+      ],
+    });
+  } else if (deadlineStatus === "VIGENTE" || filters.overdue === false) {
+    conditions.push({
+      OR: [
+        { status: "CONCLUDED" },
+        {
+          AND: [
+            { status: { not: "CONCLUDED" } },
+            effectiveDueDateWhere({ gte: today }),
+          ],
+        },
+      ],
+    });
+  }
+  if (filters.dueSoon) {
+    const end = new Date(today);
+    end.setUTCDate(end.getUTCDate() + (filters.dueSoonDays ?? 7));
+    conditions.push({
+      AND: [
+        { status: { not: "CONCLUDED" } },
+        effectiveDueDateWhere({ gte: today, lte: end }),
+      ],
+    });
+  }
+  if (filters.hasPlan === false) conditions.push({ id: "__no_action_plan__" });
+
+  return { AND: conditions };
+};
+
+const mapActionPlanRow = (
+  record: any,
+  now: Date,
+  timeZone: string,
+): ReportActionPlanRow => {
+  const officialProgress = getOfficialActionPlanProgress(record.status);
+  const effectiveDueDate = getEffectiveActionPlanDueDate(record);
+  const approvedExtension = record.deadlineExtensionRequests?.find(
+    isApprovedDeadlineExtension,
+  );
+  const observation = record.observation;
+  const observationCode = observationDisplayCode(observation);
+  return {
+    actionPlanId: record.id,
+    area: record.observationArea.area,
+    areaResponsible: record.observationArea.areaResponsible,
+    completedAt: record.completedAt?.toISOString() ?? null,
+    createdAt: record.createdAt.toISOString(),
+    deadlineStatus: getActionPlanDeadlineStatus(record, now, timeZone),
+    description: record.description,
+    effectiveDueDate: effectiveDueDate.toISOString(),
+    executor: record.responsibleUser,
+    href: `/planes-accion/${record.id}`,
+    auditReportId: observation.auditReport.id,
+    observation: {
+      code: observationCode,
+      id: observation.id,
+      title: observation.title,
+    },
+    observationId: observation.id,
+    officialProgress,
+    originalDueDate: record.originalDueDate.toISOString(),
+    processOwner: record.observationArea.processOwner,
+    progressPercent: officialProgress.percent,
+    reportedProgressPercent:
+      record.progressEvaluations?.[0]?.reportedProgressPercent ?? null,
+    reprogrammed: Boolean(approvedExtension),
+    riskLevel: observation.riskLevel,
+    title: record.title || record.description,
+    updatedAt: record.updatedAt.toISOString(),
+  };
+};
+
+const loadActionPlanRows = async (
+  filters: ReportFilters,
+  access: AuthorizationSummary,
+): Promise<{
+  dueSoonDays: number;
+  rows: ReportActionPlanRow[];
+  timeZone: string;
+}> => {
+  const dueSoonDays = filters.dueSoonDays ?? (await getConfiguredDueSoonDays());
+  const now = new Date();
+  const timeZone = await getReportingTimeZone();
+  const where = buildActionPlanWhere(
+    { ...filters, dueSoonDays },
+    access,
+    now,
+    timeZone,
+  );
+  // ponytail: one scoped read feeds KPIs/charts/rows; use DB groupBy only when measured scale requires it.
+  const records = await reportsPrisma.actionPlan.findMany({
+    orderBy: [{ currentDueDate: "asc" }, { updatedAt: "desc" }],
+    select: actionPlanReportSelect,
+    where,
+  });
+  return {
+    dueSoonDays,
+    rows: records.map((record: any) => mapActionPlanRow(record, now, timeZone)),
+    timeZone,
+  };
+};
+
+const distributionFromRows = (
+  rows: ReportActionPlanRow[],
+  getKey: (row: ReportActionPlanRow) => string,
+  getLabel: (row: ReportActionPlanRow) => string,
+  getHref?: (row: ReportActionPlanRow) => string | undefined,
+): ReportChartItem[] => {
+  const values = new Map<string, ReportChartItem>();
+  rows.forEach((row) => {
+    const key = getKey(row);
+    const href = getHref?.(row);
+    const current =
+      values.get(key) ??
+      ({
+        key,
+        label: getLabel(row),
+        value: 0,
+        ...(href ? { href } : {}),
+      } satisfies ReportChartItem);
+    current.value += 1;
+    values.set(key, current);
+  });
+  return [...values.values()].sort(
+    (left, right) =>
+      right.value - left.value || left.label.localeCompare(right.label, "es"),
+  );
+};
+
+const getActionPlanDashboard = async (
+  filters: ReportFilters,
+  access: AuthorizationSummary,
+): Promise<ReportDashboardData> => {
+  const loaded = await loadActionPlanRows(filters, access);
+  const { rows } = loaded;
+  const now = new Date();
+  const noIniciado = rows.filter(
+    (row) => row.officialProgress.key === "NOT_STARTED",
+  ).length;
+  const iniciado = rows.filter(
+    (row) => row.officialProgress.key === "STARTED",
+  ).length;
+  const conAvance = rows.filter(
+    (row) => row.officialProgress.key === "WITH_PROGRESS",
+  ).length;
+  const concluido = rows.filter(
+    (row) => row.officialProgress.key === "CONCLUDED",
+  ).length;
+  const vencidos = rows.filter(
+    (row) => row.deadlineStatus === "VENCIDO",
+  ).length;
+  const vigentes = rows.length - vencidos;
+  const reprogramados = rows.filter((row) => row.reprogrammed).length;
+  const dueSoon = rows.filter((row) => {
+    if (
+      row.officialProgress.key === "CONCLUDED" ||
+      row.deadlineStatus === "VENCIDO"
+    )
+      return false;
+    const today = getBusinessDateKey(now, loaded.timeZone);
+    const diff = getDaysBetween(
+      toDateAtUtc(today),
+      toDateAtUtc(getDateOnlyKey(new Date(row.effectiveDueDate))),
+    );
+    return diff <= loaded.dueSoonDays;
+  }).length;
+  const resolutionDays = rows.flatMap((row) =>
+    row.completedAt
+      ? [getDaysBetween(new Date(row.createdAt), new Date(row.completedAt))]
+      : [],
+  );
+  const compliantClosures = rows.filter(
+    (row) =>
+      row.completedAt &&
+      getDateOnlyKey(new Date(row.completedAt)) <=
+        getDateOnlyKey(new Date(row.effectiveDueDate)),
+  ).length;
+  const compliancePercent = concluido
+    ? Math.round((compliantClosures / concluido) * 100)
+    : 0;
+  const riskDistribution = distributionFromRows(
+    rows,
+    (row) => row.riskLevel.key,
+    (row) => row.riskLevel.name,
+    (row) =>
+      `/reportes?filter.riskLevelId=${encodeURIComponent(row.riskLevel.id)}`,
+  );
+  const progressDistribution = OFFICIAL_ACTION_PLAN_STATUSES.map((key) => {
+    const meta = getOfficialActionPlanProgress(key);
+    return {
+      key,
+      label: meta.label,
+      value: rows.filter((row) => row.officialProgress.key === key).length,
+    };
+  });
+  const deadlineDistribution = [
+    { key: "VIGENTE", label: "Vigentes", value: vigentes },
+    { key: "VENCIDO", label: "Vencidos", value: vencidos },
+  ];
+  const reprogrammedDistribution = [
+    { key: "SI", label: "Sí", value: reprogramados },
+    { key: "NO", label: "No", value: rows.length - reprogramados },
+  ];
+  const areaDistribution = distributionFromRows(
+    rows,
+    (row) => row.area.id,
+    (row) => row.area.name,
+    (row) => `/reportes?filter.areaId=${encodeURIComponent(row.area.id)}`,
+  );
+  const processOwnerDistribution = distributionFromRows(
+    rows,
+    (row) => row.processOwner?.id ?? "unassigned",
+    (row) => row.processOwner?.name ?? "Sin asignar",
+    (row) =>
+      row.processOwner
+        ? `/reportes?filter.processOwnerId=${encodeURIComponent(row.processOwner.id)}`
+        : undefined,
+  );
+  const executorDistribution = distributionFromRows(
+    rows,
+    (row) => row.executor?.id ?? "unassigned",
+    (row) => row.executor?.name ?? "Sin asignar",
+    (row) =>
+      row.executor
+        ? `/reportes?filter.executorId=${encodeURIComponent(row.executor.id)}`
+        : undefined,
+  );
+  const areaMap = new Map<string, ReportAreaSummary>();
+  rows.forEach((row) => {
+    const current = areaMap.get(row.area.id) ?? {
+      area: row.area,
+      averageResolutionDays: 0,
+      closed: 0,
+      compliancePercent: 0,
+      dueSoon: 0,
+      href: `/reportes?filter.areaId=${encodeURIComponent(row.area.id)}`,
+      inProcess: 0,
+      open: 0,
+      overdue: 0,
+      total: 0,
+    };
+    current.total += 1;
+    if (row.officialProgress.key === "CONCLUDED") current.closed += 1;
+    else current.open += 1;
+    if (["STARTED", "WITH_PROGRESS"].includes(row.officialProgress.key))
+      current.inProcess += 1;
+    if (row.deadlineStatus === "VENCIDO") current.overdue += 1;
+    areaMap.set(row.area.id, current);
+  });
+  const areaSummary = [...areaMap.values()];
+  const monthRows = rows.reduce((map, row) => {
+    const key = getMonthKey(new Date(row.createdAt));
+    const current = map.get(key) ?? { closed: 0, created: 0 };
+    current.created += 1;
+    if (row.completedAt) current.closed += 1;
+    map.set(key, current);
+    return map;
+  }, new Map<string, { closed: number; created: number }>());
+  const months = getMonthRange(filters.dateFrom, filters.dateTo);
+  const trend = months.map((month) => {
+    const monthKey = getMonthKey(month);
+    const value = monthRows.get(monthKey) ?? { closed: 0, created: 0 };
+    return { ...value, label: getMonthLabel(month), monthKey };
+  });
+  const predominantRisk = riskDistribution[0]
+    ? {
+        count: riskDistribution[0].value,
+        key: riskDistribution[0].key,
+        label: riskDistribution[0].label,
+      }
+    : null;
+  const insights = rows.length
+    ? vencidos
+      ? [
+          `${vencidos} plan${vencidos === 1 ? "" : "es"} de acción requiere${vencidos === 1 ? "" : "n"} atención por vencimiento.`,
+        ]
+      : [
+          "No se identificaron planes de acción vencidos con los filtros seleccionados.",
+        ]
+    : [];
+  return {
+    areaSummary,
+    charts: {
+      areaDistribution,
+      areaPerformance: areaSummary.map((area) => ({
+        compliancePercent: area.compliancePercent,
+        href: area.href,
+        key: area.area.id,
+        label: area.area.name,
+        value: area.total,
+      })),
+      currentVsOverdue: deadlineDistribution,
+      deadlineDistribution,
+      executorDistribution,
+      processOwnerDistribution,
+      progressDistribution,
+      reprogrammedDistribution,
+      riskDistribution,
+      statusDistribution: progressDistribution,
+      trend,
+    },
+    dueSoonDays: loaded.dueSoonDays,
+    generatedAt: new Date().toISOString(),
+    insights,
+    rows,
+    summary: {
+      averageResolutionDays: resolutionDays.length
+        ? Math.round(
+            resolutionDays.reduce((sum, value) => sum + value, 0) /
+              resolutionDays.length,
+          )
+        : 0,
+      conAvance,
+      concluido,
+      closed: concluido,
+      compliancePercent,
+      dueSoon,
+      iniciado,
+      inProcess: iniciado + conAvance,
+      noIniciado,
+      open: rows.length - concluido,
+      overdue: vencidos,
+      predominantRisk,
+      reprogramados,
+      total: rows.length,
+      vencidos,
+      vigentes,
+    },
+  };
+};
+
+const EMPTY_REPORT_FILTERS: ReportFilters = {
+  dueSoonDays: REPORT_DEFAULT_DUE_SOON_DAYS,
+  periodField: "createdAt",
+  search: "",
+};
+
+const getActionPlanRows = async (
+  query: ReportQuery,
+  access: AuthorizationSummary,
+): Promise<{ data: ReportActionPlanRow[]; total: number }> => {
+  const dueSoonDays = query.dueSoonDays ?? (await getConfiguredDueSoonDays());
+  const now = new Date();
+  const timeZone = await getReportingTimeZone();
+  const where = buildActionPlanWhere(
+    { ...query, dueSoonDays },
+    access,
+    now,
+    timeZone,
+  );
+  const [total, records] = await reportsPrisma.$transaction([
+    reportsPrisma.actionPlan.count({ where }),
+    reportsPrisma.actionPlan.findMany({
+      orderBy: [{ currentDueDate: "asc" }, { updatedAt: "desc" }],
+      select: actionPlanReportSelect,
+      skip: (query.page - 1) * query.perPage,
+      take: query.perPage,
+      where,
+    }),
+  ]);
+  return {
+    data: records.map((record: any) => mapActionPlanRow(record, now, timeZone)),
+    total,
+  };
+};
+
+const toActionPlanFlatRow = (
+  row: ReportActionPlanRow,
+): Record<string, unknown> => ({
+  Área: row.area.name,
+  "Avance oficial": `${row.officialProgress.percent}%`,
+  "Avance reportado":
+    row.reportedProgressPercent === null
+      ? "—"
+      : `${row.reportedProgressPercent}%`,
+  "Dueño del proceso": row.processOwner?.name ?? "Sin asignar",
+  Ejecutor: row.executor?.name ?? "Sin asignar",
+  "Estado de avance": row.officialProgress.label,
+  "Estado de plazo": row.deadlineStatus === "VENCIDO" ? "Vencido" : "Vigente",
+  "Fecha actual": row.effectiveDueDate,
+  "Fecha original": row.originalDueDate,
+  Informe: row.observation.code.split(" / ")[0],
+  "Nivel de riesgo": row.riskLevel.name,
+  Observación: `${row.observation.code} · ${row.observation.title}`,
+  Plan: row.title,
+  Reprogramado: row.reprogrammed ? "Sí" : "No",
+});
+
+const getActionPlanReportRows = (
+  query: ReportPreviewQuery,
+  dashboard: ReportDashboardData,
+): {
+  columns: string[];
+  rows: Array<Record<string, unknown>>;
+  total: number;
+} => {
+  const rows = dashboard.rows.map(toActionPlanFlatRow);
+  const columns = [
+    "Informe",
+    "Observación",
+    "Plan",
+    "Área",
+    "Nivel de riesgo",
+    "Dueño del proceso",
+    "Ejecutor",
+    "Estado de avance",
+    "Avance oficial",
+    "Avance reportado",
+    "Fecha original",
+    "Fecha actual",
+    "Estado de plazo",
+    "Reprogramado",
+  ];
+  if (query.type === "AREA_COMPLIANCE") {
+    return {
+      columns: [
+        "Área",
+        "Total de planes",
+        "No iniciados",
+        "Iniciados",
+        "Con avance",
+        "Concluidos",
+        "Vencidos",
+      ],
+      rows: dashboard.areaSummary.map((area) => {
+        const areaRows = dashboard.rows.filter(
+          (row) => row.area.id === area.area.id,
+        );
+        return {
+          Área: area.area.name,
+          "Con avance": areaRows.filter(
+            (row) => row.officialProgress.key === "WITH_PROGRESS",
+          ).length,
+          Concluidos: areaRows.filter(
+            (row) => row.officialProgress.key === "CONCLUDED",
+          ).length,
+          Iniciados: areaRows.filter(
+            (row) => row.officialProgress.key === "STARTED",
+          ).length,
+          "No iniciados": areaRows.filter(
+            (row) => row.officialProgress.key === "NOT_STARTED",
+          ).length,
+          "Total de planes": areaRows.length,
+          Vencidos: areaRows.filter((row) => row.deadlineStatus === "VENCIDO")
+            .length,
+        };
+      }),
+      total: dashboard.areaSummary.length,
+    };
+  }
+  if (query.type === "RESPONSIBLES") {
+    const groups = distributionFromRows(
+      dashboard.rows,
+      (row) => row.executor?.id ?? "unassigned",
+      (row) => row.executor?.name ?? "Sin asignar",
+    );
+    return {
+      columns: [
+        "Ejecutor",
+        "Total de planes",
+        "Vigentes",
+        "Vencidos",
+        "Reprogramados",
+      ],
+      rows: groups.map((group) => ({
+        Ejecutor: group.label,
+        Reprogramados: dashboard.rows.filter(
+          (row) =>
+            (row.executor?.name ?? "Sin asignar") === group.label &&
+            row.reprogrammed,
+        ).length,
+        "Total de planes": group.value,
+        Vencidos: dashboard.rows.filter(
+          (row) =>
+            (row.executor?.name ?? "Sin asignar") === group.label &&
+            row.deadlineStatus === "VENCIDO",
+        ).length,
+        Vigentes: dashboard.rows.filter(
+          (row) =>
+            (row.executor?.name ?? "Sin asignar") === group.label &&
+            row.deadlineStatus === "VIGENTE",
+        ).length,
+      })),
+      total: groups.length,
+    };
+  }
+  if (query.type === "RISKS") {
+    const groups = distributionFromRows(
+      dashboard.rows,
+      (row) => row.riskLevel.key,
+      (row) => row.riskLevel.name,
+    );
+    return {
+      columns: [
+        "Nivel de riesgo",
+        "Total de planes",
+        "Vigentes",
+        "Vencidos",
+        "Reprogramados",
+      ],
+      rows: groups.map((group) => ({
+        "Nivel de riesgo": group.label,
+        Reprogramados: dashboard.rows.filter(
+          (row) => row.riskLevel.name === group.label && row.reprogrammed,
+        ).length,
+        "Total de planes": group.value,
+        Vencidos: dashboard.rows.filter(
+          (row) =>
+            row.riskLevel.name === group.label &&
+            row.deadlineStatus === "VENCIDO",
+        ).length,
+        Vigentes: dashboard.rows.filter(
+          (row) =>
+            row.riskLevel.name === group.label &&
+            row.deadlineStatus === "VIGENTE",
+        ).length,
+      })),
+      total: groups.length,
+    };
+  }
+  return { columns, rows, total: rows.length };
+};
+
+const getReportOptions = async (
+  access: AuthorizationSummary,
+): Promise<ReportOptions> => {
+  const [{ rows }, riskLevels] = await Promise.all([
+    loadActionPlanRows(EMPTY_REPORT_FILTERS, access),
+    reportsPrisma.riskLevel.findMany({
+      orderBy: [{ severityOrder: "asc" }, { name: "asc" }],
+      select: {
+        colorToken: true,
+        id: true,
+        key: true,
+        name: true,
+      },
+      where: { active: true, deletedAt: null },
+    }),
+  ]);
+  const unique = <T extends { id: string }>(items: T[]): T[] =>
+    [...new Map(items.map((item) => [item.id, item])).values()].sort((a, b) =>
+      JSON.stringify(a).localeCompare(JSON.stringify(b), "es"),
+    );
+  const auditReports = unique(
+    rows.map((row) => ({
+      id: row.auditReportId,
+      label: row.observation.code.split(" / ")[0]!,
+    })),
+  );
+  return {
+    areas: unique(rows.map((row) => row.area)),
+    auditReports,
+    executors: unique(
+      rows.flatMap((row) => (row.executor ? [row.executor] : [])),
+    ),
+    processOwners: unique(
+      rows.flatMap((row) => (row.processOwner ? [row.processOwner] : [])),
+    ),
+    progressStatuses: OFFICIAL_ACTION_PLAN_STATUSES.map((key) => ({
+      ...getOfficialActionPlanProgress(key),
+    })),
+    riskLevels,
+  };
+};
+
 const buildObservationActionInput = (
   observation: any,
 ): ObservationActionObservation => ({
@@ -322,7 +1118,7 @@ const getObservationRows = async (
     reportsPrisma.observation.count({ where }),
     reportsPrisma.observation.findMany({
       orderBy: [{ currentDueDate: "asc" }, { updatedAt: "desc" }],
-      select: observationReportSelect,
+      select: buildObservationReportSelect(access),
       skip: options?.limit ? 0 : (query.page - 1) * query.perPage,
       take: limit,
       where,
@@ -389,8 +1185,25 @@ const getMonthRange = (dateFrom?: string, dateTo?: string): Date[] => {
 const buildFilterLabelMap = (
   filters: ReportFilters,
 ): Record<string, string | number | boolean | null> => ({
-  Área: filters.areaId ?? "Todas",
-  Estado: filters.statusId ?? "Todos",
+  Área: filters.areaId ? "Área seleccionada" : "Todas",
+  "Dueño del proceso": filters.processOwnerId ? "Dueño seleccionado" : "Todos",
+  Ejecutor:
+    filters.executorId || filters.responsibleUserId
+      ? "Ejecutor seleccionado"
+      : "Todos",
+  "Estado de avance": filters.progressStatus
+    ? {
+        CONCLUDED: "Concluido",
+        NOT_STARTED: "No iniciado",
+        STARTED: "Iniciado",
+        WITH_PROGRESS: "Con avance",
+      }[filters.progressStatus]
+    : "Todos",
+  "Estado de plazo": filters.deadlineStatus
+    ? filters.deadlineStatus === "VENCIDO"
+      ? "Vencido"
+      : "Vigente"
+    : "Todos",
   Evidencia:
     filters.hasEvidence === undefined
       ? "Todas"
@@ -401,15 +1214,22 @@ const buildFilterLabelMap = (
     filters.dateFrom || filters.dateTo
       ? `${filters.dateFrom ?? "Inicio"} – ${filters.dateTo ?? "Hoy"}`
       : "Período actual",
-  Riesgo: filters.riskLevelId ?? "Todos",
-  Responsable: filters.responsibleUserId ?? "Todos",
-  Vencidas: filters.overdue ?? false,
+  Riesgo: filters.riskLevelId ? "Nivel seleccionado" : "Todos",
+  Reprogramado:
+    filters.reprogrammed === undefined
+      ? "Todos"
+      : filters.reprogrammed
+        ? "Sí"
+        : "No",
+  Informe: filters.auditReportId ? "Informe seleccionado" : "Todos",
 });
 
+// Legacy observation-grain builder retained for audit-only compatibility.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const getDashboard = async (
   filters: ReportFilters,
   access: AuthorizationSummary,
-): Promise<ReportDashboardData> => {
+): Promise<any> => {
   const dueSoonDays = filters.dueSoonDays || (await getConfiguredDueSoonDays());
   const normalizedFilters = { ...filters, dueSoonDays };
   const where = buildObservationWhere(normalizedFilters, access);
@@ -447,6 +1267,7 @@ const getDashboard = async (
       select: {
         areaAssignments: {
           select: { area: { select: areaSummarySelect }, areaId: true },
+          where: buildObservationAreaScopeWhere(access),
         },
         createdAt: true,
         currentDueDate: true,
@@ -727,6 +1548,8 @@ const toObservationFlatRow = (
   Riesgo: row.riskLevel.name,
 });
 
+// Legacy observation-grain export builder retained for audit-only compatibility.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const getReportRows = async (
   query: ReportPreviewQuery,
   access: AuthorizationSummary,
@@ -750,7 +1573,12 @@ const getReportRows = async (
           status: true,
           description: true,
         },
-        where: { deletedAt: null, observation: observationWhere },
+        where: {
+          AND: [
+            buildActionPlanScopeWhere(access),
+            { observation: observationWhere },
+          ],
+        },
       });
       return {
         columns: [
@@ -784,7 +1612,12 @@ const getReportRows = async (
           context: true,
           uploadedByUser: { select: userSummarySelect },
         },
-        where: { deletedAt: null, observation: observationWhere },
+        where: {
+          AND: [
+            buildEvidenceScopeWhere(access),
+            { observation: observationWhere },
+          ],
+        },
       });
       return {
         columns: [
@@ -825,10 +1658,14 @@ const getReportRows = async (
           updatedAt: true,
         },
         where: {
-          deletedAt: null,
-          OR: [
-            { observation: observationWhere },
-            { actionPlan: { observation: observationWhere } },
+          AND: [
+            buildExtensionRequestScopeWhere(access),
+            {
+              OR: [
+                { observation: observationWhere },
+                { actionPlan: { observation: observationWhere } },
+              ],
+            },
           ],
         },
       });
@@ -884,7 +1721,7 @@ const getReportRows = async (
       };
     case "RESPONSIBLES": {
       const observations = await reportsPrisma.observation.findMany({
-        select: observationReportSelect,
+        select: buildObservationReportSelect(access),
         where: observationWhere,
       });
       const groups = new Map<
@@ -1169,7 +2006,7 @@ const getAuditStructuredRows = async (
         context: true,
         uploadedByUser: { select: userSummarySelect },
       },
-      where: { ...common, deletedAt: null },
+      where: { ...common, ...buildEvidenceScopeWhere(access) },
     });
     return {
       columns: [
@@ -1222,10 +2059,14 @@ const getAuditStructuredRows = async (
         status: true,
       },
       where: {
-        deletedAt: null,
-        OR: [
-          { observation: observationWhere },
-          { actionPlan: { observation: observationWhere } },
+        AND: [
+          buildExtensionRequestScopeWhere(access),
+          {
+            OR: [
+              { observation: observationWhere },
+              { actionPlan: { observation: observationWhere } },
+            ],
+          },
         ],
       },
     });
@@ -1455,19 +2296,27 @@ export const reportsService = {
   buildObservationWhere,
 
   async getDashboard(filters: ReportFilters, access: AuthorizationSummary) {
-    return getDashboard(filters, access);
+    return getActionPlanDashboard(filters, access);
+  },
+
+  async getOptions(access: AuthorizationSummary) {
+    return getReportOptions(access);
+  },
+
+  async listActionPlans(query: ReportQuery, access: AuthorizationSummary) {
+    return getActionPlanRows(query, access);
   },
 
   async listObservations(query: ReportQuery, access: AuthorizationSummary) {
-    return getObservationRows(query, access);
+    return getActionPlanRows(query, access);
   },
 
   async getPreview(
     query: ReportPreviewQuery,
     access: AuthorizationSummary,
   ): Promise<ReportPreviewData> {
-    const dashboard = await getDashboard(query, access);
-    const report = await getReportRows(query, access, dashboard);
+    const dashboard = await getActionPlanDashboard(query, access);
+    const report = getActionPlanReportRows(query, dashboard);
     return {
       columns: report.columns,
       filters: buildFilterLabelMap(query),

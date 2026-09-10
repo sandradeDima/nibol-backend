@@ -1,0 +1,3 @@
+NIBOL QA evidence
+Evidencia inicial editable para el flujo QA.
+Report: NIBOL-QA-2026-001

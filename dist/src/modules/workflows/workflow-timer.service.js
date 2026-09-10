@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { NotificationDeliveryStatus, NotificationPriority, ScheduledJobExecutionStatus, } from "../../../generated/prisma/client.js";
 import { AppError } from "../../utils/app-error.js";
+import { ADMIN_ROLE_CODE } from "../../permissions/role-codes.js";
 import { logger } from "../../utils/logger.js";
 import { prisma } from "../../utils/prisma.js";
 import { env } from "../../utils/env.js";
@@ -296,7 +297,7 @@ const executeEscalation = async ({ configuration, context, db, instance, task, t
                 deletedAt: null,
                 isActive: true,
                 userRoles: {
-                    some: { role: { name: { in: ["Admin", "Sistemas", "Systems"] } } },
+                    some: { role: { code: ADMIN_ROLE_CODE } },
                 },
             },
         });

@@ -1,9 +1,9 @@
 import { renderBaseEmailLayout } from "../layouts/BaseEmailLayout.js";
-import { escapeHtml, greeting, joinTextBlocks } from "../utils.js";
+import { escapeHtml, emailSemanticBadgeStyle, greeting, joinTextBlocks, resolveEmailAppName, } from "../utils.js";
 export const automationNotificationEmailTemplate = {
     name: "automationNotification",
     render: ({ brand, variables }) => {
-        const appName = variables.appName?.trim() || brand.appName;
+        const appName = resolveEmailAppName(variables.appName ?? brand.appName);
         const details = [
             ["Código", variables.code],
             ["Área responsable", variables.areaName],
@@ -14,7 +14,7 @@ export const automationNotificationEmailTemplate = {
             .map(([label, value]) => `
           <tr>
             <td style="border-bottom: 1px solid #e7edf5; color: #617086; font-size: 12px; font-weight: 700; padding: 10px 12px 10px 0; text-transform: uppercase;">${escapeHtml(label)}</td>
-            <td style="border-bottom: 1px solid #e7edf5; color: #1b2940; font-size: 14px; font-weight: 600; padding: 10px 0;">${escapeHtml(value)}</td>
+            <td style="border-bottom: 1px solid #e7edf5; color: #1b2940; font-size: 14px; font-weight: 600; padding: 10px 0;">${label === "Estado actual" ? `<span style="${emailSemanticBadgeStyle(value)};border-radius:999px;display:inline-block;font-size:12px;font-weight:700;padding:4px 8px;">${escapeHtml(value)}</span>` : escapeHtml(value)}</td>
           </tr>
         `)
             .join("");

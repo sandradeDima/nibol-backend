@@ -194,7 +194,7 @@ export const auditReportsService = {
                                 where: { deletedAt: null },
                             },
                             id: true,
-                            riskLevel: { select: { key: true } },
+                            riskLevel: { select: { maxRemediationDays: true } },
                         },
                         where: { auditReportId: id, deletedAt: null },
                     });
@@ -202,7 +202,7 @@ export const auditReportsService = {
                         if (observation._count.actionPlans > 0 ||
                             observation.deadlineExtensionRequests.length > 0)
                             continue;
-                        const deadline = observationDeadlineService.calculate(input.reportDate, observation.riskLevel.key);
+                        const deadline = observationDeadlineService.calculate(input.reportDate, observation.riskLevel.maxRemediationDays);
                         await tx.observation.update({
                             data: { currentDueDate: deadline, originalDueDate: deadline },
                             where: { id: observation.id },

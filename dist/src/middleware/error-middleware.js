@@ -1,3 +1,4 @@
+import multer from "multer";
 import { ZodError } from "zod";
 import { AppError } from "../utils/app-error.js";
 import { logger } from "../utils/logger.js";
@@ -44,6 +45,15 @@ export const errorMiddleware = (error, _request, response, _next) => {
             statusCode: error.statusCode,
         });
         sendError(response, error.message, error.statusCode);
+        return;
+    }
+    if (error instanceof multer.MulterError) {
+        const message = error.code === "LIMIT_FILE_SIZE"
+            ? "El archivo supera el tamaño máximo permitido."
+            : error.code === "LIMIT_FILE_COUNT"
+                ? "Puede adjuntar hasta 10 archivos por carga."
+                : "No se pudo recibir el archivo. Intente nuevamente.";
+        sendError(response, message, 400);
         return;
     }
     logger.error("Unhandled application error.", {

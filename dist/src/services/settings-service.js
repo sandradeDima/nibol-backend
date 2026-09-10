@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { ADMIN_ROLE_NAME } from "../permissions/definitions.js";
+import { ADMIN_ROLE_CODE } from "../permissions/definitions.js";
 import { env } from "../utils/env.js";
 import { buildLogoUrl, logoUploadsDir } from "../utils/uploads.js";
 import { prisma } from "../utils/prisma.js";
@@ -32,7 +32,7 @@ const buildDefaultSnapshot = () => {
         senderEmail: env.SMTP_FROM_EMAIL,
         senderName: env.SMTP_FROM_NAME,
         supportEmail: env.SMTP_FROM_EMAIL,
-        timezone: "UTC",
+        timezone: "America/La_Paz",
         updatedAt: null,
     };
 };
@@ -85,7 +85,7 @@ const listActiveAdminUserIds = async (db) => {
         where: {
             role: {
                 deletedAt: null,
-                name: ADMIN_ROLE_NAME,
+                code: ADMIN_ROLE_CODE,
             },
             user: {
                 deletedAt: null,

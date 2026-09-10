@@ -15,6 +15,7 @@ import {
   createObservationSchema,
   listObservationsQuerySchema,
   observationIdParamSchema,
+  sendObservationsSchema,
   updateObservationSchema,
 } from "./observations.validators.js";
 
@@ -35,6 +36,98 @@ const observationId = (request: Request): string =>
   observationIdParamSchema.parse({ id: queryValue(request.params.id) }).id;
 
 export const observationsController = {
+  async sendObservations(request: Request, response: Response) {
+    const result = await observationsService.sendObservations(
+      sendObservationsSchema.parse(request.body).ids,
+      requireAccess(request),
+    );
+    const actor = getRequestLogActorContext(request);
+    await Promise.all([
+      auditLogService.create({
+        ...actor,
+        entityId: result.current[0]?.id ?? result.previous[0]?.id ?? "batch",
+        entityType: "OBSERVATION_BATCH",
+        newValues: { observationIds: result.current.map(({ id }) => id) },
+        oldValues: { observationIds: result.previous.map(({ id }) => id) },
+      }),
+      ...result.current.map((current) => {
+        const previous = result.previous.find(({ id }) => id === current.id);
+        return Promise.all([
+          activityLogService.logUserAction({
+            ...actor,
+            action: OBSERVATIONS_PERMISSIONS.send,
+            entityId: current.id,
+            entityType: OBSERVATIONS_ENTITY_TYPE,
+            metadata: {
+              identifier: current.displayCode,
+              summary: `Se distribuyó ${current.displayCode}.`,
+            },
+          }),
+          auditLogService.create({
+            ...actor,
+            entityId: current.id,
+            entityType: OBSERVATIONS_ENTITY_TYPE,
+            newValues: current,
+            oldValues: previous ?? null,
+          }),
+          entityActivityService.recordEntityChange({
+            action: "send",
+            activityType: "OBSERVATION_SENT",
+            actorUserId: actor.userId,
+            description: `Se distribuyó ${current.displayCode} a los involucrados.`,
+            entityId: current.id,
+            entityType: "OBSERVATION",
+            newData: current,
+            observationId: current.id,
+            previousData: previous ?? null,
+            targetUrl: `/observaciones/${current.id}`,
+            title: "Observación distribuida",
+          }),
+        ]);
+      }),
+    ]);
+    sendSuccess(response, { observations: result.current });
+  },
+  async send(request: Request, response: Response) {
+    const result = await observationsService.sendObservation(
+      observationId(request),
+      requireAccess(request),
+    );
+    const actor = getRequestLogActorContext(request);
+    await Promise.all([
+      activityLogService.logUserAction({
+        ...actor,
+        action: OBSERVATIONS_PERMISSIONS.send,
+        entityId: result.current.id,
+        entityType: OBSERVATIONS_ENTITY_TYPE,
+        metadata: {
+          identifier: result.current.displayCode,
+          summary: `Se distribuyó ${result.current.displayCode}.`,
+        },
+      }),
+      auditLogService.create({
+        ...actor,
+        entityId: result.current.id,
+        entityType: OBSERVATIONS_ENTITY_TYPE,
+        newValues: result.current,
+        oldValues: result.previous,
+      }),
+      entityActivityService.recordEntityChange({
+        action: "send",
+        activityType: "OBSERVATION_SENT",
+        actorUserId: actor.userId,
+        description: `Se distribuyó ${result.current.displayCode} a los involucrados.`,
+        entityId: result.current.id,
+        entityType: "OBSERVATION",
+        newData: result.current,
+        observationId: result.current.id,
+        previousData: result.previous,
+        targetUrl: `/observaciones/${result.current.id}`,
+        title: "Observación distribuida",
+      }),
+    ]);
+    sendSuccess(response, result.current);
+  },
   async close(request: Request, response: Response) {
     const access = requireAccess(request);
     const result = await observationsService.closeObservation(

@@ -55,15 +55,13 @@ export const ActionPlanStatus = {
 };
 export const ProgressEvaluationType = {
     ADVANCE: 'ADVANCE',
-    FINALIZATION: 'FINALIZATION',
-    CORRECTION: 'CORRECTION'
+    FINALIZATION: 'FINALIZATION'
 };
 export const ProgressEvaluationReviewStatus = {
     DRAFT: 'DRAFT',
     SENT_TO_AUDIT: 'SENT_TO_AUDIT',
     APPROVED: 'APPROVED',
-    RETURNED: 'RETURNED',
-    REJECTED: 'REJECTED'
+    RETURNED: 'RETURNED'
 };
 export const CommentVisibility = {
     INTERNAL_AUDIT: 'INTERNAL_AUDIT',
@@ -73,17 +71,13 @@ export const CommentVisibility = {
 export const ProgressReviewAction = {
     SENT: 'SENT',
     APPROVED: 'APPROVED',
-    RETURNED: 'RETURNED',
-    REJECTED: 'REJECTED'
+    RETURNED: 'RETURNED'
 };
 export const DeadlineExtensionStatus = {
     DRAFT: 'DRAFT',
     SENT_TO_MANAGER: 'SENT_TO_MANAGER',
     MANAGER_APPROVED: 'MANAGER_APPROVED',
     MANAGER_REJECTED: 'MANAGER_REJECTED',
-    SENT_TO_AUDIT: 'SENT_TO_AUDIT',
-    AUDIT_APPROVED: 'AUDIT_APPROVED',
-    AUDIT_REJECTED: 'AUDIT_REJECTED',
     CANCELLED: 'CANCELLED'
 };
 export const DeadlineExtensionTarget = {
@@ -95,6 +89,13 @@ export const EvidenceContext = {
     ACTION_PLAN: 'ACTION_PLAN',
     PROGRESS_EVALUATION: 'PROGRESS_EVALUATION',
     CLOSURE: 'CLOSURE'
+};
+export const EvidenceReviewStatus = {
+    DRAFT: 'DRAFT',
+    PENDING: 'PENDING',
+    APPROVED: 'APPROVED',
+    RETURNED: 'RETURNED',
+    REJECTED: 'REJECTED'
 };
 export const WorkflowDefinitionStatus = {
     DRAFT: 'DRAFT',
@@ -112,6 +113,7 @@ export const WorkflowNodeType = {
     START: 'START',
     STAGE: 'STAGE',
     APPROVAL: 'APPROVAL',
+    SUBFLOW: 'SUBFLOW',
     REJECTION: 'REJECTION',
     CONDITION: 'CONDITION',
     SLA: 'SLA',

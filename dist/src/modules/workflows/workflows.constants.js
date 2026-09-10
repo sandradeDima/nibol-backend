@@ -4,6 +4,7 @@ export const WORKFLOW_PROCESS_TYPE_VALUES = [
     "OBSERVATION_CLOSURE",
     "REMEDIATION_PLAN_APPROVAL",
     "EVIDENCE_REVIEW",
+    "OBSERVATION_LIFECYCLE",
     "SPECIAL_REQUEST",
 ];
 export const WORKFLOW_DEFINITION_STATUS_VALUES = [
@@ -22,6 +23,7 @@ export const WORKFLOW_NODE_TYPE_VALUES = [
     "START",
     "STAGE",
     "APPROVAL",
+    "SUBFLOW",
     "REJECTION",
     "CONDITION",
     "SLA",
@@ -50,6 +52,8 @@ export const WORKFLOW_CONDITION_FIELD_VALUES = [
     "daysOverdue",
     "hasEvidence",
     "evidenceCount",
+    "areaPlanRequired",
+    "allPlansValidated",
     "remediationPlanStatus",
     "requestType",
     "requestedExtensionDays",
@@ -140,7 +144,8 @@ export const WORKFLOW_PROCESS_TYPE_LABELS = {
     DEADLINE_EXTENSION: "Ampliación de plazo",
     EVIDENCE_REVIEW: "Revisión de evidencias",
     OBSERVATION_CLOSURE: "Cierre de observación",
-    REMEDIATION_PLAN_APPROVAL: "Aprobación de plan de remediación",
+    REMEDIATION_PLAN_APPROVAL: "Aprobación de plan de acción recomendado",
     SPECIAL_REQUEST: "Solicitud especial",
+    OBSERVATION_LIFECYCLE: "Ciclo completo de observaciones",
 };
 //# sourceMappingURL=workflows.constants.js.map

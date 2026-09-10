@@ -114,7 +114,11 @@ export const getAllowlistedRuntimeReference = (
     ? normalized.slice("custom.".length)
     : normalized;
   if (
-    ["recordOwnerUserId", "observationResponsibleUserId"].includes(customKey)
+    [
+      "areaResponsibleUserId",
+      "recordOwnerUserId",
+      "observationResponsibleUserId",
+    ].includes(customKey)
   ) {
     const customValue = context.custom[customKey];
     return typeof customValue === "string" && customValue.trim()
@@ -129,6 +133,8 @@ export const getSafeRuntimeContextSummary = (
   context: WorkflowRuntimeContext,
 ): Record<string, unknown> => ({
   areaId: context.areaId ?? null,
+  allPlansValidated: context.allPlansValidated ?? null,
+  areaPlanRequired: context.areaPlanRequired ?? null,
   currentNodeKey: context.currentNodeKey ?? null,
   daysOverdue: context.daysOverdue ?? null,
   dueDate: context.dueDate ?? null,

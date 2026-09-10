@@ -9,8 +9,10 @@ const issue = (code, message, node, severity) => ({
     nodeKey: node.nodeKey,
     severity,
 });
-const getDecision = (request, node, fallback) => {
-    const configured = request.nodeDecisions[node.nodeKey];
+const getDecision = (request, node, fallback, forceFallback = false) => {
+    const configured = forceFallback
+        ? undefined
+        : request.nodeDecisions[node.nodeKey];
     return configured
         ? { decision: configured, wasDefaulted: false }
         : { decision: fallback, wasDefaulted: true };
@@ -101,7 +103,7 @@ const selectRejectionTransition = (graph, node) => {
         outgoing[0] ??
         null);
 };
-const chooseNextTransition = (graph, node, request, context) => {
+const chooseNextTransition = (graph, node, request, context, repeatedDecisionNode) => {
     const configuration = node.configurationJson;
     const outgoing = getOutgoingTransitions(graph, node);
     switch (configuration.nodeType) {
@@ -117,7 +119,7 @@ const chooseNextTransition = (graph, node, request, context) => {
             };
         }
         case "APPROVAL": {
-            const selectedDecision = getDecision(request, node, "APPROVE");
+            const selectedDecision = getDecision(request, node, "APPROVE", repeatedDecisionNode);
             const normalized = selectedDecision.decision.toUpperCase();
             if (!configuration.allowedActions.includes(normalized)) {
                 return {
@@ -134,14 +136,18 @@ const chooseNextTransition = (graph, node, request, context) => {
                 selected: choice.transition,
                 selectedDecision: normalized,
                 warnings: selectedDecision.wasDefaulted
-                    ? ["Se aplicó APPROVE como decisión simulada predeterminada."]
+                    ? [
+                        repeatedDecisionNode
+                            ? "Se aplicó APPROVE después de un retorno controlado para modelar la nueva decisión humana."
+                            : "Se aplicó APPROVE como decisión simulada predeterminada.",
+                    ]
                     : choice.usedFallback
                         ? ["Se utilizó la salida DEFAULT para la decisión simulada."]
                         : [],
             };
         }
         case "STAGE": {
-            const selectedDecision = getDecision(request, node, "COMPLETE");
+            const selectedDecision = getDecision(request, node, "COMPLETE", repeatedDecisionNode);
             const normalized = selectedDecision.decision.toUpperCase();
             if (!configuration.allowedActions.includes(normalized)) {
                 return {
@@ -158,7 +164,11 @@ const chooseNextTransition = (graph, node, request, context) => {
                 selected: choice.transition,
                 selectedDecision: normalized,
                 warnings: selectedDecision.wasDefaulted
-                    ? ["Se aplicó COMPLETE como acción simulada predeterminada."]
+                    ? [
+                        repeatedDecisionNode
+                            ? "Se aplicó COMPLETE después de un retorno controlado para modelar la nueva acción humana."
+                            : "Se aplicó COMPLETE como acción simulada predeterminada.",
+                    ]
                     : choice.usedFallback
                         ? ["Se utilizó la salida DEFAULT para la acción simulada."]
                         : [],
@@ -196,6 +206,7 @@ export const simulateWorkflowGraph = ({ graph, request, validation, versionId, }
     let resolvedAssignments = 0;
     let projectedNotifications = 0;
     let projectedTimers = 0;
+    const visitedDecisionNodes = new Set();
     if (validation.errors.length > 0 || !start) {
         errors.push({
             code: "SIMULATION_BLOCKED_BY_VALIDATION",
@@ -259,7 +270,11 @@ export const simulateWorkflowGraph = ({ graph, request, validation, versionId, }
             };
             projectedNotifications += 1;
         }
-        const next = chooseNextTransition(graph, node, request, context);
+        const isDecisionNode = node.type === "APPROVAL" || node.type === "STAGE";
+        const repeatedDecisionNode = isDecisionNode && visitedDecisionNodes.has(node.nodeKey);
+        const next = chooseNextTransition(graph, node, request, context, repeatedDecisionNode);
+        if (isDecisionNode)
+            visitedDecisionNodes.add(node.nodeKey);
         step.evaluationDetails = next.evaluations;
         evaluatedConditions += next.evaluations.reduce((total, evaluation) => total + evaluation.results.length, 0);
         for (const message of next.warnings) {

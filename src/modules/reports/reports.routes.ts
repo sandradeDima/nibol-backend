@@ -17,6 +17,18 @@ reportsRouter.get(
 );
 
 reportsRouter.get(
+  "/reports/options",
+  requirePermission(REPORTS_PERMISSIONS.view),
+  asyncHandler(reportsController.options),
+);
+
+reportsRouter.get(
+  "/reports/action-plans",
+  requirePermission(REPORTS_PERMISSIONS.view),
+  asyncHandler(reportsController.listActionPlans),
+);
+
+reportsRouter.get(
   "/reports/observations",
   requirePermission(REPORTS_PERMISSIONS.view),
   asyncHandler(reportsController.listObservations),

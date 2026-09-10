@@ -4,6 +4,7 @@ import {
   escapeHtml,
   greeting,
   joinTextBlocks,
+  resolveEmailAppName,
   toParagraphHtml,
 } from "../utils.js";
 
@@ -11,7 +12,7 @@ export const genericNotificationEmailTemplate: EmailTemplateDefinition<"genericN
   {
     name: "genericNotification",
     render: ({ brand, variables }) => {
-      const appName = variables.appName?.trim() || brand.appName;
+      const appName = resolveEmailAppName(variables.appName ?? brand.appName);
       const actionHtml =
         variables.actionLabel && variables.actionLink
           ? `

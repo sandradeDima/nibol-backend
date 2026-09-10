@@ -1,6 +1,7 @@
+import { randomUUID } from "node:crypto";
 import type { Prisma } from "../../generated/prisma/client.js";
 
-import { ADMIN_ROLE_NAME } from "../permissions/definitions.js";
+import { ADMIN_ROLE_CODE } from "../permissions/definitions.js";
 import { activityLogService } from "./activity-log-service.js";
 import { auditLogService } from "./audit-log-service.js";
 import { AppError } from "../utils/app-error.js";
@@ -14,6 +15,15 @@ import { adminSafeguardService } from "./admin-safeguard-service.js";
 import { areStringArraysEqual, type LogActorContext } from "./logging-utils.js";
 
 const MAX_ROLE_NAME_LENGTH = 191;
+
+const buildRoleCode = (name: string, id: string): string =>
+  `CUSTOM_${name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "_")
+    .replace(/^_|_$/g, "")
+    .toUpperCase()
+    .slice(0, 48)}_${id.slice(0, 12)}`;
 
 const buildOrderBy = (
   sortBy: ListRolesQuery["sortBy"],
@@ -122,6 +132,7 @@ const getRoleDetailsRecord = async (roleId: string) => {
       description: true,
       id: true,
       name: true,
+      code: true,
       rolePermissions: {
         orderBy: {
           permission: {
@@ -157,7 +168,7 @@ const mapRoleDetails = (
     createdAt: role.createdAt.toISOString(),
     description: role.description,
     id: role.id,
-    isAdmin: role.name === ADMIN_ROLE_NAME,
+    isAdmin: role.code === ADMIN_ROLE_CODE,
     name: role.name,
     permissions: role.rolePermissions.map(({ permission }) => permission.name),
     updatedAt: role.updatedAt.toISOString(),
@@ -241,9 +252,12 @@ export const rolesService = {
     const permissions = await getPermissionRecords(input.permissionNames);
 
     const createdRole = await prisma.$transaction(async (transaction) => {
+      const id = randomUUID();
       const role = await transaction.role.create({
         data: {
+          code: buildRoleCode(input.name, id),
           description: input.description,
+          id,
           name: input.name,
         },
         select: {
@@ -323,6 +337,7 @@ export const rolesService = {
       select: {
         id: true,
         name: true,
+        code: true,
       },
       where: {
         deletedAt: null,
@@ -427,6 +442,7 @@ export const rolesService = {
           description: true,
           id: true,
           name: true,
+          code: true,
         },
         skip: (query.page - 1) * query.perPage,
         take: query.perPage,
@@ -439,7 +455,7 @@ export const rolesService = {
         createdAt: role.createdAt.toISOString(),
         description: role.description,
         id: role.id,
-        isAdmin: role.name === ADMIN_ROLE_NAME,
+        isAdmin: role.code === ADMIN_ROLE_CODE,
         name: role.name,
         usersCount: role._count.userRoles,
       })),

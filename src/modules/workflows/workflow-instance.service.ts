@@ -231,6 +231,8 @@ const mapInstance = (
     completedAt: record.completedAt?.toISOString() ?? null,
     context: {
       areaId: context.areaId ?? null,
+      allPlansValidated: context.allPlansValidated ?? null,
+      areaPlanRequired: context.areaPlanRequired ?? null,
       currentNodeKey: context.currentNodeKey ?? null,
       daysOverdue: context.daysOverdue ?? null,
       dueDate: context.dueDate ?? null,

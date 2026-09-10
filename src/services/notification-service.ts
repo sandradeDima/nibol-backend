@@ -1,4 +1,6 @@
 import {
+  NotificationDeliveryChannel,
+  NotificationDeliveryStatus,
   NotificationPriority as PrismaNotificationPriority,
   NotificationType as PrismaNotificationType,
   type Prisma,
@@ -25,6 +27,25 @@ type NotificationWriter = {
     | "updateMany"
   >;
 };
+
+type NotificationDeliveryWriter = Pick<
+  typeof prisma.notificationDelivery,
+  "create" | "findUnique" | "findUniqueOrThrow" | "update" | "updateMany"
+>;
+
+export type CreateNotificationDeliveryInput = {
+  channel: NotificationDeliveryChannel;
+  dedupeKey: string;
+  notificationId?: string;
+  payloadJson?: Prisma.InputJsonValue;
+  recipientEmail?: string | null;
+  recipientUserId?: string | null;
+  status?: NotificationDeliveryStatus;
+};
+
+const notificationDeliveryMaxAttempts = 3;
+const notificationDeliveryClaimLeaseMs = 15 * 60_000;
+const notificationDeliveryRetryDelayMs = 5 * 60_000;
 
 type NotificationRecord = {
   createdAt: Date;
@@ -210,6 +231,101 @@ export const notificationService = {
     });
 
     return { createdCount: created.count };
+  },
+
+  async createDelivery(
+    input: CreateNotificationDeliveryInput,
+    options?: { db?: NotificationDeliveryWriter },
+  ) {
+    const db = options?.db ?? prisma.notificationDelivery;
+    const existing = await db.findUnique({
+      where: { dedupeKey: input.dedupeKey },
+    });
+    if (existing) return existing;
+
+    const status = input.status ?? NotificationDeliveryStatus.PENDING;
+    try {
+      const data: Prisma.NotificationDeliveryUncheckedCreateInput = {
+        channel: input.channel,
+        dedupeKey: input.dedupeKey,
+        ...(input.notificationId !== undefined
+          ? { notificationId: input.notificationId }
+          : {}),
+        ...(input.payloadJson !== undefined
+          ? { payloadJson: input.payloadJson }
+          : {}),
+        ...(input.recipientEmail !== undefined
+          ? { recipientEmail: input.recipientEmail }
+          : {}),
+        ...(input.recipientUserId !== undefined
+          ? { recipientUserId: input.recipientUserId }
+          : {}),
+        ...(status === NotificationDeliveryStatus.SENT
+          ? { sentAt: new Date() }
+          : {}),
+        status,
+      };
+      return await db.create({
+        data,
+      });
+    } catch (error) {
+      if ((error as { code?: string }).code !== "P2002") throw error;
+      return db.findUniqueOrThrow({ where: { dedupeKey: input.dedupeKey } });
+    }
+  },
+
+  async claimEmailDelivery(deliveryId: string) {
+    const now = new Date();
+    const claimed = await prisma.notificationDelivery.updateMany({
+      data: {
+        attempts: { increment: 1 },
+        lastAttemptAt: now,
+        status: NotificationDeliveryStatus.PENDING,
+      },
+      where: {
+        attempts: { lt: notificationDeliveryMaxAttempts },
+        channel: NotificationDeliveryChannel.EMAIL,
+        id: deliveryId,
+        OR: [
+          {
+            lastAttemptAt: null,
+            status: NotificationDeliveryStatus.PENDING,
+          },
+          {
+            lastAttemptAt: {
+              lt: new Date(now.getTime() - notificationDeliveryClaimLeaseMs),
+            },
+            status: NotificationDeliveryStatus.PENDING,
+          },
+          {
+            lastAttemptAt: {
+              lt: new Date(now.getTime() - notificationDeliveryRetryDelayMs),
+            },
+            status: NotificationDeliveryStatus.FAILED,
+          },
+        ],
+      },
+    });
+    return claimed.count === 1;
+  },
+
+  async completeEmailDelivery(
+    deliveryId: string,
+    result: { error?: string; success: boolean },
+  ) {
+    await prisma.notificationDelivery.update({
+      data: result.success
+        ? {
+            errorMessage: null,
+            sentAt: new Date(),
+            status: NotificationDeliveryStatus.SENT,
+          }
+        : {
+            errorMessage: result.error ?? "No fue posible enviar el correo.",
+            status: NotificationDeliveryStatus.FAILED,
+          },
+      where: { id: deliveryId },
+    });
   },
 
   async delete(notificationId: string, userId: string) {

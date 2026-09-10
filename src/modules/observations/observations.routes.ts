@@ -39,6 +39,11 @@ observationsRouter.get(
 );
 
 observationsRouter.post(
+  "/observations/send",
+  requirePermission("observations.send"),
+  asyncHandler(observationsController.sendObservations),
+);
+observationsRouter.post(
   "/observations",
   requirePermission(OBSERVATIONS_PERMISSIONS.create),
   asyncHandler(observationsController.create),
@@ -54,6 +59,12 @@ observationsRouter.post(
   "/observations/:id/close",
   requirePermission(OBSERVATIONS_PERMISSIONS.close),
   asyncHandler(observationsController.close),
+);
+
+observationsRouter.post(
+  "/observations/:id/send",
+  requirePermission(OBSERVATIONS_PERMISSIONS.send),
+  asyncHandler(observationsController.send),
 );
 
 observationsRouter.delete(

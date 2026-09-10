@@ -1,9 +1,9 @@
 import { renderBaseEmailLayout } from "../layouts/BaseEmailLayout.js";
-import { escapeHtml, greeting, joinTextBlocks } from "../utils.js";
+import { escapeHtml, greeting, joinTextBlocks, resolveEmailAppName, } from "../utils.js";
 export const welcomeEmailTemplate = {
     name: "welcome",
     render: ({ brand, variables }) => {
-        const appName = variables.appName?.trim() || brand.appName;
+        const appName = resolveEmailAppName(variables.appName ?? brand.appName);
         const loginHtml = variables.loginLink
             ? `
         <p style="margin: 24px 0;">

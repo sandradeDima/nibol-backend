@@ -1,72 +1,94 @@
-import { AUDIT_ROLE_MARKERS, SYSTEM_WIDE_ROLE_NAMES, } from "../remediation/remediation.constants.js";
+import { buildObservationScopeWhere as buildScopedObservationWhere, } from "../../services/authorization-service.js";
+import { officialProgressByStatus } from "../progress/progress.constants.js";
 export const REPORT_DEFAULT_DUE_SOON_DAYS = 7;
 export const REPORT_MAX_DUE_SOON_DAYS = 90;
 export const REPORT_RESOLUTION_LOOKBACK_MONTHS = 12;
+export const OFFICIAL_ACTION_PLAN_STATUSES = [
+    "NOT_STARTED",
+    "STARTED",
+    "WITH_PROGRESS",
+    "CONCLUDED",
+];
+export const officialActionPlanStatusMeta = {
+    CONCLUDED: {
+        code: "CO",
+        label: "Concluido",
+        percent: officialProgressByStatus.CONCLUDED,
+    },
+    NOT_STARTED: {
+        code: "NI",
+        label: "No iniciado",
+        percent: officialProgressByStatus.NOT_STARTED,
+    },
+    STARTED: {
+        code: "I",
+        label: "Iniciado",
+        percent: officialProgressByStatus.STARTED,
+    },
+    WITH_PROGRESS: {
+        code: "CA",
+        label: "Con avance",
+        percent: officialProgressByStatus.WITH_PROGRESS,
+    },
+};
+const toOfficialActionPlanStatus = (value) => OFFICIAL_ACTION_PLAN_STATUSES.includes(value)
+    ? value
+    : "NOT_STARTED";
+export const getOfficialActionPlanProgress = (status) => {
+    const normalized = toOfficialActionPlanStatus(status);
+    return {
+        ...officialActionPlanStatusMeta[normalized],
+        key: normalized,
+    };
+};
+export const isApprovedDeadlineExtension = (extension) => extension?.status === "MANAGER_APPROVED";
+export const getEffectiveActionPlanDueDate = (plan) => {
+    const approvedExtension = plan.deadlineExtensionRequests?.find(isApprovedDeadlineExtension);
+    return approvedExtension?.proposedDueDate ?? plan.currentDueDate;
+};
+export const getDateOnlyKey = (value) => value.toISOString().slice(0, 10);
+export const getBusinessDateKey = (now = new Date(), timeZone = "UTC") => {
+    try {
+        const parts = new Intl.DateTimeFormat("en-US", {
+            day: "2-digit",
+            month: "2-digit",
+            timeZone,
+            year: "numeric",
+        })
+            .formatToParts(now)
+            .reduce((result, part) => {
+            result[part.type] = part.value;
+            return result;
+        }, {});
+        return `${parts.year}-${parts.month}-${parts.day}`;
+    }
+    catch {
+        return getDateOnlyKey(now);
+    }
+};
+export const getActionPlanDeadlineStatus = (plan, now = new Date(), timeZone = "UTC") => {
+    const effectiveDueDate = getEffectiveActionPlanDueDate(plan);
+    if (plan.status === "CONCLUDED")
+        return "VIGENTE";
+    return getDateOnlyKey(effectiveDueDate) < getBusinessDateKey(now, timeZone)
+        ? "VENCIDO"
+        : "VIGENTE";
+};
+export const isActionPlanOverdue = (plan, now = new Date(), timeZone = "UTC") => getActionPlanDeadlineStatus(plan, now, timeZone) === "VENCIDO";
 export const CLOSED_OBSERVATION_STATUS_KEYS = new Set(["CONCLUIDO"]);
 export const OPEN_OBSERVATION_STATUS_KEYS = new Set([
     "NO_INICIADO",
     "INICIADO",
     "CON_AVANCE",
 ]);
-export const normalizeBusinessRole = (value) => {
-    return value
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .trim()
-        .toLowerCase();
-};
 export const hasGlobalBusinessAccess = (access) => {
-    if (access.isAdmin) {
-        return true;
-    }
-    return access.roles.some((role) => {
-        const normalized = normalizeBusinessRole(role);
-        return (SYSTEM_WIDE_ROLE_NAMES.has(normalized) ||
-            AUDIT_ROLE_MARKERS.some((marker) => normalized.includes(marker)));
-    });
+    return access.dataScope === "ALL" || access.dataScope === "AUDIT_SCOPE";
 };
 export const buildObservationVisibilityCondition = (access) => {
     if (hasGlobalBusinessAccess(access)) {
         return undefined;
     }
-    return {
-        OR: [
-            { auditorUserId: access.userId },
-            {
-                areaAssignments: {
-                    some: {
-                        OR: [
-                            { areaResponsibleUserId: access.userId },
-                            { processOwnerUserId: access.userId },
-                            {
-                                area: {
-                                    active: true,
-                                    deletedAt: null,
-                                    managerUserId: access.userId,
-                                },
-                            },
-                        ],
-                    },
-                },
-            },
-            {
-                actionPlans: {
-                    some: {
-                        deletedAt: null,
-                        responsibleUserId: access.userId,
-                    },
-                },
-            },
-            {
-                remediationPlans: {
-                    some: {
-                        deletedAt: null,
-                        ownerUserId: access.userId,
-                    },
-                },
-            },
-        ],
-    };
+    return buildScopedObservationWhere(access);
 };
 export const buildObservationScopeWhere = (access) => {
     const visibility = buildObservationVisibilityCondition(access);

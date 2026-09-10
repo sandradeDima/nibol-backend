@@ -19,10 +19,13 @@ const getAccess = (request) => {
 const reportQueryInput = (request) => ({
     activeOnly: getQueryValue(request.query["filter.activeOnly"]),
     areaId: getQueryValue(request.query["filter.areaId"]),
+    auditReportId: getQueryValue(request.query["filter.auditReportId"]),
     dateFrom: getQueryValue(request.query["filter.dateFrom"]),
     dateTo: getQueryValue(request.query["filter.dateTo"]),
+    deadlineStatus: getQueryValue(request.query["filter.deadlineStatus"]),
     dueSoon: getQueryValue(request.query["filter.dueSoon"]),
     dueSoonDays: getQueryValue(request.query["filter.dueSoonDays"]),
+    executorId: getQueryValue(request.query["filter.executorId"]),
     hasEvidence: getQueryValue(request.query["filter.hasEvidence"]),
     hasExtension: getQueryValue(request.query["filter.hasExtension"]),
     hasPlan: getQueryValue(request.query["filter.hasPlan"]),
@@ -32,10 +35,14 @@ const reportQueryInput = (request) => ({
     periodField: getQueryValue(request.query.periodField),
     progressMax: getQueryValue(request.query["filter.progressMax"]),
     progressMin: getQueryValue(request.query["filter.progressMin"]),
+    progressStatus: getQueryValue(request.query["filter.progressStatus"]),
+    processOwnerId: getQueryValue(request.query["filter.processOwnerId"]),
+    reprogrammed: getQueryValue(request.query["filter.reprogrammed"]),
     reportName: getQueryValue(request.query.reportName),
     responsibleUserId: getQueryValue(request.query["filter.responsibleUserId"]),
     riskLevelId: getQueryValue(request.query["filter.riskLevelId"]),
-    search: getQueryValue(request.query.search),
+    search: getQueryValue(request.query["filter.search"]) ??
+        getQueryValue(request.query.search),
     statusId: getQueryValue(request.query["filter.statusId"]),
     type: getQueryValue(request.query.type),
 });
@@ -65,6 +72,18 @@ export const reportsController = {
     async dashboard(request, response) {
         const filters = reportFiltersSchema.parse(reportQueryInput(request));
         sendSuccess(response, await reportsService.getDashboard(filters, getAccess(request)));
+    },
+    async options(request, response) {
+        sendSuccess(response, await reportsService.getOptions(getAccess(request)));
+    },
+    async listActionPlans(request, response) {
+        const query = reportQuerySchema.parse(reportQueryInput(request));
+        const result = await reportsService.listActionPlans(query, getAccess(request));
+        sendPaginated(response, result.data, {
+            page: query.page,
+            perPage: query.perPage,
+            total: result.total,
+        });
     },
     async listObservations(request, response) {
         const query = reportQuerySchema.parse(reportQueryInput(request));

@@ -5,7 +5,7 @@ import { AppError } from "../../utils/app-error.js";
 import { getRequestLogActorContext } from "../../utils/request-context.js";
 import { sendPaginated, sendSuccess } from "../../utils/response.js";
 import { extensionRequestsService as service } from "./extension-requests.service.js";
-import { actionPlanIdParamSchema, createExtensionRequestSchema, extensionRequestIdParamSchema, listExtensionRequestsQuerySchema, observationIdParamSchema, reviewExtensionRequestSchema, updateExtensionRequestSchema, } from "./extension-requests.validators.js";
+import { actionPlanIdParamSchema, createExtensionRequestSchema, extensionRequestIdParamSchema, listExtensionRequestsQuerySchema, reviewExtensionRequestSchema, updateExtensionRequestSchema, } from "./extension-requests.validators.js";
 const value = (input) => typeof input === "string" ? input : undefined;
 const access = (request) => {
     if (!request.authorizationSummary)
@@ -50,15 +50,8 @@ const log = async (request, action, current, previous) => {
     ]);
 };
 export const extensionRequestsController = {
-    async auditApprove(request, response) {
-        const result = await service.auditReview(parsedId(request, extensionRequestIdParamSchema), true, reviewExtensionRequestSchema.parse(request.body), access(request));
-        await log(request, "extension_requests.approve", result.current, result.previous);
-        sendSuccess(response, result.current);
-    },
-    async auditReject(request, response) {
-        const result = await service.auditReview(parsedId(request, extensionRequestIdParamSchema), false, reviewExtensionRequestSchema.parse(request.body), access(request));
-        await log(request, "extension_requests.reject", result.current, result.previous);
-        sendSuccess(response, result.current);
+    async listClassifications(request, response) {
+        sendSuccess(response, await service.listClassifications(access(request)));
     },
     async cancel(request, response) {
         const result = await service.cancel(parsedId(request, extensionRequestIdParamSchema), access(request));
@@ -66,12 +59,7 @@ export const extensionRequestsController = {
     },
     async createForActionPlan(request, response) {
         const record = await service.createForActionPlan(parsedId(request, actionPlanIdParamSchema), createExtensionRequestSchema.parse(request.body), access(request));
-        await log(request, "extension_requests.create", record, null);
-        sendSuccess(response, record, 201);
-    },
-    async createForObservation(request, response) {
-        const record = await service.createForObservation(parsedId(request, observationIdParamSchema), createExtensionRequestSchema.parse(request.body), access(request));
-        await log(request, "extension_requests.create", record, null);
+        await log(request, "deadline_extensions.request", record, null);
         sendSuccess(response, record, 201);
     },
     async getById(request, response) {
@@ -92,18 +80,22 @@ export const extensionRequestsController = {
     },
     async managerApprove(request, response) {
         const result = await service.managerReview(parsedId(request, extensionRequestIdParamSchema), true, reviewExtensionRequestSchema.parse(request.body), access(request));
+        await log(request, "deadline_extensions.approve", result.current, result.previous);
         sendSuccess(response, result.current);
     },
     async managerReject(request, response) {
         const result = await service.managerReview(parsedId(request, extensionRequestIdParamSchema), false, reviewExtensionRequestSchema.parse(request.body), access(request));
+        await log(request, "deadline_extensions.reject", result.current, result.previous);
         sendSuccess(response, result.current);
     },
     async sendToManager(request, response) {
         const result = await service.submit(parsedId(request, extensionRequestIdParamSchema), access(request));
+        await log(request, "action_plans.submit_to_audit", result.current, result.previous);
         sendSuccess(response, result.current);
     },
     async update(request, response) {
         const result = await service.update(parsedId(request, extensionRequestIdParamSchema), updateExtensionRequestSchema.parse(request.body), access(request));
+        await log(request, "deadline_extensions.request", result.current, result.previous);
         sendSuccess(response, result.current);
     },
 };

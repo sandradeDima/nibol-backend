@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildWorkflowRuntimeContext } from "./workflow-runtime-context.js";
+import { buildWorkflowRuntimeContext, getSpecialRequestRuntimeSummary, } from "./workflow-runtime-context.js";
+import { getWorkflowEntityAdapter } from "./workflow-entity-adapters.js";
 import { selectRuntimeTransition } from "./workflow-transition-resolver.js";
 import { workflowDesignerSaveSchema } from "./workflows.validators.js";
 const node = (input) => input;
@@ -158,6 +159,29 @@ test("runtime keeps registered fields separate from custom context", () => {
     assert.equal(runtimeContext.custom.recordOwnerUserId, "user-2");
     assert.equal(runtimeContext.custom.secret, "not-a-rule");
     assert.equal(runtimeContext.riskLevel, undefined);
+});
+test("runtime exposes only the safe special-request summary", () => {
+    const runtimeContext = buildWorkflowRuntimeContext({
+        actorUserId: "user-1",
+        context: {
+            custom: {
+                description: "  Review this exception.  ",
+                reference: "  SR-2026-001  ",
+                secret: "not returned",
+                title: "  Purchase exception  ",
+            },
+        },
+        processType: "SPECIAL_REQUEST",
+    });
+    assert.deepEqual(getSpecialRequestRuntimeSummary(runtimeContext), {
+        description: "Review this exception.",
+        reference: "SR-2026-001",
+        title: "Purchase exception",
+    });
+});
+test("runtime registers operational adapters for every integrated process", () => {
+    assert.equal(getWorkflowEntityAdapter("REMEDIATION_PLAN_APPROVAL")?.processType, "REMEDIATION_PLAN_APPROVAL");
+    assert.equal(getWorkflowEntityAdapter("EVIDENCE_REVIEW")?.processType, "EVIDENCE_REVIEW");
 });
 test("runtime selects condition routes in priority order and uses fallback", () => {
     const condition = pinned.nodes.find((candidate) => candidate.nodeKey === "condition");

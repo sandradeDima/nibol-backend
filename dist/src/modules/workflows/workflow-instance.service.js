@@ -1,5 +1,5 @@
 import { AppError } from "../../utils/app-error.js";
-import { buildWorkflowRuntimeContext, restoreWorkflowRuntimeContext, } from "./workflow-runtime-context.js";
+import { buildWorkflowRuntimeContext, getEvidenceReviewRuntimeSummary, getSpecialRequestRuntimeSummary, restoreWorkflowRuntimeContext, } from "./workflow-runtime-context.js";
 import { executeAutomaticNodes, } from "./workflow-runtime.service.js";
 import { writeRuntimeAuditEvent, writeRuntimeTransitionLog, } from "./workflow-runtime-events.js";
 import { loadPinnedWorkflowGraph } from "./workflow-runtime-graph.js";
@@ -29,6 +29,12 @@ const canSeeInstance = async (db, instanceId, access) => {
         access.permissions.includes("workflow_tasks.view")) {
         return true;
     }
+    const ownInstance = await db.workflowInstance.findFirst({
+        select: { id: true },
+        where: { id: instanceId, startedById: access.userId },
+    });
+    if (ownInstance)
+        return true;
     const task = await db.workflowTask.findFirst({
         select: { id: true },
         where: {
@@ -155,10 +161,14 @@ const mapInstance = (record) => {
     const currentTask = record.tasks.find((task) => ["PENDING", "IN_PROGRESS"].includes(task.status)) ?? null;
     const context = restoreWorkflowRuntimeContext(record.processType, record.contextJson);
     const relatedRecordUrl = getWorkflowEntityAdapter(record.processType)?.getEntityLink?.(record.entityId, context);
+    const specialRequest = getSpecialRequestRuntimeSummary(context);
+    const evidenceReview = getEvidenceReviewRuntimeSummary(context);
     return {
         completedAt: record.completedAt?.toISOString() ?? null,
         context: {
             areaId: context.areaId ?? null,
+            allPlansValidated: context.allPlansValidated ?? null,
+            areaPlanRequired: context.areaPlanRequired ?? null,
             currentNodeKey: context.currentNodeKey ?? null,
             daysOverdue: context.daysOverdue ?? null,
             dueDate: context.dueDate ?? null,
@@ -179,7 +189,9 @@ const mapInstance = (record) => {
         definition: record.definition,
         entityId: record.entityId,
         entityType: record.entityType,
+        evidenceReview,
         relatedRecordUrl: relatedRecordUrl ?? null,
+        specialRequest,
         finalResult: record.finalResult,
         id: record.id,
         runtimeError: record.runtimeErrorCode
@@ -221,6 +233,44 @@ const mapInstance = (record) => {
     };
 };
 export const workflowInstanceService = {
+    async getStartOptions(access) {
+        assertPermission(access, WORKFLOW_INSTANCE_PERMISSIONS.start);
+        const [workflows, users, areas, riskLevels] = await prisma.$transaction([
+            prisma.workflowDefinition.findMany({
+                orderBy: { name: "asc" },
+                select: {
+                    activeVersion: {
+                        select: { id: true, versionNumber: true },
+                    },
+                    description: true,
+                    id: true,
+                    name: true,
+                },
+                where: {
+                    activeVersionId: { not: null },
+                    archivedAt: null,
+                    processType: "SPECIAL_REQUEST",
+                    status: "PUBLISHED",
+                },
+            }),
+            prisma.user.findMany({
+                orderBy: [{ name: "asc" }, { email: "asc" }],
+                select: { email: true, id: true, name: true },
+                where: { deletedAt: null, isActive: true },
+            }),
+            prisma.area.findMany({
+                orderBy: { name: "asc" },
+                select: { id: true, name: true },
+                where: { active: true, deletedAt: null },
+            }),
+            prisma.riskLevel.findMany({
+                orderBy: [{ severityOrder: "asc" }, { name: "asc" }],
+                select: { key: true, name: true },
+                where: { active: true, deletedAt: null },
+            }),
+        ]);
+        return { areas, riskLevels, users, workflows };
+    },
     async startInstance(input, access, options) {
         if (!options?.internal)
             assertPermission(access, WORKFLOW_INSTANCE_PERMISSIONS.start);

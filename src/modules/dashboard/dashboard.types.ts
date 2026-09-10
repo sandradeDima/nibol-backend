@@ -74,11 +74,16 @@ export type DashboardObservationRow = {
 
 export type DashboardActionPlanRow = {
   area: DashboardAreaSummary;
+  deadlineStatus: "VIGENTE" | "VENCIDO";
   dueDate: string;
+  effectiveDueDate: string;
   href: string;
   id: string;
   isOverdue: boolean;
+  officialProgressCode: "NI" | "I" | "CA" | "CO";
+  officialProgressPercent: number;
   progressPercent: number;
+  reprogrammed: boolean;
   responsibleUser: DashboardUserSummary | null;
   status: DashboardStatusSummary;
   title: string;
@@ -87,6 +92,28 @@ export type DashboardActionPlanRow = {
     code: string;
     id: string;
     title: string;
+  };
+};
+
+export type DashboardActionPlanReporting = {
+  charts: {
+    byArea: DashboardDistributionItem[];
+    byDeadline: DashboardDistributionItem[];
+    byExecutor: DashboardDistributionItem[];
+    byProcessOwner: DashboardDistributionItem[];
+    byProgress: DashboardDistributionItem[];
+    byReprogrammed: DashboardDistributionItem[];
+    byRisk: DashboardDistributionItem[];
+  };
+  summary: {
+    conAvance: number;
+    concluido: number;
+    iniciado: number;
+    noIniciado: number;
+    reprogramados: number;
+    total: number;
+    vencidos: number;
+    vigentes: number;
   };
 };
 
@@ -112,6 +139,7 @@ export type DashboardActivityRow = {
 };
 
 export type AuditDashboardData = {
+  actionPlanReporting: DashboardActionPlanReporting;
   charts: {
     currentVsOverdue: DashboardDistributionItem[];
     monthlyTrend: DashboardTrendPoint[];
@@ -146,6 +174,7 @@ export type AuditDashboardData = {
 };
 
 export type AreaDashboardData = {
+  actionPlanReporting: DashboardActionPlanReporting;
   charts: {
     currentVsOverdue: DashboardDistributionItem[];
     observationsByArea: DashboardDistributionItem[];

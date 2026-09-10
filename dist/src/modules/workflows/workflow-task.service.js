@@ -1,6 +1,6 @@
 import { AppError } from "../../utils/app-error.js";
 import { prisma } from "../../utils/prisma.js";
-import { restoreWorkflowRuntimeContext, } from "./workflow-runtime-context.js";
+import { getEvidenceReviewRuntimeSummary, getSpecialRequestRuntimeSummary, restoreWorkflowRuntimeContext, } from "./workflow-runtime-context.js";
 import { writeRuntimeAuditEvent, writeRuntimeTransitionLog, } from "./workflow-runtime-events.js";
 import { loadPinnedWorkflowGraph } from "./workflow-runtime-graph.js";
 import { WORKFLOW_RUNTIME_ERROR_CODES, WorkflowRuntimeError, } from "./workflow-runtime-errors.js";
@@ -123,7 +123,8 @@ const mapTask = (task, access, canAct) => {
         return null;
     const configuration = getNodeConfiguration(task.node.configurationJson);
     const allowedActions = getAllowedActions(configuration);
-    const relatedRecordUrl = getWorkflowEntityAdapter(task.instance.processType)?.getEntityLink?.(task.instance.entityId, restoreWorkflowRuntimeContext(task.instance.processType, task.instance.contextJson));
+    const context = restoreWorkflowRuntimeContext(task.instance.processType, task.instance.contextJson);
+    const relatedRecordUrl = getWorkflowEntityAdapter(task.instance.processType)?.getEntityLink?.(task.instance.entityId, context);
     return {
         assignedArea: task.assignedArea,
         assignedRole: task.assignedRole,
@@ -142,9 +143,11 @@ const mapTask = (task, access, canAct) => {
         instance: {
             entityId: task.instance.entityId,
             entityType: task.instance.entityType,
+            evidenceReview: getEvidenceReviewRuntimeSummary(context),
             id: task.instance.id,
             processType: task.instance.processType,
             relatedRecordUrl: relatedRecordUrl ?? null,
+            specialRequest: getSpecialRequestRuntimeSummary(context),
             startedAt: task.instance.startedAt.toISOString(),
             startedBy: task.instance.startedBy,
             status: task.instance.status,
@@ -318,6 +321,7 @@ export const workflowTaskService = {
         return {
             data: tasks.map((task) => {
                 const configuration = getNodeConfiguration(task.node.configurationJson);
+                const context = restoreWorkflowRuntimeContext(task.instance.processType, task.instance.contextJson);
                 const assignment = task.assignmentSnapshotJson;
                 const assignmentRecord = assignment &&
                     typeof assignment === "object" &&
@@ -339,9 +343,11 @@ export const workflowTaskService = {
                     instance: {
                         entityId: task.instance.entityId,
                         entityType: task.instance.entityType,
+                        evidenceReview: getEvidenceReviewRuntimeSummary(context),
                         id: task.instance.id,
                         processType: task.instance.processType,
-                        relatedRecordUrl: getWorkflowEntityAdapter(task.instance.processType)?.getEntityLink?.(task.instance.entityId, restoreWorkflowRuntimeContext(task.instance.processType, task.instance.contextJson)) ?? null,
+                        relatedRecordUrl: getWorkflowEntityAdapter(task.instance.processType)?.getEntityLink?.(task.instance.entityId, context) ?? null,
+                        specialRequest: getSpecialRequestRuntimeSummary(context),
                         startedBy: task.instance.startedBy,
                         version: task.instance.version,
                         workflow: task.instance.definition,

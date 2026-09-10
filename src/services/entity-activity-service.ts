@@ -1,6 +1,7 @@
 import { Prisma } from "../../generated/prisma/client.js";
 
 import type { AuthorizationSummary } from "./authorization-service.js";
+import { buildObservationScopeWhere } from "./authorization-service.js";
 import { prisma } from "../utils/prisma.js";
 import { AppError } from "../utils/app-error.js";
 
@@ -107,41 +108,18 @@ const asJson = (
   safeValue(value) ?? Prisma.JsonNull;
 
 const isSystemOperator = (access: AuthorizationSummary): boolean => {
-  if (access.isAdmin) return true;
-  return access.roles.some((role) =>
-    /^(sistemas?|systems?)$/i.test(role.trim()),
-  );
+  return access.dataScope === "ALL";
 };
 
 const isAuditRole = (access: AuthorizationSummary): boolean =>
-  access.roles.some((role) => /audit|auditor|auditoria/i.test(role));
-
-const isManagerRole = (access: AuthorizationSummary): boolean =>
-  access.roles.some((role) => /gerencia|manager|jefatura/i.test(role));
+  access.dataScope === "AUDIT_SCOPE";
 
 const activityScope = (
   access: AuthorizationSummary,
 ): Prisma.EntityActivityWhereInput => {
   if (isSystemOperator(access)) return {};
 
-  const observationScope: Prisma.ObservationWhereInput = {
-    OR: [
-      { auditorUserId: access.userId },
-      {
-        areaAssignments: {
-          some: {
-            OR: [
-              { areaResponsibleUserId: access.userId },
-              { processOwnerUserId: access.userId },
-              { area: { managerUserId: access.userId } },
-            ],
-          },
-        },
-      },
-      { actionPlans: { some: { responsibleUserId: access.userId } } },
-      { remediationPlans: { some: { ownerUserId: access.userId } } },
-    ],
-  };
+  const observationScope = buildObservationScopeWhere(access);
 
   if (isAuditRole(access)) {
     return {
@@ -163,11 +141,7 @@ const activityScope = (
         ACTIVITY_VISIBILITIES.areaVisible,
       ],
     },
-    observation: isManagerRole(access)
-      ? {
-          areaAssignments: { some: { area: { managerUserId: access.userId } } },
-        }
-      : observationScope,
+    observation: observationScope,
   };
 };
 

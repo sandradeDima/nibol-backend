@@ -6,7 +6,7 @@ import { AppError } from "../../utils/app-error.js";
 import { getRequestLogActorContext } from "../../utils/request-context.js";
 import { sendPaginated, sendSuccess } from "../../utils/response.js";
 import { progressService } from "./progress.service.js";
-import { actionPlanIdParamSchema, commentIdParamSchema, createCommentSchema, createProgressEvaluationSchema, evidenceIdParamSchema, listProgressEvaluationsQuerySchema, observationIdParamSchema, progressEvaluationIdParamSchema, reviewProgressEvaluationSchema, updateCommentSchema, updateProgressEvaluationSchema, uploadEvidenceSchema, } from "./progress.validators.js";
+import { actionPlanIdParamSchema, commentIdParamSchema, createCommentSchema, createProgressEvaluationSchema, evidenceIdParamSchema, listProgressEvaluationsQuerySchema, observationIdParamSchema, progressEvaluationIdParamSchema, reviewProgressEvaluationSchema, reviewEvidenceSchema, updateCommentSchema, updateProgressEvaluationSchema, uploadEvidenceSchema, } from "./progress.validators.js";
 const value = (input) => typeof input === "string" ? input : undefined;
 const access = (request) => {
     if (!request.authorizationSummary)
@@ -54,7 +54,7 @@ const log = async (request, action, entityType, current, previous) => {
             entityId: record.id,
             entityType,
             newData: current,
-            observationId: record.observation?.id,
+            observationId: record.observation?.id ?? record.observationId,
             previousData: previous,
             title: action,
         }),
@@ -63,7 +63,7 @@ const log = async (request, action, entityType, current, previous) => {
 export const progressController = {
     async approveProgressEvaluation(request, response) {
         const result = await progressService.reviewProgressEvaluation(idWith(request, progressEvaluationIdParamSchema), "approve", reviewProgressEvaluationSchema.parse(request.body), access(request));
-        await log(request, "progress_evaluations.approve", "PROGRESS_EVALUATION", result.current, result.previous);
+        await log(request, "action_plans.approve", "PROGRESS_EVALUATION", result.current, result.previous);
         sendSuccess(response, result.current);
     },
     async createComment(request, response) {
@@ -78,7 +78,7 @@ export const progressController = {
     },
     async createProgressEvaluation(request, response) {
         const record = await progressService.createProgressEvaluation(idWith(request, actionPlanIdParamSchema), createProgressEvaluationSchema.parse(request.body), access(request));
-        await log(request, "progress_evaluations.submit", "PROGRESS_EVALUATION", record, null);
+        await log(request, "action_plans.submit_to_audit", "PROGRESS_EVALUATION", record, null);
         sendSuccess(response, record, 201);
     },
     async createProgressEvaluationEvidence(request, response) {
@@ -104,6 +104,23 @@ export const progressController = {
     async getObservationEvidence(request, response) {
         sendSuccess(response, await progressService.getObservationEvidence(idWith(request, observationIdParamSchema), access(request)));
     },
+    async submitEvidenceForReview(request, response) {
+        const record = await progressService.submitEvidenceForReview(idWith(request, evidenceIdParamSchema), access(request));
+        await log(request, record.workflowInstanceId
+            ? "evidence.review.submitted"
+            : "evidence.review.fallback.created", "EVIDENCE_FILE", record, null);
+        sendSuccess(response, record);
+    },
+    async approveEvidenceReview(request, response) {
+        const result = await progressService.reviewEvidence(idWith(request, evidenceIdParamSchema), "approve", null, access(request));
+        await log(request, "evidence.approved", "EVIDENCE_FILE", result.current, result.previous);
+        sendSuccess(response, result.current);
+    },
+    async returnEvidenceReview(request, response) {
+        const result = await progressService.reviewEvidence(idWith(request, evidenceIdParamSchema), "return", reviewEvidenceSchema.parse(request.body ?? {}).comment, access(request));
+        await log(request, "evidence.returned", "EVIDENCE_FILE", result.current, result.previous);
+        sendSuccess(response, result.current);
+    },
     async getProgressEvaluation(request, response) {
         sendSuccess(response, await progressService.getProgressEvaluation(idWith(request, progressEvaluationIdParamSchema), access(request)));
     },
@@ -121,16 +138,14 @@ export const progressController = {
         }), access(request));
         sendPaginated(response, result.data, result.pagination);
     },
-    async rejectProgressEvaluation(request, response) {
-        const result = await progressService.reviewProgressEvaluation(idWith(request, progressEvaluationIdParamSchema), "reject", reviewProgressEvaluationSchema.parse(request.body), access(request));
-        sendSuccess(response, result.current);
-    },
     async returnProgressEvaluation(request, response) {
         const result = await progressService.reviewProgressEvaluation(idWith(request, progressEvaluationIdParamSchema), "return", reviewProgressEvaluationSchema.parse(request.body), access(request));
+        await log(request, "action_plans.return", "PROGRESS_EVALUATION", result.current, result.previous);
         sendSuccess(response, result.current);
     },
     async sendProgressEvaluationToAudit(request, response) {
         const result = await progressService.sendProgressEvaluationToAudit(idWith(request, progressEvaluationIdParamSchema), access(request));
+        await log(request, "action_plans.submit_to_audit", "PROGRESS_EVALUATION", result.current, result.previous);
         sendSuccess(response, result.current);
     },
     async updateComment(request, response) {
@@ -138,6 +153,7 @@ export const progressController = {
     },
     async updateProgressEvaluation(request, response) {
         const result = await progressService.updateProgressEvaluation(idWith(request, progressEvaluationIdParamSchema), updateProgressEvaluationSchema.parse(request.body), access(request));
+        await log(request, "action_plans.edit", "PROGRESS_EVALUATION", result.current, result.previous);
         sendSuccess(response, result.current);
     },
 };
