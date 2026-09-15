@@ -1,6 +1,7 @@
 import type { Prisma } from "../../../generated/prisma/client.js";
 
 import { AppError } from "../../utils/app-error.js";
+import { buildObservationUrl } from "../../utils/observation-links.js";
 import type { WorkflowRuntimeContext } from "./workflow-runtime-context.js";
 import type { WorkflowNodeConfiguration } from "./workflows.validators.js";
 
@@ -376,7 +377,16 @@ const deadlineExtensionAdapter: WorkflowEntityAdapter = {
     }
   },
 
-  getEntityLink: (entityId) => `/ampliaciones-plazo/${entityId}`,
+  getEntityLink: (entityId, context) =>
+    context?.custom.observationId
+      ? buildObservationUrl(String(context.custom.observationId), {
+          extensionId: entityId,
+          ...(context.custom.actionPlanId
+            ? { planId: String(context.custom.actionPlanId) }
+            : {}),
+          tab: "plans",
+        })
+      : `/ampliaciones-plazo/${entityId}`,
 };
 
 const observationClosureAdapter: WorkflowEntityAdapter = {
@@ -601,9 +611,15 @@ const observationClosureAdapter: WorkflowEntityAdapter = {
     }
   },
 
-  getEntityLink: (_entityId, context) =>
+  getEntityLink: (entityId, context) =>
     context?.custom.observationId
-      ? `/observaciones/${context.custom.observationId}`
+      ? buildObservationUrl(String(context.custom.observationId), {
+          advanceId: entityId,
+          ...(context.custom.actionPlanId
+            ? { planId: String(context.custom.actionPlanId) }
+            : {}),
+          tab: "plans",
+        })
       : "/observaciones",
 };
 
@@ -743,7 +759,9 @@ const remediationPlanAdapter: WorkflowEntityAdapter = {
 
   getEntityLink: (_entityId, context) =>
     context?.custom.observationId
-      ? `/observaciones/${context.custom.observationId}`
+      ? buildObservationUrl(String(context.custom.observationId), {
+          tab: "plans",
+        })
       : "/observaciones",
 };
 
@@ -864,9 +882,12 @@ const evidenceReviewAdapter: WorkflowEntityAdapter = {
     }
   },
 
-  getEntityLink: (_entityId, context) =>
+  getEntityLink: (entityId, context) =>
     context?.custom.observationId
-      ? `/observaciones/${context.custom.observationId}?tab=evidence&evidenceId=${encodeURIComponent(_entityId)}`
+      ? buildObservationUrl(String(context.custom.observationId), {
+          evidenceId: entityId,
+          tab: "evidence",
+        })
       : "/observaciones",
 };
 

@@ -39,4 +39,12 @@ export const dashboardController = {
 
     sendSuccess(response, result);
   },
+
+  async getOperationalDashboard(request: Request, response: Response) {
+    const result = await dashboardService.getOperationalDashboard(
+      getRequiredAuthorizationSummary(request),
+    );
+
+    sendSuccess(response, result);
+  },
 };

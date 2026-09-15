@@ -23,3 +23,9 @@ dashboardRouter.get(
   requireAuth(),
   asyncHandler(dashboardController.getMySummary),
 );
+
+dashboardRouter.get(
+  "/dashboard/operational",
+  requireAuth(),
+  asyncHandler(dashboardController.getOperationalDashboard),
+);

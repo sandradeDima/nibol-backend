@@ -20,6 +20,7 @@ import { notificationService } from "../../services/notification-service.js";
 import { AppError } from "../../utils/app-error.js";
 import { env } from "../../utils/env.js";
 import { logger } from "../../utils/logger.js";
+import { buildObservationUrl } from "../../utils/observation-links.js";
 import { prisma } from "../../utils/prisma.js";
 import { uploadsRootDir } from "../../utils/uploads.js";
 import { recalculateObservationFromActionPlans } from "../remediation/remediation.service.js";
@@ -262,6 +263,17 @@ type EvidenceReviewRecord = Prisma.EvidenceFileGetPayload<{
 
 const evidenceReviewTargetUrl = (observationId: string, evidenceId: string) =>
   `/observaciones/${observationId}?tab=evidence&evidenceId=${encodeURIComponent(evidenceId)}`;
+
+const progressEvaluationTargetUrl = (
+  observationId: string,
+  actionPlanId: string,
+  evaluationId: string,
+) =>
+  buildObservationUrl(observationId, {
+    advanceId: evaluationId,
+    planId: actionPlanId,
+    tab: "plans",
+  });
 
 const evidenceObservationLabel = (evidence: EvidenceReviewRecord) =>
   `${evidence.observation.auditReport.reportNumber} / OBS-${String(evidence.observation.observationNumber).padStart(3, "0")}`;
@@ -633,6 +645,11 @@ export const progressService = {
       await notificationService.create({
         message: `La evaluación de avance del plan de acción fue ${next === "APPROVED" ? "aprobada" : "devuelta"}.`,
         title: "Evaluación de avance revisada",
+        targetUrl: progressEvaluationTargetUrl(
+          previous.actionPlan.observation.id,
+          previous.actionPlan.id,
+          id,
+        ),
         type: next === "APPROVED" ? "success" : "warning",
         userId: previous.submittedByUser.id,
       });
@@ -685,6 +702,11 @@ export const progressService = {
         message:
           "Hay una evaluación de avance pendiente para un plan de acción.",
         title: "Avance pendiente de revisión",
+        targetUrl: progressEvaluationTargetUrl(
+          previous.actionPlan.observation.id,
+          previous.actionPlan.id,
+          id,
+        ),
         type: "info",
         userId: auditorId,
       });

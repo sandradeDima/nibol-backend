@@ -9,6 +9,7 @@ import {
 } from "../../services/authorization-service.js";
 import { notificationService } from "../../services/notification-service.js";
 import { AppError } from "../../utils/app-error.js";
+import { buildObservationUrl } from "../../utils/observation-links.js";
 import { prisma } from "../../utils/prisma.js";
 import { workflowIntegrationService } from "../workflows/workflow-integration.service.js";
 import { workflowTaskService } from "../workflows/workflow-task.service.js";
@@ -95,6 +96,16 @@ const include = {
 type ExtensionRecord = Prisma.DeadlineExtensionRequestGetPayload<{
   include: typeof include;
 }>;
+
+const extensionTargetUrl = (record: ExtensionRecord) => {
+  const observation = record.observation ?? record.actionPlan?.observation;
+  if (!observation) return `/ampliaciones-plazo/${record.id}`;
+  return buildObservationUrl(observation.id, {
+    extensionId: record.id,
+    ...(record.actionPlan?.id ? { planId: record.actionPlan.id } : {}),
+    tab: "plans",
+  });
+};
 
 const format = (record: ExtensionRecord) => ({
   actionPlan: record.actionPlan
@@ -560,6 +571,7 @@ export const extensionRequestsService = {
           ? `La ampliación fue aprobada hasta el ${previous.proposedDueDate.toISOString().slice(0, 10)}.`
           : "La solicitud de ampliación fue rechazada.",
         title: "Solicitud de ampliación revisada",
+        targetUrl: extensionTargetUrl(previous),
         type: approved ? "success" : "warning",
         userId: previous.requestedByUserId,
       });

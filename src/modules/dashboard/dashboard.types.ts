@@ -138,6 +138,28 @@ export type DashboardActivityRow = {
   title: string;
 };
 
+export type OperationalDashboardData = {
+  attention: DashboardObservationRow[];
+  generatedAt: string;
+  links: {
+    allObservations: string;
+    inProgressObservations: string;
+    overdueObservations: string;
+    pendingApprovals: string;
+    pendingExtensions: string;
+    upcomingObservations: string;
+  };
+  reminderDaysBeforeDue: number;
+  summary: {
+    inProgressObservations: number;
+    overdueObservations: number;
+    pendingApprovals: number;
+    pendingExtensions: number;
+    totalObservations: number;
+    upcomingObservations: number;
+  };
+};
+
 export type AuditDashboardData = {
   actionPlanReporting: DashboardActionPlanReporting;
   charts: {

@@ -1,4 +1,5 @@
 import type { Prisma } from "../../../generated/prisma/client.js";
+import { buildObservationUrl } from "../../utils/observation-links.js";
 import {
   buildActionPlanScopeWhere,
   buildExtensionRequestScopeWhere,
@@ -19,6 +20,7 @@ import type {
   DashboardObservationRow,
   DashboardReviewQueueRow,
   DashboardViewerProfile,
+  OperationalDashboardData,
 } from "./dashboard.types.js";
 import {
   getActionPlanDeadlineStatus,
@@ -148,7 +150,7 @@ const observationRow = (
   area: record.areaAssignments[0]?.area ?? { id: "", name: "Sin área" },
   code: displayCode(record),
   dueDate: record.currentDueDate.toISOString(),
-  href: `/observaciones/${record.id}`,
+  href: buildObservationUrl(record.id),
   id: record.id,
   isOverdue:
     !record.status.isFinal && record.currentDueDate.getTime() < now.getTime(),
@@ -312,7 +314,11 @@ const buildReviewRows = (
       .filter((item) => item.reviewStatus === "SENT_TO_AUDIT")
       .map((item) => ({
         areaName: item.actionPlan.observationArea.area.name,
-        href: `/observaciones/${item.actionPlan.observation.id}?tab=plans`,
+        href: buildObservationUrl(item.actionPlan.observation.id, {
+          advanceId: item.id,
+          planId: item.actionPlan.id,
+          tab: "plans",
+        }),
         id: item.id,
         kind: "PROGRESS" as const,
         responsibleName: item.submittedByUser.name,
@@ -329,7 +335,11 @@ const buildReviewRows = (
         const observation = item.observation ?? item.actionPlan!.observation;
         return {
           areaName: item.observationArea?.area.name ?? "Varias áreas",
-          href: `/ampliaciones-plazo/${item.id}`,
+          href: buildObservationUrl(observation.id, {
+            extensionId: item.id,
+            ...(item.actionPlan?.id ? { planId: item.actionPlan.id } : {}),
+            tab: "plans",
+          }),
           id: item.id,
           kind: "EXTENSION" as const,
           responsibleName: item.requestedByUser.name,
@@ -355,7 +365,7 @@ const latestRows = (
   [
     ...data.observations.slice(0, 6).map((item) => ({
       description: `Observación ${item.status.name.toLowerCase()} con ${item.progressPercent}% de avance.`,
-      href: `/observaciones/${item.id}`,
+      href: buildObservationUrl(item.id),
       id: item.id,
       kind: "OBSERVATION" as const,
       timestamp: item.updatedAt.toISOString(),
@@ -363,7 +373,11 @@ const latestRows = (
     })),
     ...data.evaluations.slice(0, 6).map((item) => ({
       description: `Evaluación ${statusLabel(item.reviewStatus).toLowerCase()} para el plan de acción.`,
-      href: `/observaciones/${item.actionPlan.observation.id}?tab=plans`,
+      href: buildObservationUrl(item.actionPlan.observation.id, {
+        advanceId: item.id,
+        planId: item.actionPlan.id,
+        tab: "plans",
+      }),
       id: item.id,
       kind: "PROGRESS" as const,
       timestamp: item.updatedAt.toISOString(),
@@ -530,6 +544,32 @@ const common = async (access: AuthorizationSummary) => {
   };
 };
 
+const operationalAttention = (
+  value: Awaited<ReturnType<typeof common>>,
+): DashboardObservationRow[] =>
+  [...value.data.observations]
+    .filter((item) => !item.status.isFinal)
+    .sort((a, b) => {
+      const rank = (item: (typeof value.data.observations)[number]) => {
+        if (item.currentDueDate < value.data.now) return 0;
+        if (
+          item.currentDueDate >= value.data.now &&
+          item.currentDueDate <=
+            new Date(value.data.now.getTime() + value.data.days * DAY)
+        )
+          return 1;
+        if (["INICIADO", "CON_AVANCE"].includes(item.status.key)) return 2;
+        return 3;
+      };
+      return (
+        rank(a) - rank(b) ||
+        a.currentDueDate.getTime() - b.currentDueDate.getTime() ||
+        b.updatedAt.getTime() - a.updatedAt.getTime()
+      );
+    })
+    .slice(0, 4)
+    .map((item) => observationRow(item, value.data.now));
+
 export const dashboardService = {
   async getMySummary(
     access: AuthorizationSummary,
@@ -545,6 +585,47 @@ export const dashboardService = {
         ? "Visión corporativa del ciclo de hallazgos."
         : "Seguimiento de sus áreas y planes asignados.",
       viewerProfile: profile,
+    };
+  },
+  async getOperationalDashboard(
+    access: AuthorizationSummary,
+  ): Promise<OperationalDashboardData> {
+    const value = await common(access);
+    const todayKey = getBusinessDateKey(value.data.now, value.data.timeZone);
+    const dueSoonEnd = new Date(`${todayKey}T00:00:00.000Z`);
+    dueSoonEnd.setUTCDate(dueSoonEnd.getUTCDate() + value.data.days);
+    const dueSoonEndKey = getDateOnlyKey(dueSoonEnd);
+    const pendingProgress = value.data.evaluations.filter(
+      (item) => item.reviewStatus === "SENT_TO_AUDIT",
+    ).length;
+    const pendingExtensions = value.data.extensions.filter((item) =>
+      ["SENT_TO_MANAGER", "SENT_TO_AUDIT"].includes(item.status),
+    ).length;
+
+    return {
+      attention: operationalAttention(value),
+      generatedAt: value.data.now.toISOString(),
+      links: {
+        allObservations: "/observaciones",
+        inProgressObservations: "/observaciones",
+        overdueObservations: "/observaciones?filter.overdue=true",
+        pendingApprovals: "/aprobaciones/pendientes",
+        pendingExtensions: "/ampliaciones-plazo",
+        upcomingObservations: `/observaciones?filter.currentDueDateFrom=${todayKey}&filter.currentDueDateTo=${dueSoonEndKey}`,
+      },
+      reminderDaysBeforeDue: value.data.days,
+      summary: {
+        inProgressObservations: value.data.observations.filter(
+          (item) =>
+            !item.status.isFinal &&
+            ["INICIADO", "CON_AVANCE"].includes(item.status.key),
+        ).length,
+        overdueObservations: value.overdue.length,
+        pendingApprovals: pendingProgress + pendingExtensions,
+        pendingExtensions,
+        totalObservations: value.data.observations.length,
+        upcomingObservations: value.upcomingObservations.length,
+      },
     };
   },
   async getAuditDashboard(
