@@ -21,7 +21,7 @@ export const ensureUploadDirectories = async (): Promise<void> => {
 };
 
 export const buildAvatarUrl = (fileName: string): string => {
-  return `${env.BETTER_AUTH_URL}/uploads/avatars/${fileName}`;
+  return `/uploads/avatars/${fileName}`;
 };
 
 export const buildLogoUrl = (fileName: string): string => {
