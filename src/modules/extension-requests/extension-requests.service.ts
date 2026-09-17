@@ -305,6 +305,23 @@ export const extensionRequestsService = {
       deletedAt: null,
       ...accessWhere(access),
       ...(query.actionPlanId ? { actionPlanId: query.actionPlanId } : {}),
+      ...(query.areaId
+        ? {
+            AND: [
+              {
+                OR: [
+                  { observationArea: { areaId: query.areaId } },
+                  { actionPlan: { observationArea: { areaId: query.areaId } } },
+                  {
+                    observation: {
+                      areaAssignments: { some: { areaId: query.areaId } },
+                    },
+                  },
+                ],
+              },
+            ],
+          }
+        : {}),
       ...(query.observationId
         ? {
             OR: [

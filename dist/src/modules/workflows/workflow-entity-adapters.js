@@ -1,4 +1,5 @@
 import { AppError } from "../../utils/app-error.js";
+import { buildObservationUrl } from "../../utils/observation-links.js";
 const database = (db) => {
     // Adapters are called from runtime transactions. The fallback is injected by
     // the registry only for validation/context reads in standalone callers.
@@ -218,7 +219,15 @@ const deadlineExtensionAdapter = {
             });
         }
     },
-    getEntityLink: (entityId) => `/ampliaciones-plazo/${entityId}`,
+    getEntityLink: (entityId, context) => context?.custom.observationId
+        ? buildObservationUrl(String(context.custom.observationId), {
+            extensionId: entityId,
+            ...(context.custom.actionPlanId
+                ? { planId: String(context.custom.actionPlanId) }
+                : {}),
+            tab: "plans",
+        })
+        : `/ampliaciones-plazo/${entityId}`,
 };
 const observationClosureAdapter = {
     processType: "OBSERVATION_CLOSURE",
@@ -411,8 +420,14 @@ const observationClosureAdapter = {
             });
         }
     },
-    getEntityLink: (_entityId, context) => context?.custom.observationId
-        ? `/observaciones/${context.custom.observationId}`
+    getEntityLink: (entityId, context) => context?.custom.observationId
+        ? buildObservationUrl(String(context.custom.observationId), {
+            advanceId: entityId,
+            ...(context.custom.actionPlanId
+                ? { planId: String(context.custom.actionPlanId) }
+                : {}),
+            tab: "plans",
+        })
         : "/observaciones",
 };
 const remediationPlanAdapter = {
@@ -532,7 +547,9 @@ const remediationPlanAdapter = {
         }
     },
     getEntityLink: (_entityId, context) => context?.custom.observationId
-        ? `/observaciones/${context.custom.observationId}`
+        ? buildObservationUrl(String(context.custom.observationId), {
+            tab: "plans",
+        })
         : "/observaciones",
 };
 const evidenceReviewAdapter = {
@@ -629,8 +646,11 @@ const evidenceReviewAdapter = {
             });
         }
     },
-    getEntityLink: (_entityId, context) => context?.custom.observationId
-        ? `/observaciones/${context.custom.observationId}?tab=evidence&evidenceId=${encodeURIComponent(_entityId)}`
+    getEntityLink: (entityId, context) => context?.custom.observationId
+        ? buildObservationUrl(String(context.custom.observationId), {
+            evidenceId: entityId,
+            tab: "evidence",
+        })
         : "/observaciones",
 };
 const adapters = new Map([

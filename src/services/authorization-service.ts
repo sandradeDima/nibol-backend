@@ -28,7 +28,8 @@ const getDataScope = (
   isAdmin: boolean,
 ): DataScope => {
   if (isAdmin) return "ALL";
-  if (roleCode === "AUDITOR") return "AUDIT_SCOPE";
+  if (roleCode === "AUDITOR" || roleCode === "AUDIT_CHIEF")
+    return "AUDIT_SCOPE";
   if (roleCode === "PROCESS_OWNER" || roleCode === "AREA_RESPONSIBLE") {
     return "AREA";
   }

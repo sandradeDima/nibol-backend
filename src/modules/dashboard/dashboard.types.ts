@@ -143,18 +143,24 @@ export type OperationalDashboardData = {
   generatedAt: string;
   links: {
     allObservations: string;
+    concludedObservations: string;
     inProgressObservations: string;
     overdueObservations: string;
+    pendingObservations: string;
     pendingApprovals: string;
     pendingExtensions: string;
+    pendingProgressReviews: string;
     upcomingObservations: string;
   };
   reminderDaysBeforeDue: number;
   summary: {
+    concludedObservations: number;
     inProgressObservations: number;
     overdueObservations: number;
+    pendingObservations: number;
     pendingApprovals: number;
     pendingExtensions: number;
+    pendingProgressReviews: number;
     totalObservations: number;
     upcomingObservations: number;
   };
@@ -233,4 +239,97 @@ export type DashboardMySummary = {
   preferredDashboard: DashboardScope;
   subtitle: string;
   viewerProfile: DashboardViewerProfile;
+};
+
+export type RoleDashboardRole =
+  | "PROCESS_OWNER"
+  | "AREA_RESPONSIBLE"
+  | "EXECUTOR";
+
+export type RoleDashboardOption = {
+  id: string;
+  name: string;
+};
+
+export type RoleDashboardNodeStatus = {
+  key: "PENDING" | "CONCLUDED" | "MIXED";
+  name: string;
+};
+
+export type RoleDashboardExecutorNode = {
+  concluded: number;
+  id: string;
+  name: string;
+  pending: number;
+  status: RoleDashboardNodeStatus;
+  total: number;
+};
+
+export type RoleDashboardResponsibleNode = {
+  concluded: number;
+  executors: RoleDashboardExecutorNode[];
+  id: string;
+  name: string;
+  pending: number;
+  status: RoleDashboardNodeStatus;
+  total: number;
+};
+
+export type RoleDashboardAreaNode = {
+  concluded: number;
+  executors?: RoleDashboardExecutorNode[];
+  id: string;
+  name: string;
+  pending: number;
+  responsibles?: RoleDashboardResponsibleNode[];
+  status: RoleDashboardNodeStatus;
+  total: number;
+};
+
+export type RoleDashboardPriority = {
+  code: "OVERDUE" | "PENDING_EXTENSIONS" | "PENDING_REVIEWS";
+  count: number;
+  href: string;
+  label: string;
+};
+
+export type RoleDashboardQuickAction = {
+  code:
+    | "SEND_PROGRESS"
+    | "UPLOAD_EVIDENCE"
+    | "UPDATE_PLAN"
+    | "REQUEST_EXTENSION"
+    | "VIEW_TIMELINE";
+  description: string;
+  href: string;
+  label: string;
+};
+
+export type RoleDashboardData = {
+  areas: RoleDashboardOption[];
+  filters: {
+    executors: RoleDashboardOption[];
+    responsibles: RoleDashboardOption[];
+  };
+  generatedAt: string;
+  globalSummary: {
+    concludedObservations: number;
+    pendingObservations: number;
+    totalObservations: number;
+  };
+  hierarchy: RoleDashboardAreaNode[];
+  priorities: RoleDashboardPriority[];
+  quickActions: RoleDashboardQuickAction[];
+  roleCode: RoleDashboardRole;
+  selectedAreaId: string | null;
+  selectedExecutorId: string | null;
+  selectedResponsibleId: string | null;
+  selectedExecutorIds?: string[];
+  selectedObservationState?: "PENDING" | "CONCLUDED" | null;
+  selectedResponsibleIds?: string[];
+  summary: {
+    concludedObservations: number;
+    pendingObservations: number;
+    totalObservations: number;
+  };
 };

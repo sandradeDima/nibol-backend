@@ -14,6 +14,11 @@ export const ROLE_DEFINITIONS = [
         name: "Auditor",
     },
     {
+        code: "AUDIT_CHIEF",
+        description: "Visibilidad global de reportería de Auditoría.",
+        name: "Jefe Auditor",
+    },
+    {
         code: "PROCESS_OWNER",
         description: "Seguimiento de observaciones y planes del proceso.",
         name: "Dueño del proceso",
@@ -177,6 +182,12 @@ const AREA_PERMISSIONS = [
 export const ROLE_PERMISSION_NAMES = {
     [ADMIN_ROLE_CODE]: ALL_PERMISSION_NAMES,
     AUDITOR: AUDITOR_PERMISSIONS,
+    AUDIT_CHIEF: [
+        "reports.view",
+        "reports.export",
+        "audit_reports.view",
+        "audit_reports.export",
+    ],
     PROCESS_OWNER: AREA_PERMISSIONS,
     AREA_RESPONSIBLE: [
         ...AREA_PERMISSIONS,

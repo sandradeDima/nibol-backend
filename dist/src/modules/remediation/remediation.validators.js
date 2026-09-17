@@ -1,4 +1,10 @@
 import { z } from "zod";
+const csvArray = (item) => z.preprocess((value) => typeof value === "string"
+    ? value
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean)
+    : value, z.array(item).min(1).optional());
 export const actionPlanIdParamSchema = z.object({ id: z.uuid() });
 export const observationActionPlanParamsSchema = z.object({ id: z.uuid() });
 export const remediationPlanIdParamSchema = z.object({ id: z.uuid() });
@@ -32,24 +38,26 @@ export const updateActionPlanSchema = z
     message: "At least one field is required.",
 });
 export const listActionPlansQuerySchema = z.object({
-    areaId: z.uuid().optional(),
+    areaId: csvArray(z.uuid()),
+    areaResponsibleUserId: csvArray(z.uuid()),
+    deadlineStatus: csvArray(z.enum(["VIGENTE", "VENCIDO", "REPROGRAMADO"])),
     dueDateFrom: z.coerce.date().optional(),
     dueDateTo: z.coerce.date().optional(),
-    observationId: z.uuid().optional(),
+    observationId: csvArray(z.uuid()),
     overdue: z
         .enum(["false", "true"])
         .transform((value) => value === "true")
         .optional(),
     page: z.coerce.number().int().positive().default(1),
     perPage: z.coerce.number().int().positive().max(100).default(20),
-    responsibleUserId: z.uuid().optional(),
+    progressStatus: csvArray(z.enum(["NOT_STARTED", "STARTED", "WITH_PROGRESS", "CONCLUDED"])),
+    reportNumber: z.string().trim().max(64).optional(),
+    responsibleUserId: csvArray(z.uuid()),
     search: z.string().trim().default(""),
     sortBy: z
         .enum(["currentDueDate", "progressPercent", "updatedAt"])
         .default("currentDueDate"),
     sortDirection: z.enum(["asc", "desc"]).default("asc"),
-    status: z
-        .enum(["NOT_STARTED", "STARTED", "WITH_PROGRESS", "CONCLUDED"])
-        .optional(),
+    status: csvArray(z.enum(["NOT_STARTED", "STARTED", "WITH_PROGRESS", "CONCLUDED"])),
 });
 //# sourceMappingURL=remediation.validators.js.map

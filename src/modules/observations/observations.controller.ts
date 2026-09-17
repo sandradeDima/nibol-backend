@@ -251,7 +251,9 @@ export const observationsController = {
         request.query["filter.currentDueDateFrom"],
       ),
       currentDueDateTo: queryValue(request.query["filter.currentDueDateTo"]),
+      deadlineStatus: queryValue(request.query["filter.deadlineStatus"]),
       mainObservationId: queryValue(request.query["filter.mainObservationId"]),
+      observationState: queryValue(request.query["filter.observationState"]),
       observationStatus: queryValue(request.query["filter.observationStatus"]),
       overdue: queryValue(request.query["filter.overdue"]),
       page: queryValue(request.query.page),
@@ -261,9 +263,11 @@ export const observationsController = {
       ),
       riskId: queryValue(request.query["filter.riskId"]),
       riskLevelId: queryValue(request.query["filter.riskLevelId"]),
+      progressStatus: queryValue(request.query["filter.progressStatus"]),
       search: queryValue(request.query.search),
       sortBy: queryValue(request.query.sortBy),
       sortDirection: queryValue(request.query.sortDirection),
+      title: queryValue(request.query["filter.title"]),
     });
     const result = await observationsService.listObservations(
       query,

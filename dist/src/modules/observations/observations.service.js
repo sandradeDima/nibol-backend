@@ -89,7 +89,9 @@ export const buildObservationAssignmentGroups = (records, maxPeriods) => {
             .sort((left, right) => left.reportNumber.localeCompare(right.reportNumber))
             .map((report) => ({
             areaNames: [...report.areaNames].sort((left, right) => left.localeCompare(right)),
-            observations: [...report.observations.values()].sort((left, right) => left.number - right.number).map((observation) => ({
+            observations: [...report.observations.values()]
+                .sort((left, right) => left.number - right.number)
+                .map((observation) => ({
                 area: [...observation.areaNames].join(", "),
                 code: `${report.reportNumber}-${observation.number}`,
                 description: observation.description,
@@ -304,6 +306,30 @@ const extensionRequestForObservationWhere = (observationId) => ({
         { observationArea: { observationId } },
     ],
 });
+const isObservationState = (value) => ["PENDING", "CONCLUDED"].includes(value);
+const isObservationProgressStatus = (value) => ["NO_INICIADO", "INICIADO", "CON_AVANCE", "CONCLUIDO"].includes(value);
+const buildObservationStateWhere = (states) => {
+    const selectedStates = new Set(states);
+    if (selectedStates.size !== 1)
+        return null;
+    return { status: { isFinal: selectedStates.has("CONCLUDED") } };
+};
+const buildObservationProgressWhere = (statuses) => {
+    if (statuses.length === 0)
+        return null;
+    if (statuses.length === 1)
+        return buildBusinessStatusWhere(statuses[0]);
+    return { OR: statuses.map((status) => buildBusinessStatusWhere(status)) };
+};
+const buildObservationDeadlineWhereForValues = (statuses, now) => {
+    if (statuses.length === 0)
+        return null;
+    if (statuses.length === 1)
+        return buildObservationDeadlineWhere(statuses[0], now);
+    return {
+        OR: statuses.map((status) => buildObservationDeadlineWhere(status, now)),
+    };
+};
 const buildBusinessStatusWhere = (status) => {
     switch (status) {
         case "NO_INICIADO":
@@ -342,6 +368,22 @@ const buildBusinessStatusWhere = (status) => {
             };
         case "CONCLUIDO":
             return { status: { isFinal: true } };
+    }
+};
+const buildObservationDeadlineWhere = (deadlineStatus, now) => {
+    switch (deadlineStatus) {
+        case "REPROGRAMADO":
+            return {
+                deadlineExtensionRequests: {
+                    some: { deletedAt: null, status: "MANAGER_APPROVED" },
+                },
+            };
+        case "VENCIDO":
+            return { currentDueDate: { lt: now }, status: { isFinal: false } };
+        case "VIGENTE":
+            return {
+                OR: [{ currentDueDate: { gte: now } }, { status: { isFinal: true } }],
+            };
     }
 };
 export const observationsService = {
@@ -798,72 +840,108 @@ export const observationsService = {
     },
     async listObservations(query, access) {
         const now = new Date();
+        const today = new Date(now);
+        today.setUTCHours(0, 0, 0, 0);
         const numericSearch = /^\d+$/.test(query.search)
             ? Number(query.search)
             : null;
+        const stateValues = [
+            ...new Set([
+                ...(query.observationState ?? []),
+                ...(query.observationStatus?.filter(isObservationState) ?? []),
+            ]),
+        ];
+        const progressStatuses = query.progressStatus?.length
+            ? query.progressStatus
+            : [
+                ...new Set(query.observationStatus?.filter(isObservationProgressStatus) ?? []),
+            ];
+        const stateWhere = buildObservationStateWhere(stateValues);
+        const progressWhere = buildObservationProgressWhere(progressStatuses);
+        const deadlineWhere = buildObservationDeadlineWhereForValues(query.deadlineStatus ?? [], today);
         const where = {
             AND: [
                 buildObservationAccessWhere(access),
-                ...(query.observationStatus
-                    ? [buildBusinessStatusWhere(query.observationStatus)]
+                ...(stateWhere ? [stateWhere] : []),
+                ...(progressWhere ? [progressWhere] : []),
+                ...(deadlineWhere ? [deadlineWhere] : []),
+                ...(query.currentDueDateFrom || query.currentDueDateTo
+                    ? [
+                        {
+                            currentDueDate: {
+                                ...(query.currentDueDateFrom
+                                    ? { gte: query.currentDueDateFrom }
+                                    : {}),
+                                ...(query.currentDueDateTo
+                                    ? { lte: query.currentDueDateTo }
+                                    : {}),
+                            },
+                        },
+                    ]
+                    : []),
+                ...(query.overdue !== undefined
+                    ? [
+                        query.overdue
+                            ? {
+                                currentDueDate: { lt: today },
+                                status: { isFinal: false },
+                            }
+                            : {
+                                OR: [
+                                    { currentDueDate: { gte: today } },
+                                    { status: { isFinal: true } },
+                                ],
+                            },
+                    ]
                     : []),
             ],
             deletedAt: null,
-            ...(query.actionPlanResponsibleUserId
+            ...(query.actionPlanResponsibleUserId?.length
                 ? {
                     actionPlans: {
                         some: {
                             deletedAt: null,
-                            responsibleUserId: query.actionPlanResponsibleUserId,
+                            responsibleUserId: { in: query.actionPlanResponsibleUserId },
                         },
                     },
                 }
                 : {}),
-            ...(query.areaId ||
-                query.areaResponsibleUserId ||
-                query.processOwnerUserId
+            ...(query.areaId?.length ||
+                query.areaResponsibleUserId?.length ||
+                query.processOwnerUserId?.length
                 ? {
                     areaAssignments: {
                         some: {
-                            ...(query.areaId ? { areaId: query.areaId } : {}),
-                            ...(query.areaResponsibleUserId
-                                ? { areaResponsibleUserId: query.areaResponsibleUserId }
+                            ...(query.areaId?.length
+                                ? { areaId: { in: query.areaId } }
                                 : {}),
-                            ...(query.processOwnerUserId
-                                ? { processOwnerUserId: query.processOwnerUserId }
+                            ...(query.areaResponsibleUserId?.length
+                                ? {
+                                    areaResponsibleUserId: {
+                                        in: query.areaResponsibleUserId,
+                                    },
+                                }
+                                : {}),
+                            ...(query.processOwnerUserId?.length
+                                ? { processOwnerUserId: { in: query.processOwnerUserId } }
                                 : {}),
                         },
                     },
                 }
                 : {}),
-            ...(query.auditReportId ? { auditReportId: query.auditReportId } : {}),
-            ...(query.currentDueDateFrom || query.currentDueDateTo
-                ? {
-                    currentDueDate: {
-                        ...(query.currentDueDateFrom
-                            ? { gte: query.currentDueDateFrom }
-                            : {}),
-                        ...(query.currentDueDateTo
-                            ? { lte: query.currentDueDateTo }
-                            : {}),
-                    },
-                }
+            ...(query.auditReportId?.length
+                ? { auditReportId: { in: query.auditReportId } }
                 : {}),
-            ...(query.mainObservationId
-                ? { mainObservationId: query.mainObservationId }
+            ...(query.mainObservationId?.length
+                ? { mainObservationId: { in: query.mainObservationId } }
                 : {}),
-            ...(query.overdue !== undefined
-                ? query.overdue
-                    ? { currentDueDate: { lt: now }, status: { isFinal: false } }
-                    : {
-                        OR: [
-                            { currentDueDate: { gte: now } },
-                            { status: { isFinal: true } },
-                        ],
-                    }
+            ...(query.riskId?.length
+                ? { risks: { some: { riskId: { in: query.riskId } } } }
                 : {}),
-            ...(query.riskId ? { risks: { some: { riskId: query.riskId } } } : {}),
-            ...(query.riskLevelId ? { riskLevelId: query.riskLevelId } : {}),
+            ...(query.riskLevelId?.length
+                ? { riskLevelId: { in: query.riskLevelId } }
+                : {}),
+            ...(query.title ? { title: { contains: query.title } } : {}),
             ...(query.search
                 ? {
                     OR: [

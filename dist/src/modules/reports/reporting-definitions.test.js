@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { getActionPlanDeadlineStatus, getEffectiveActionPlanDueDate, getOfficialActionPlanProgress, getObservationStatusGroup, getRiskGroupLabel, isApprovedDeadlineExtension, isObservationDueSoon, isObservationOverdue, } from "./reporting-definitions.js";
+import { buildActionPlanWhere } from "./reports.service.js";
+const scopedExecutor = {
+    dataScope: "ASSIGNED",
+    isAdmin: false,
+    permissions: ["reports.view"],
+    roleCode: "EXECUTOR",
+    roleName: "Ejecutor",
+    roles: ["EXECUTOR"],
+    userId: "user-1",
+};
 const now = new Date("2026-08-12T12:00:00.000Z");
 test("clasifica vencimientos sin contar estados finales como atrasados", () => {
     assert.equal(isObservationOverdue(new Date("2026-08-11T12:00:00.000Z"), {
@@ -66,5 +76,17 @@ test("aplica la fecha efectiva aprobada y conserva la fecha para hoy como vigent
         ],
     }, new Date("2026-09-09T12:00:00.000Z"), "UTC"), "VENCIDO");
     assert.equal(getActionPlanDeadlineStatus({ ...plan, status: "CONCLUDED" }, new Date("2026-10-01T12:00:00.000Z"), "UTC"), "VIGENTE");
+});
+test("el corte incluye altas del día y excluye altas posteriores", () => {
+    const where = buildActionPlanWhere({ cutoffDate: "2026-09-17" }, scopedExecutor, new Date("2030-01-01T12:00:00.000Z"), "America/La_Paz");
+    const serialized = JSON.stringify(where);
+    assert.equal(serialized.match(/2026-09-18T04:00:00.000Z/g)?.length, 2);
+    assert.doesNotMatch(serialized, /2030-01-01/);
+});
+test("el estado de vencimiento usa la fecha de corte y no la fecha actual", () => {
+    const where = buildActionPlanWhere({ cutoffDate: "2026-08-12", deadlineStatus: "VENCIDO" }, scopedExecutor, new Date("2030-01-01T12:00:00.000Z"), "UTC");
+    const serialized = JSON.stringify(where);
+    assert.match(serialized, /2026-08-12T00:00:00.000Z/);
+    assert.doesNotMatch(serialized, /2030-01-01/);
 });
 //# sourceMappingURL=reporting-definitions.test.js.map

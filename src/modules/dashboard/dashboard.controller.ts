@@ -4,6 +4,14 @@ import type { AuthorizationSummary } from "../../services/authorization-service.
 import { AppError } from "../../utils/app-error.js";
 import { sendSuccess } from "../../utils/response.js";
 import { dashboardService } from "./dashboard.service.js";
+import { roleDashboardQuerySchema } from "./dashboard.validators.js";
+
+const queryValue = (value: unknown): string | undefined =>
+  typeof value === "string"
+    ? value
+    : Array.isArray(value) && typeof value[0] === "string"
+      ? value[0]
+      : undefined;
 
 const getRequiredAuthorizationSummary = (
   request: Request,
@@ -43,6 +51,21 @@ export const dashboardController = {
   async getOperationalDashboard(request: Request, response: Response) {
     const result = await dashboardService.getOperationalDashboard(
       getRequiredAuthorizationSummary(request),
+    );
+
+    sendSuccess(response, result);
+  },
+
+  async getRoleDashboard(request: Request, response: Response) {
+    const result = await dashboardService.getRoleDashboard(
+      getRequiredAuthorizationSummary(request),
+      roleDashboardQuerySchema.parse({
+        areaId: queryValue(request.query.areaId),
+        areaResponsibleUserId: queryValue(request.query.areaResponsibleUserId),
+        executorId: queryValue(request.query.executorId),
+        observationState: queryValue(request.query.observationState),
+        search: queryValue(request.query.search),
+      }),
     );
 
     sendSuccess(response, result);

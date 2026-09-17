@@ -131,12 +131,16 @@ export const remediationController = {
     async listActionPlans(request, response) {
         const result = await remediationService.listActionPlans(listActionPlansQuerySchema.parse({
             areaId: value(request.query["filter.areaId"]),
+            areaResponsibleUserId: value(request.query["filter.areaResponsibleUserId"]),
+            deadlineStatus: value(request.query["filter.deadlineStatus"]),
             dueDateFrom: value(request.query["filter.dueDateFrom"]),
             dueDateTo: value(request.query["filter.dueDateTo"]),
             observationId: value(request.query["filter.observationId"]),
             overdue: value(request.query["filter.overdue"]),
             page: value(request.query.page),
             perPage: value(request.query.perPage),
+            progressStatus: value(request.query["filter.progressStatus"]),
+            reportNumber: value(request.query["filter.reportNumber"]),
             responsibleUserId: value(request.query["filter.responsibleUserId"]),
             search: value(request.query.search),
             sortBy: value(request.query.sortBy),

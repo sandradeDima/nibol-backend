@@ -73,6 +73,36 @@ const labels = {
   WITH_PROGRESS: "Con avance",
 } as const;
 
+type ActionPlanDeadlineStatus = NonNullable<
+  ListActionPlansQuery["deadlineStatus"]
+>[number];
+
+const buildActionPlanDeadlineWhere = (
+  status: ActionPlanDeadlineStatus,
+  today: Date,
+): Prisma.ActionPlanWhereInput => {
+  switch (status) {
+    case "REPROGRAMADO":
+      return {
+        deadlineExtensionRequests: {
+          some: {
+            deletedAt: null,
+            status: "MANAGER_APPROVED",
+          },
+        },
+      };
+    case "VENCIDO":
+      return {
+        currentDueDate: { lt: today },
+        status: { not: "CONCLUDED" },
+      };
+    case "VIGENTE":
+      return {
+        OR: [{ currentDueDate: { gte: today } }, { status: "CONCLUDED" }],
+      };
+  }
+};
+
 const format = (record: ActionPlanRecord): ActionPlanDetail => {
   const officialProgress = getOfficialActionPlanProgress(record.status);
   const effectiveDueDate = getEffectiveActionPlanDueDate(record);
@@ -674,45 +704,112 @@ export const remediationService = {
     access: AuthorizationSummary,
   ) {
     const now = new Date();
+    const today = new Date(now);
+    today.setUTCHours(0, 0, 0, 0);
+    const progressStatuses = query.progressStatus?.length
+      ? query.progressStatus
+      : (query.status ?? []);
     const where: Prisma.ActionPlanWhereInput = {
-      deletedAt: null,
-      ...accessWhere(access),
-      ...(query.areaId ? { observationArea: { areaId: query.areaId } } : {}),
-      ...(query.dueDateFrom || query.dueDateTo
-        ? {
-            currentDueDate: {
-              ...(query.dueDateFrom ? { gte: query.dueDateFrom } : {}),
-              ...(query.dueDateTo ? { lte: query.dueDateTo } : {}),
-            },
-          }
-        : {}),
-      ...(query.observationId ? { observationId: query.observationId } : {}),
-      ...(query.overdue !== undefined
-        ? query.overdue
-          ? { currentDueDate: { lt: now }, status: { not: "CONCLUDED" } }
-          : { OR: [{ currentDueDate: { gte: now } }, { status: "CONCLUDED" }] }
-        : {}),
-      ...(query.responsibleUserId
-        ? { responsibleUserId: query.responsibleUserId }
-        : {}),
-      ...(query.search
-        ? {
-            OR: [
-              { description: { contains: query.search } },
-              { observation: { title: { contains: query.search } } },
+      AND: [
+        accessWhere(access),
+        ...(query.deadlineStatus?.length
+          ? [
               {
-                observation: {
-                  auditReport: { reportNumber: { contains: query.search } },
+                OR: query.deadlineStatus.map((status) =>
+                  buildActionPlanDeadlineWhere(status, today),
+                ),
+              },
+            ]
+          : []),
+        ...(query.overdue !== undefined
+          ? [
+              query.overdue
+                ? {
+                    currentDueDate: { lt: today },
+                    status: { not: "CONCLUDED" as const },
+                  }
+                : {
+                    OR: [
+                      { currentDueDate: { gte: today } },
+                      { status: "CONCLUDED" as const },
+                    ],
+                  },
+            ]
+          : []),
+        ...(query.dueDateFrom || query.dueDateTo
+          ? [
+              {
+                currentDueDate: {
+                  ...(query.dueDateFrom ? { gte: query.dueDateFrom } : {}),
+                  ...(query.dueDateTo ? { lte: query.dueDateTo } : {}),
                 },
               },
-              { responsibleUser: { name: { contains: query.search } } },
+            ]
+          : []),
+        ...(query.areaId?.length || query.areaResponsibleUserId?.length
+          ? [
               {
-                observationArea: { area: { name: { contains: query.search } } },
+                observationArea: {
+                  ...(query.areaId?.length
+                    ? { areaId: { in: query.areaId } }
+                    : {}),
+                  ...(query.areaResponsibleUserId?.length
+                    ? {
+                        areaResponsibleUserId: {
+                          in: query.areaResponsibleUserId,
+                        },
+                      }
+                    : {}),
+                },
               },
-            ],
-          }
-        : {}),
-      ...(query.status ? { status: query.status } : {}),
+            ]
+          : []),
+        ...(query.observationId?.length
+          ? [{ observationId: { in: query.observationId } }]
+          : []),
+        ...(progressStatuses.length
+          ? [{ status: { in: progressStatuses } }]
+          : []),
+        ...(query.reportNumber
+          ? [
+              {
+                observation: {
+                  auditReport: {
+                    reportNumber: { contains: query.reportNumber },
+                  },
+                },
+              },
+            ]
+          : []),
+        ...(query.responsibleUserId?.length
+          ? [{ responsibleUserId: { in: query.responsibleUserId } }]
+          : []),
+        ...(query.search
+          ? [
+              {
+                OR: [
+                  { title: { contains: query.search } },
+                  { description: { contains: query.search } },
+                  { observation: { title: { contains: query.search } } },
+                  {
+                    observation: {
+                      auditReport: {
+                        reportNumber: { contains: query.search },
+                      },
+                    },
+                  },
+                  { responsibleUser: { name: { contains: query.search } } },
+                  {
+                    observationArea: {
+                      area: { name: { contains: query.search } },
+                    },
+                  },
+                ],
+              },
+            ]
+          : []),
+      ],
+      deletedAt: null,
     };
     const [records, total] = await Promise.all([
       prisma.actionPlan.findMany({

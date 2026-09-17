@@ -8,6 +8,7 @@ import {
   buildProgressEvaluationScopeWhere,
   type AuthorizationSummary,
 } from "../../services/authorization-service.js";
+import { AppError } from "../../utils/app-error.js";
 import { prisma } from "../../utils/prisma.js";
 import type {
   AreaDashboardData,
@@ -21,7 +22,17 @@ import type {
   DashboardReviewQueueRow,
   DashboardViewerProfile,
   OperationalDashboardData,
+  RoleDashboardAreaNode,
+  RoleDashboardData,
+  RoleDashboardExecutorNode,
+  RoleDashboardNodeStatus,
+  RoleDashboardOption,
+  RoleDashboardPriority,
+  RoleDashboardQuickAction,
+  RoleDashboardResponsibleNode,
+  RoleDashboardRole,
 } from "./dashboard.types.js";
+import type { RoleDashboardQuery } from "./dashboard.validators.js";
 import {
   getActionPlanDeadlineStatus,
   getBusinessDateKey,
@@ -38,7 +49,8 @@ const viewerProfile = (
   access: AuthorizationSummary,
 ): DashboardViewerProfile => {
   if (access.roleCode === "SYSTEM_ADMIN") return "ADMIN";
-  if (access.roleCode === "AUDITOR") return "AUDIT";
+  if (access.roleCode === "AUDITOR" || access.roleCode === "AUDIT_CHIEF")
+    return "AUDIT";
   if (access.roleCode === "PROCESS_OWNER") return "MANAGEMENT";
   if (access.roleCode === "AREA_RESPONSIBLE" || access.roleCode === "EXECUTOR")
     return "EXECUTOR";
@@ -546,6 +558,7 @@ const common = async (access: AuthorizationSummary) => {
 
 const operationalAttention = (
   value: Awaited<ReturnType<typeof common>>,
+  access: AuthorizationSummary,
 ): DashboardObservationRow[] =>
   [...value.data.observations]
     .filter((item) => !item.status.isFinal)
@@ -568,9 +581,636 @@ const operationalAttention = (
       );
     })
     .slice(0, 4)
-    .map((item) => observationRow(item, value.data.now));
+    .map((item) => {
+      const row = observationRow(item, value.data.now);
+      const filters = new URLSearchParams({
+        "filter.observationState": "PENDING",
+      });
+      const area = item.areaAssignments[0];
+      if (area?.areaId) filters.set("filter.areaId", area.areaId);
+      if (access.roleCode === "AREA_RESPONSIBLE") {
+        filters.set("filter.areaResponsibleUserId", access.userId);
+      }
+      if (access.roleCode === "EXECUTOR") {
+        filters.set("filter.actionPlanResponsibleUserId", access.userId);
+      }
+      return { ...row, href: `/observaciones?${filters.toString()}` };
+    });
+
+const roleDashboardRoles = new Set<RoleDashboardRole>([
+  "AREA_RESPONSIBLE",
+  "EXECUTOR",
+  "PROCESS_OWNER",
+]);
+
+const roleActionPlanWhere = (
+  access: AuthorizationSummary,
+  query: RoleDashboardQuery,
+): Prisma.ActionPlanWhereInput => ({
+  deletedAt: null,
+  ...(access.roleCode === "EXECUTOR"
+    ? { responsibleUserId: access.userId }
+    : query.executorId?.length
+      ? { responsibleUserId: { in: query.executorId } }
+      : {}),
+});
+
+const roleObservationAreaWhere = (
+  access: AuthorizationSummary,
+  query: RoleDashboardQuery,
+): Prisma.ObservationAreaWhereInput => ({
+  ...buildObservationAreaScopeWhere(access),
+  ...(query.areaId ? { areaId: query.areaId } : {}),
+  ...(access.roleCode === "PROCESS_OWNER" && query.areaResponsibleUserId?.length
+    ? { areaResponsibleUserId: { in: query.areaResponsibleUserId } }
+    : {}),
+  ...(access.roleCode !== "EXECUTOR" && query.executorId?.length
+    ? {
+        actionPlans: {
+          some: {
+            deletedAt: null,
+            responsibleUserId: { in: query.executorId },
+          },
+        },
+      }
+    : {}),
+});
+
+const roleObservationWhere = (
+  access: AuthorizationSummary,
+  query: RoleDashboardQuery,
+): Prisma.ObservationWhereInput => {
+  const areaWhere = roleObservationAreaWhere(access, query);
+  const actionPlanWhere = roleActionPlanWhere(access, query);
+  const search = query.search.trim();
+  return {
+    ...buildObservationScopeWhere(access),
+    AND: [
+      { areaAssignments: { some: areaWhere } },
+      ...(query.observationState
+        ? [
+            {
+              status: { isFinal: query.observationState === "CONCLUDED" },
+            },
+          ]
+        : []),
+      ...(search
+        ? [
+            {
+              OR: [
+                { title: { contains: search } },
+                { description: { contains: search } },
+                { auditRecommendation: { contains: search } },
+                { auditReport: { reportNumber: { contains: search } } },
+                { auditReport: { title: { contains: search } } },
+                {
+                  areaAssignments: {
+                    some: {
+                      ...areaWhere,
+                      area: { name: { contains: search } },
+                    },
+                  },
+                },
+                {
+                  areaAssignments: {
+                    some: {
+                      ...areaWhere,
+                      areaResponsible: { name: { contains: search } },
+                    },
+                  },
+                },
+                {
+                  areaAssignments: {
+                    some: {
+                      ...areaWhere,
+                      actionPlans: {
+                        some: {
+                          ...actionPlanWhere,
+                          description: { contains: search },
+                        },
+                      },
+                    },
+                  },
+                },
+                {
+                  areaAssignments: {
+                    some: {
+                      ...areaWhere,
+                      actionPlans: {
+                        some: {
+                          ...actionPlanWhere,
+                          responsibleUser: { name: { contains: search } },
+                        },
+                      },
+                    },
+                  },
+                },
+              ],
+            },
+          ]
+        : []),
+    ],
+  };
+};
+
+const roleObservationInclude = (
+  access: AuthorizationSummary,
+  query: RoleDashboardQuery,
+) =>
+  ({
+    areaAssignments: {
+      include: {
+        actionPlans: {
+          select: {
+            id: true,
+            responsibleUser: { select: { id: true, name: true } },
+          },
+          where: roleActionPlanWhere(access, query),
+        },
+        area: { select: { id: true, name: true } },
+        areaResponsible: { select: { id: true, name: true } },
+      },
+      where: roleObservationAreaWhere(access, query),
+    },
+    auditReport: { select: { reportNumber: true } },
+    status: { select: { isFinal: true, key: true, name: true } },
+  }) satisfies Prisma.ObservationInclude;
+
+type RoleObservationRecord = Prisma.ObservationGetPayload<{
+  include: ReturnType<typeof roleObservationInclude>;
+}>;
+
+const roleAssignmentSelect = {
+  actionPlans: {
+    select: {
+      id: true,
+      responsibleUser: { select: { id: true, name: true } },
+    },
+    where: { deletedAt: null },
+  },
+  area: { select: { id: true, name: true } },
+  areaResponsible: { select: { id: true, name: true } },
+} satisfies Prisma.ObservationAreaSelect;
+
+type RoleAssignmentRecord = Prisma.ObservationAreaGetPayload<{
+  select: typeof roleAssignmentSelect;
+}>;
+
+const roleOption = (record: {
+  id: string;
+  name: string;
+}): RoleDashboardOption => ({
+  id: record.id,
+  name: record.name,
+});
+
+const uniqueRoleOptions = (
+  records: Array<{ id: string; name: string }>,
+): RoleDashboardOption[] =>
+  [
+    ...new Map(
+      records.map((record) => [record.id, roleOption(record)]),
+    ).values(),
+  ].sort((left, right) => left.name.localeCompare(right.name, "es"));
+
+const relevantPlans = (
+  assignment: RoleAssignmentRecord,
+  access: AuthorizationSummary,
+) =>
+  access.roleCode === "EXECUTOR"
+    ? assignment.actionPlans.filter(
+        (plan) => plan.responsibleUser.id === access.userId,
+      )
+    : assignment.actionPlans;
+
+const roleDashboardContextParams = (query: RoleDashboardQuery) => {
+  const params = new URLSearchParams();
+  if (query.areaId) params.set("filter.areaId", query.areaId);
+  if (query.areaResponsibleUserId?.length)
+    params.set(
+      "filter.areaResponsibleUserId",
+      query.areaResponsibleUserId.join(","),
+    );
+  if (query.executorId?.length)
+    params.set(
+      "filter.actionPlanResponsibleUserId",
+      query.executorId.join(","),
+    );
+  if (query.observationState)
+    params.set("filter.observationState", query.observationState);
+  return params;
+};
+
+const observationsHref = (
+  query: RoleDashboardQuery,
+  extra: Record<string, string> = {},
+) => {
+  const params = roleDashboardContextParams(query);
+  if (query.search) params.set("search", query.search);
+  Object.entries(extra).forEach(([key, value]) => params.set(key, value));
+  return `/observaciones?${params.toString()}`;
+};
+
+const extensionRequestsHref = (query: RoleDashboardQuery) => {
+  const params = new URLSearchParams({
+    "filter.status": "SENT_TO_MANAGER",
+  });
+  if (query.areaId) params.set("filter.areaId", query.areaId);
+  return `/ampliaciones-plazo?${params.toString()}`;
+};
+
+const progressReviewsHref = (query: RoleDashboardQuery) => {
+  const params = new URLSearchParams({
+    "filter.reviewStatus": "SENT_TO_AUDIT",
+  });
+  if (query.areaId) params.set("filter.areaId", query.areaId);
+  return `/avances-evidencias?${params.toString()}`;
+};
+
+type RoleAggregate = {
+  concluded: Set<string>;
+  pending: Set<string>;
+  total: Set<string>;
+};
+
+type RoleHierarchyBucket = {
+  aggregate: RoleAggregate;
+  children: Map<string, RoleHierarchyBucket>;
+  id: string;
+  name: string;
+};
+
+const emptyRoleAggregate = (): RoleAggregate => ({
+  concluded: new Set(),
+  pending: new Set(),
+  total: new Set(),
+});
+
+const emptyRoleBucket = (id: string, name: string): RoleHierarchyBucket => ({
+  aggregate: emptyRoleAggregate(),
+  children: new Map(),
+  id,
+  name,
+});
+
+const addToRoleAggregate = (
+  aggregate: RoleAggregate,
+  record: RoleObservationRecord,
+) => {
+  aggregate.total.add(record.id);
+  if (record.status.isFinal) aggregate.concluded.add(record.id);
+  else aggregate.pending.add(record.id);
+};
+
+const getRoleChild = (
+  bucket: RoleHierarchyBucket,
+  id: string,
+  name: string,
+) => {
+  const current = bucket.children.get(id);
+  if (current) return current;
+  const next = emptyRoleBucket(id, name);
+  bucket.children.set(id, next);
+  return next;
+};
+
+export const getRoleDashboardStatus = (
+  pending: number,
+  concluded: number,
+): RoleDashboardNodeStatus => {
+  if (pending > 0 && concluded > 0) return { key: "MIXED", name: "Mixto" };
+  if (concluded > 0) return { key: "CONCLUDED", name: "Concluida" };
+  return { key: "PENDING", name: "Pendiente" };
+};
+
+const roleAggregateValues = (aggregate: RoleAggregate) => {
+  const pending = aggregate.pending.size;
+  const concluded = aggregate.concluded.size;
+  return {
+    concluded,
+    pending,
+    status: getRoleDashboardStatus(pending, concluded),
+    total: aggregate.total.size,
+  };
+};
+
+const sortedRoleChildren = (bucket: RoleHierarchyBucket) =>
+  [...bucket.children.values()].sort((left, right) =>
+    left.name.localeCompare(right.name, "es"),
+  );
+
+const buildRoleDashboardHierarchy = (
+  records: RoleObservationRecord[],
+  roleCode: RoleDashboardRole,
+): RoleDashboardAreaNode[] => {
+  const areas = new Map<string, RoleHierarchyBucket>();
+  for (const record of records) {
+    for (const assignment of record.areaAssignments) {
+      const area =
+        areas.get(assignment.area.id) ??
+        emptyRoleBucket(assignment.area.id, assignment.area.name);
+      areas.set(assignment.area.id, area);
+      addToRoleAggregate(area.aggregate, record);
+      const plans = assignment.actionPlans;
+
+      if (roleCode === "PROCESS_OWNER") {
+        const responsible = getRoleChild(
+          area,
+          assignment.areaResponsible.id,
+          assignment.areaResponsible.name,
+        );
+        addToRoleAggregate(responsible.aggregate, record);
+        for (const plan of plans) {
+          const executor = getRoleChild(
+            responsible,
+            plan.responsibleUser.id,
+            plan.responsibleUser.name,
+          );
+          addToRoleAggregate(executor.aggregate, record);
+        }
+      } else if (plans.length) {
+        for (const plan of plans) {
+          const executor = getRoleChild(
+            area,
+            plan.responsibleUser.id,
+            plan.responsibleUser.name,
+          );
+          addToRoleAggregate(executor.aggregate, record);
+        }
+      } else if (roleCode === "AREA_RESPONSIBLE") {
+        const executor = getRoleChild(area, "unassigned", "Sin ejecutor");
+        addToRoleAggregate(executor.aggregate, record);
+      }
+    }
+  }
+
+  const toExecutor = (
+    bucket: RoleHierarchyBucket,
+  ): RoleDashboardExecutorNode => ({
+    ...roleAggregateValues(bucket.aggregate),
+    id: bucket.id,
+    name: bucket.name,
+  });
+  const toResponsible = (
+    bucket: RoleHierarchyBucket,
+  ): RoleDashboardResponsibleNode => ({
+    ...roleAggregateValues(bucket.aggregate),
+    executors: sortedRoleChildren(bucket).map(toExecutor),
+    id: bucket.id,
+    name: bucket.name,
+  });
+
+  return [...areas.values()]
+    .sort((left, right) => left.name.localeCompare(right.name, "es"))
+    .map((area) => ({
+      ...roleAggregateValues(area.aggregate),
+      ...(roleCode === "PROCESS_OWNER"
+        ? { responsibles: sortedRoleChildren(area).map(toResponsible) }
+        : { executors: sortedRoleChildren(area).map(toExecutor) }),
+      id: area.id,
+      name: area.name,
+    }));
+};
+
+const priority = (
+  code: RoleDashboardPriority["code"],
+  label: string,
+  count: number,
+  href: string,
+): RoleDashboardPriority => ({ code, count, href, label });
+
+const quickActions = (
+  access: AuthorizationSummary,
+  query: RoleDashboardQuery,
+): RoleDashboardQuickAction[] => {
+  if (access.roleCode !== "EXECUTOR") return [];
+  const planParams = new URLSearchParams({
+    "filter.responsibleUserId": access.userId,
+  });
+  if (query.areaId) planParams.set("filter.areaId", query.areaId);
+  const planHref = `/planes-accion?${planParams.toString()}`;
+  return [
+    {
+      code: "SEND_PROGRESS",
+      description: "Registra y envía un nuevo avance.",
+      href: planHref,
+      label: "Enviar avance",
+    },
+    {
+      code: "UPLOAD_EVIDENCE",
+      description: "Adjunta respaldo a un plan de acción.",
+      href: planHref,
+      label: "Cargar evidencia",
+    },
+    {
+      code: "UPDATE_PLAN",
+      description: "Actualiza fechas, descripción o progreso.",
+      href: planHref,
+      label: "Actualizar plan",
+    },
+    {
+      code: "REQUEST_EXTENSION",
+      description: "Solicita una ampliación de plazo.",
+      href: planHref,
+      label: "Solicitar ampliación",
+    },
+    {
+      code: "VIEW_TIMELINE",
+      description: "Consulta fechas y próximos hitos.",
+      href: "/cronograma",
+      label: "Ver cronograma",
+    },
+  ];
+};
 
 export const dashboardService = {
+  async getRoleDashboard(
+    access: AuthorizationSummary,
+    query: RoleDashboardQuery,
+  ): Promise<RoleDashboardData> {
+    if (!roleDashboardRoles.has(access.roleCode as RoleDashboardRole))
+      throw new AppError("Este dashboard no está disponible para su rol.", 403);
+
+    const roleCode = access.roleCode as RoleDashboardRole;
+    const roleQuery = { ...query, search: query.search ?? "" };
+    if (
+      (roleCode !== "PROCESS_OWNER" &&
+        roleQuery.areaResponsibleUserId?.length) ||
+      (roleCode === "EXECUTOR" && roleQuery.executorId?.length)
+    )
+      throw new AppError(
+        "Uno de los filtros no está disponible para su rol.",
+        403,
+      );
+
+    const assignments = await prisma.observationArea.findMany({
+      select: roleAssignmentSelect,
+      where: {
+        ...buildObservationAreaScopeWhere(access),
+        area: { deletedAt: null },
+        observation: { deletedAt: null },
+      },
+    });
+    const areas = uniqueRoleOptions(assignments.map(({ area }) => area));
+    if (roleQuery.areaId && !areas.some((area) => area.id === roleQuery.areaId))
+      throw new AppError(
+        "El área seleccionada no está dentro de su alcance.",
+        403,
+      );
+
+    const areaAssignments = assignments.filter(
+      (assignment) =>
+        !roleQuery.areaId || assignment.area.id === roleQuery.areaId,
+    );
+    const responsibles =
+      roleCode === "PROCESS_OWNER"
+        ? uniqueRoleOptions(
+            areaAssignments.map(({ areaResponsible }) => areaResponsible),
+          )
+        : [];
+    if (
+      roleQuery.areaResponsibleUserId?.some(
+        (selectedId) =>
+          !responsibles.some((responsible) => responsible.id === selectedId),
+      )
+    )
+      throw new AppError(
+        "El responsable seleccionado no está dentro de su alcance.",
+        403,
+      );
+
+    const executors = uniqueRoleOptions(
+      areaAssignments.flatMap((assignment) =>
+        relevantPlans(assignment, access).map(
+          ({ responsibleUser }) => responsibleUser,
+        ),
+      ),
+    );
+    if (
+      roleQuery.executorId?.some(
+        (selectedId) =>
+          !executors.some((executor) => executor.id === selectedId),
+      )
+    )
+      throw new AppError(
+        "El ejecutor seleccionado no está dentro de su alcance.",
+        403,
+      );
+
+    const [observations, globalObservations] = await Promise.all([
+      prisma.observation.findMany({
+        include: roleObservationInclude(access, roleQuery),
+        orderBy: { updatedAt: "desc" },
+        where: roleObservationWhere(access, roleQuery),
+      }),
+      prisma.observation.findMany({
+        select: { status: { select: { isFinal: true } } },
+        where: roleObservationWhere(access, { search: "" }),
+      }),
+    ]);
+    const observationIds = observations.map(({ id }) => id);
+    const observationAreaIds = observations.flatMap((observation) =>
+      observation.areaAssignments.map(({ id }) => id),
+    );
+    const actionPlanIds = observations.flatMap((observation) =>
+      observation.areaAssignments.flatMap((assignment) =>
+        assignment.actionPlans.map(({ id }) => id),
+      ),
+    );
+    const [pendingExtensions, pendingReviews] = await Promise.all([
+      prisma.deadlineExtensionRequest.count({
+        where: {
+          AND: [
+            buildExtensionRequestScopeWhere(access),
+            { status: "SENT_TO_MANAGER" },
+            {
+              OR: [
+                { actionPlanId: { in: actionPlanIds } },
+                { observationAreaId: { in: observationAreaIds } },
+                { observationId: { in: observationIds } },
+              ],
+            },
+          ],
+        },
+      }),
+      prisma.progressEvaluation.count({
+        where: {
+          AND: [
+            buildProgressEvaluationScopeWhere(access),
+            { actionPlanId: { in: actionPlanIds } },
+            { reviewStatus: "SENT_TO_AUDIT" },
+          ],
+        },
+      }),
+    ]);
+
+    const now = new Date();
+    const pendingObservations = observations.filter(
+      (observation) => !observation.status.isFinal,
+    );
+    const concludedObservations = observations.filter(
+      (observation) => observation.status.isFinal,
+    );
+    const globalPendingObservations = globalObservations.filter(
+      (observation) => !observation.status.isFinal,
+    ).length;
+    const overdueObservations = pendingObservations.filter(
+      (observation) => observation.currentDueDate < now,
+    ).length;
+    const priorities =
+      roleCode === "EXECUTOR"
+        ? []
+        : [
+            priority(
+              "OVERDUE",
+              "Vencidas",
+              overdueObservations,
+              observationsHref(roleQuery, {
+                "filter.deadlineStatus": "VENCIDO",
+                "filter.observationState": "PENDING",
+              }),
+            ),
+            priority(
+              "PENDING_EXTENSIONS",
+              "Ampliaciones pendientes",
+              pendingExtensions,
+              extensionRequestsHref(roleQuery),
+            ),
+            priority(
+              "PENDING_REVIEWS",
+              "Avances pendientes de revisión",
+              pendingReviews,
+              progressReviewsHref(roleQuery),
+            ),
+          ];
+
+    return {
+      areas,
+      filters: { executors, responsibles },
+      generatedAt: now.toISOString(),
+      globalSummary: {
+        concludedObservations:
+          globalObservations.length - globalPendingObservations,
+        pendingObservations: globalPendingObservations,
+        totalObservations: globalObservations.length,
+      },
+      hierarchy: buildRoleDashboardHierarchy(observations, roleCode),
+      priorities,
+      quickActions: quickActions(access, roleQuery),
+      roleCode,
+      selectedAreaId: roleQuery.areaId ?? null,
+      selectedExecutorId: roleQuery.executorId?.[0] ?? null,
+      selectedExecutorIds: roleQuery.executorId ?? [],
+      selectedObservationState: roleQuery.observationState ?? null,
+      selectedResponsibleId: roleQuery.areaResponsibleUserId?.[0] ?? null,
+      selectedResponsibleIds: roleQuery.areaResponsibleUserId ?? [],
+      summary: {
+        concludedObservations: concludedObservations.length,
+        pendingObservations: pendingObservations.length,
+        totalObservations: observations.length,
+      },
+    };
+  },
   async getMySummary(
     access: AuthorizationSummary,
   ): Promise<DashboardMySummary> {
@@ -603,26 +1243,37 @@ export const dashboardService = {
     ).length;
 
     return {
-      attention: operationalAttention(value),
+      attention: operationalAttention(value, access),
       generatedAt: value.data.now.toISOString(),
       links: {
         allObservations: "/observaciones",
-        inProgressObservations: "/observaciones",
-        overdueObservations: "/observaciones?filter.overdue=true",
+        concludedObservations:
+          "/observaciones?filter.observationState=CONCLUDED",
+        inProgressObservations:
+          "/observaciones?filter.observationState=PENDING",
+        overdueObservations: "/observaciones?filter.deadlineStatus=VENCIDO",
+        pendingObservations: "/observaciones?filter.observationState=PENDING",
         pendingApprovals: "/aprobaciones/pendientes",
-        pendingExtensions: "/ampliaciones-plazo",
+        pendingExtensions: "/ampliaciones-plazo?filter.status=SENT_TO_MANAGER",
+        pendingProgressReviews:
+          "/avances-evidencias?filter.reviewStatus=SENT_TO_AUDIT",
         upcomingObservations: `/observaciones?filter.currentDueDateFrom=${todayKey}&filter.currentDueDateTo=${dueSoonEndKey}`,
       },
       reminderDaysBeforeDue: value.data.days,
       summary: {
+        concludedObservations: value.data.observations.filter(
+          (item) => item.status.isFinal,
+        ).length,
         inProgressObservations: value.data.observations.filter(
           (item) =>
             !item.status.isFinal &&
             ["INICIADO", "CON_AVANCE"].includes(item.status.key),
         ).length,
         overdueObservations: value.overdue.length,
+        pendingObservations: value.open.length,
         pendingApprovals: pendingProgress + pendingExtensions,
         pendingExtensions,
+        pendingProgressReviews: pendingProgress,
         totalObservations: value.data.observations.length,
         upcomingObservations: value.upcomingObservations.length,
       },

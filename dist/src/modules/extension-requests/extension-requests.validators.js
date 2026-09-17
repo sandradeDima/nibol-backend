@@ -24,6 +24,7 @@ export const reviewExtensionRequestSchema = z.object({
 });
 export const listExtensionRequestsQuerySchema = z.object({
     actionPlanId: z.uuid().optional(),
+    areaId: z.uuid().optional(),
     observationId: z.uuid().optional(),
     page: z.coerce.number().int().positive().default(1),
     perPage: z.coerce.number().int().positive().max(100).default(20),

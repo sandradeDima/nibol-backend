@@ -1,6 +1,7 @@
 import { authorizationService, buildActionPlanScopeWhere, buildEvidenceScopeWhere, buildExtensionRequestScopeWhere, } from "../../services/authorization-service.js";
 import { notificationService } from "../../services/notification-service.js";
 import { AppError } from "../../utils/app-error.js";
+import { buildObservationUrl } from "../../utils/observation-links.js";
 import { prisma } from "../../utils/prisma.js";
 import { workflowIntegrationService } from "../workflows/workflow-integration.service.js";
 import { workflowTaskService } from "../workflows/workflow-task.service.js";
@@ -74,6 +75,16 @@ const include = {
         },
     },
     requestedByUser: { select: userSelect },
+};
+const extensionTargetUrl = (record) => {
+    const observation = record.observation ?? record.actionPlan?.observation;
+    if (!observation)
+        return `/ampliaciones-plazo/${record.id}`;
+    return buildObservationUrl(observation.id, {
+        extensionId: record.id,
+        ...(record.actionPlan?.id ? { planId: record.actionPlan.id } : {}),
+        tab: "plans",
+    });
 };
 const format = (record) => ({
     actionPlan: record.actionPlan
@@ -225,6 +236,23 @@ export const extensionRequestsService = {
             deletedAt: null,
             ...accessWhere(access),
             ...(query.actionPlanId ? { actionPlanId: query.actionPlanId } : {}),
+            ...(query.areaId
+                ? {
+                    AND: [
+                        {
+                            OR: [
+                                { observationArea: { areaId: query.areaId } },
+                                { actionPlan: { observationArea: { areaId: query.areaId } } },
+                                {
+                                    observation: {
+                                        areaAssignments: { some: { areaId: query.areaId } },
+                                    },
+                                },
+                            ],
+                        },
+                    ],
+                }
+                : {}),
             ...(query.observationId
                 ? {
                     OR: [
@@ -437,6 +465,7 @@ export const extensionRequestsService = {
                     ? `La ampliación fue aprobada hasta el ${previous.proposedDueDate.toISOString().slice(0, 10)}.`
                     : "La solicitud de ampliación fue rechazada.",
                 title: "Solicitud de ampliación revisada",
+                targetUrl: extensionTargetUrl(previous),
                 type: approved ? "success" : "warning",
                 userId: previous.requestedByUserId,
             });

@@ -23,6 +23,14 @@ export type ReportChartItem = {
   value: number;
 };
 
+export type ReportFilterCapabilities = {
+  area: boolean;
+  areaResponsible: boolean;
+  auditReport: boolean;
+  executor: boolean;
+  processOwner: boolean;
+};
+
 export type ReportObservationRow = {
   actionSummary?: ObservationActionSummary;
   area: { id: string; name: string };
@@ -60,8 +68,10 @@ export type ReportActionPlanRow = {
   observation: {
     code: string;
     id: string;
+    status: { isFinal: boolean; key: string; name: string };
     title: string;
   };
+  observationDueDate: string;
   observationId: string;
   officialProgress: {
     code: "NI" | "I" | "CA" | "CO";
@@ -84,10 +94,51 @@ export type ReportActionPlanRow = {
   updatedAt: string;
 };
 
+export type ReportCriticalObservation = {
+  area: { id: string; name: string };
+  dueDate: string;
+  href: string;
+  id: string;
+  progressPercent: number;
+  riskLevel: { colorToken: string | null; name: string };
+  status: { key: string; name: string };
+  title: string;
+};
+
+export type ReportUpcomingActionPlan = {
+  actionPlanId: string;
+  effectiveDueDate: string;
+  executorName: string;
+  href: string;
+  observationCode: string;
+  progress: { code: "NI" | "I" | "CA" | "CO"; label: string; percent: number };
+  status: string;
+  title: string;
+};
+
 export type ReportOptions = {
   areas: Array<{ id: string; name: string }>;
+  areaRelationships: Array<{
+    areaId: string;
+    areaResponsibleIds: string[];
+    executorIds: string[];
+    processOwnerIds: string[];
+    responsibleExecutorIds: Array<{
+      areaResponsibleId: string;
+      executorIds: string[];
+    }>;
+  }>;
+  hierarchyRelationships: Array<{
+    areaId: string;
+    areaResponsibleId: string | null;
+    executorId: string | null;
+    processOwnerId: string | null;
+  }>;
   auditReports: Array<{ id: string; label: string }>;
+  areaResponsibles: Array<{ email: string; id: string; name: string }>;
   executors: Array<{ email: string; id: string; name: string }>;
+  filterCapabilities: ReportFilterCapabilities;
+  observationStatuses: Array<{ id: string; key: string; name: string }>;
   processOwners: Array<{ email: string; id: string; name: string }>;
   progressStatuses: Array<{
     code: "NI" | "I" | "CA" | "CO";
@@ -101,6 +152,7 @@ export type ReportOptions = {
     key: string;
     name: string;
   }>;
+  defaultCutoffDate: string;
 };
 
 export type ReportAreaSummary = {
@@ -121,6 +173,7 @@ export type ReportDashboardData = {
   charts: {
     areaPerformance: Array<ReportChartItem & { compliancePercent: number }>;
     areaDistribution: ReportChartItem[];
+    areaResponsibleDistribution: ReportChartItem[];
     currentVsOverdue: ReportChartItem[];
     deadlineDistribution: ReportChartItem[];
     executorDistribution: ReportChartItem[];
@@ -129,6 +182,8 @@ export type ReportDashboardData = {
     reprogrammedDistribution: ReportChartItem[];
     riskDistribution: ReportChartItem[];
     statusDistribution: ReportChartItem[];
+    topOverdueAreas?: ReportChartItem[];
+    topResponsibleWorkload?: ReportChartItem[];
     trend: Array<{
       closed: number;
       created: number;
@@ -137,8 +192,13 @@ export type ReportDashboardData = {
     }>;
   };
   dueSoonDays: number;
+  cutoffDate: string;
   generatedAt: string;
   insights: string[];
+  operational: {
+    criticalOrOverdueObservations: ReportCriticalObservation[];
+    upcomingActionPlans: ReportUpcomingActionPlan[];
+  };
   rows: ReportActionPlanRow[];
   summary: {
     averageResolutionDays: number;
@@ -155,12 +215,16 @@ export type ReportDashboardData = {
     predominantRisk: { count: number; key: string; label: string } | null;
     reprogramados: number;
     total: number;
+    totalObservations: number;
+    pendingObservations: number;
+    closedObservations: number;
     vencidos: number;
     vigentes: number;
   };
 };
 
 export type ReportPreviewData = {
+  charts: ReportDashboardData["charts"];
   columns: string[];
   filters: Record<string, string | number | boolean | null>;
   generatedAt: string;

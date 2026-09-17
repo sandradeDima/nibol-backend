@@ -8,6 +8,12 @@ const dateFilter = z
     .trim()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .optional();
+const csvArray = (item) => z.preprocess((value) => typeof value === "string"
+    ? value
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean)
+    : value, z.array(item).min(1).optional());
 export const reportTypeSchema = z.enum([
     "OBSERVATIONS",
     "ACTION_PLANS",
@@ -33,13 +39,15 @@ export const reportProgressStatusSchema = z.enum([
 export const reportFiltersSchema = z.object({
     activeOnly: booleanFilter,
     areaId: z.uuid().optional(),
-    auditReportId: z.uuid().optional(),
+    areaResponsibleId: csvArray(z.uuid()),
+    auditReportId: csvArray(z.uuid()),
     dateFrom: dateFilter,
     dateTo: dateFilter,
+    cutoffDate: dateFilter,
     deadlineStatus: reportDeadlineStatusSchema.optional(),
     dueSoon: booleanFilter,
     dueSoonDays: z.coerce.number().int().min(1).max(90).default(7),
-    executorId: z.uuid().optional(),
+    executorId: csvArray(z.uuid()),
     hasEvidence: booleanFilter,
     hasExtension: booleanFilter,
     hasPlan: booleanFilter,
@@ -48,7 +56,7 @@ export const reportFiltersSchema = z.object({
     progressMax: z.coerce.number().int().min(0).max(100).optional(),
     progressMin: z.coerce.number().int().min(0).max(100).optional(),
     progressStatus: reportProgressStatusSchema.optional(),
-    processOwnerId: z.uuid().optional(),
+    processOwnerId: csvArray(z.uuid()),
     reprogrammed: booleanFilter,
     responsibleUserId: z.uuid().optional(),
     riskLevelId: z.uuid().optional(),

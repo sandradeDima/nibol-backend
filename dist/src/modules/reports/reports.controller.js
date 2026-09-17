@@ -1,6 +1,6 @@
 import { AppError } from "../../utils/app-error.js";
 import { sendPaginated, sendSuccess } from "../../utils/response.js";
-import { buildExcelWorkbook, buildSimplePdf } from "./reports.exports.js";
+import { buildExcelWorkbook, buildReportPdf, buildSimplePdf, } from "./reports.exports.js";
 import { reportsService } from "./reports.service.js";
 import { auditReportExportQuerySchema, auditReportQuerySchema, reportExportQuerySchema, reportFiltersSchema, reportPreviewQuerySchema, reportQuerySchema, } from "./reports.validators.js";
 const getQueryValue = (value) => {
@@ -19,9 +19,13 @@ const getAccess = (request) => {
 const reportQueryInput = (request) => ({
     activeOnly: getQueryValue(request.query["filter.activeOnly"]),
     areaId: getQueryValue(request.query["filter.areaId"]),
+    areaResponsibleId: getQueryValue(request.query["filter.areaResponsibleId"]),
     auditReportId: getQueryValue(request.query["filter.auditReportId"]),
     dateFrom: getQueryValue(request.query["filter.dateFrom"]),
     dateTo: getQueryValue(request.query["filter.dateTo"]),
+    cutoffDate: getQueryValue(request.query.fechaCorte) ??
+        getQueryValue(request.query["filter.cutoffDate"]) ??
+        getQueryValue(request.query["filter.fechaCorte"]),
     deadlineStatus: getQueryValue(request.query["filter.deadlineStatus"]),
     dueSoon: getQueryValue(request.query["filter.dueSoon"]),
     dueSoonDays: getQueryValue(request.query["filter.dueSoonDays"]),
@@ -120,22 +124,26 @@ export const reportsController = {
         const format = getQueryValue(request.query.format) ?? "excel";
         const filters = report.filters;
         if (format === "pdf") {
-            sendFile(response, buildSimplePdf({
+            sendFile(response, buildReportPdf({
+                charts: report.charts,
                 columns: report.columns,
                 filters,
                 generatedAt: report.generatedAt,
                 reportName: report.reportName,
                 rows: report.rows,
+                summary: report.summary,
             }), "application/pdf", "reporte-nibol.pdf");
             return;
         }
         sendFile(response, buildExcelWorkbook({
+            charts: report.charts,
             columns: report.columns,
             filters,
             generatedAt: report.generatedAt,
             reportName: report.reportName,
             rows: report.rows,
-        }), "application/vnd.ms-excel; charset=utf-8", "reporte-nibol.xls");
+            summary: report.summary,
+        }), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "reporte-nibol.xlsx");
     },
     async exportAudit(request, response) {
         const query = auditReportExportQuerySchema.parse(auditQueryInput(request));
@@ -166,7 +174,7 @@ export const reportsController = {
             generatedAt: report.generatedAt,
             reportName,
             rows: report.rows,
-        }), "application/vnd.ms-excel; charset=utf-8", "reporte-auditoria-nibol.xls");
+        }), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "reporte-auditoria-nibol.xlsx");
     },
 };
 //# sourceMappingURL=reports.controller.js.map

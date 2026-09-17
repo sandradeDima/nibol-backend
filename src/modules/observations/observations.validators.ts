@@ -10,6 +10,18 @@ const nullableText = z
 const uniqueIds = (values: string[]): boolean =>
   new Set(values).size === values.length;
 
+const csvArray = <T extends z.ZodType>(item: T) =>
+  z.preprocess(
+    (value) =>
+      typeof value === "string"
+        ? value
+            .split(",")
+            .map((item) => item.trim())
+            .filter(Boolean)
+        : value,
+    z.array(item).min(1).optional(),
+  );
+
 export const observationAreaInputSchema = z.object({
   areaId: z.uuid(),
   areaResponsibleUserId: z.uuid(),
@@ -94,26 +106,39 @@ export const sendObservationsSchema = z.object({
 });
 
 export const listObservationsQuerySchema = z.object({
-  actionPlanResponsibleUserId: z.uuid().optional(),
-  areaId: z.uuid().optional(),
-  areaResponsibleUserId: z.uuid().optional(),
-  auditReportId: z.uuid().optional(),
+  actionPlanResponsibleUserId: csvArray(z.uuid()),
+  areaId: csvArray(z.uuid()),
+  areaResponsibleUserId: csvArray(z.uuid()),
+  auditReportId: csvArray(z.uuid()),
   currentDueDateFrom: z.coerce.date().optional(),
   currentDueDateTo: z.coerce.date().optional(),
-  mainObservationId: z.uuid().optional(),
-  observationStatus: z
-    .enum(["NO_INICIADO", "INICIADO", "CON_AVANCE", "CONCLUIDO"])
-    .optional(),
+  deadlineStatus: csvArray(z.enum(["VIGENTE", "VENCIDO", "REPROGRAMADO"])),
+  mainObservationId: csvArray(z.uuid()),
+  observationState: csvArray(z.enum(["PENDING", "CONCLUDED"])),
+  observationStatus: csvArray(
+    z.enum([
+      "NO_INICIADO",
+      "INICIADO",
+      "CON_AVANCE",
+      "CONCLUIDO",
+      "PENDING",
+      "CONCLUDED",
+    ]),
+  ),
   overdue: z
     .enum(["false", "true"])
     .transform((value) => value === "true")
     .optional(),
   page: z.coerce.number().int().min(1).default(1),
   perPage: z.coerce.number().int().min(1).max(100).default(20),
-  processOwnerUserId: z.uuid().optional(),
-  riskId: z.uuid().optional(),
-  riskLevelId: z.uuid().optional(),
+  processOwnerUserId: csvArray(z.uuid()),
+  riskId: csvArray(z.uuid()),
+  riskLevelId: csvArray(z.uuid()),
   search: z.string().trim().default(""),
+  progressStatus: csvArray(
+    z.enum(["NO_INICIADO", "INICIADO", "CON_AVANCE", "CONCLUIDO"]),
+  ),
+  title: z.string().trim().max(191).optional(),
   sortBy: z
     .enum([
       "currentDueDate",

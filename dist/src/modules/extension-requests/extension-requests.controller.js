@@ -68,6 +68,7 @@ export const extensionRequestsController = {
     async list(request, response) {
         const result = await service.list(listExtensionRequestsQuerySchema.parse({
             actionPlanId: value(request.query["filter.actionPlanId"]),
+            areaId: value(request.query["filter.areaId"]),
             observationId: value(request.query["filter.observationId"]),
             page: value(request.query.page),
             perPage: value(request.query.perPage),

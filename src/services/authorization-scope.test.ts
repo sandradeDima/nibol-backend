@@ -33,6 +33,13 @@ test("cada rol NIBOL usa el scope de datos esperado", () => {
     ),
     "AUDIT_SCOPE",
   );
+  assert.equal(
+    authorizationService.getAccessibleScope(
+      access("AUDIT_CHIEF", "AUDIT_SCOPE"),
+      "observations",
+    ),
+    "AUDIT_SCOPE",
+  );
   assert.deepEqual(
     buildObservationScopeWhere(access("AUDITOR", "AUDIT_SCOPE")),
     {
@@ -92,6 +99,13 @@ test("el scope de executor evita IDOR en planes, evidencias y ampliaciones", () 
 });
 
 test("los permisos sensibles quedan separados por rol", () => {
+  assert.deepEqual(ROLE_PERMISSION_NAMES.AUDIT_CHIEF, [
+    "reports.view",
+    "reports.export",
+    "audit_reports.view",
+    "audit_reports.export",
+  ]);
+  assert.ok(!ROLE_PERMISSION_NAMES.AUDIT_CHIEF.includes("observations.close"));
   assert.ok(ROLE_PERMISSION_NAMES.AUDITOR.includes("observations.close"));
   assert.ok(ROLE_PERMISSION_NAMES.AUDITOR.includes("observations.create"));
   assert.ok(ROLE_PERMISSION_NAMES.AUDITOR.includes("observations.send"));

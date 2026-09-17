@@ -3,7 +3,7 @@ import { prisma } from "../utils/prisma.js";
 const getDataScope = (roleCode, isAdmin) => {
     if (isAdmin)
         return "ALL";
-    if (roleCode === "AUDITOR")
+    if (roleCode === "AUDITOR" || roleCode === "AUDIT_CHIEF")
         return "AUDIT_SCOPE";
     if (roleCode === "PROCESS_OWNER" || roleCode === "AREA_RESPONSIBLE") {
         return "AREA";

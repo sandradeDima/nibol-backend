@@ -212,7 +212,7 @@ const loadContexts = async (observations) => {
             where: {
                 actionPlan: { observationId: { in: ids } },
                 deletedAt: null,
-                reviewStatus: "SENT_TO_AUDIT",
+                reviewStatus: { in: ["SENT_TO_AUDIT", "RETURNED"] },
             },
         }),
     ]);
