@@ -32,7 +32,7 @@ export const genericNotificationEmailTemplate = {
                 contentHtml,
                 previewText: variables.title,
             }),
-            subject: variables.title,
+            subject: `NIBOL · ${variables.title}`,
             text: joinTextBlocks(greeting(variables.userName), variables.title, variables.message, actionText, `Este mensaje fue generado por ${appName}.`),
         };
     },

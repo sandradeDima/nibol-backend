@@ -8,6 +8,10 @@ import {
 
 import { emailService } from "../../emails/EmailService.js";
 import { logger } from "../../utils/logger.js";
+import {
+  buildFrontendUrl,
+  resolveNotificationTarget,
+} from "../../utils/notification-links.js";
 import { prisma } from "../../utils/prisma.js";
 import { toLogJsonValue } from "../../services/logging-utils.js";
 import type { WorkflowRuntimeContext } from "./workflow-runtime-context.js";
@@ -357,7 +361,13 @@ export const createWorkflowNotificationIntent = async (
   const entityType = event.entityType ?? "workflow_instance";
   const priority = event.priority ?? NotificationPriority.NORMAL;
   const targetUrl =
-    event.targetUrl ?? `/configuracion/flujos/instancias/${event.instanceId}`;
+    event.targetUrl ??
+    resolveNotificationTarget({
+      entityId,
+      entityType,
+      eventType: event.eventType,
+    }) ??
+    `/configuracion/flujos/instancias/${event.instanceId}`;
   const createdDeliveries: string[] = [];
 
   for (const recipient of recipients) {
@@ -583,7 +593,7 @@ export const deliverWorkflowNotificationDelivery = async (
       ...(delivery.notification?.targetUrl
         ? {
             actionLabel: "Abrir en NIBOL",
-            actionLink: delivery.notification.targetUrl,
+            actionLink: buildFrontendUrl(delivery.notification.targetUrl),
           }
         : {}),
       message:

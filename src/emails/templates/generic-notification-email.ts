@@ -44,7 +44,7 @@ export const genericNotificationEmailTemplate: EmailTemplateDefinition<"genericN
           contentHtml,
           previewText: variables.title,
         }),
-        subject: variables.title,
+        subject: `NIBOL · ${variables.title}`,
         text: joinTextBlocks(
           greeting(variables.userName),
           variables.title,

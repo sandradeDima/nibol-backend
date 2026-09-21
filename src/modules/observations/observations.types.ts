@@ -34,6 +34,7 @@ export type ObservationListItem = {
     title: string;
   };
   currentDueDate: string;
+  deadlineStatus: "VIGENTE" | "VENCIDO" | "NO_APLICA";
   displayCode: string;
   id: string;
   isOverdue: boolean;
@@ -50,7 +51,9 @@ export type ObservationListItem = {
     name: string;
   };
   status: { id: string; isFinal: boolean; key: string; name: string };
+  completedTaskCount: number;
   sentAt: string | null;
+  taskCount: number;
   title: string;
   updatedAt: string;
 };

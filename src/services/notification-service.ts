@@ -7,6 +7,7 @@ import {
 } from "../../generated/prisma/client.js";
 
 import { AppError } from "../utils/app-error.js";
+import { resolveNotificationTarget } from "../utils/notification-links.js";
 import { prisma } from "../utils/prisma.js";
 import type {
   CreateNotificationInput,
@@ -182,6 +183,10 @@ export const notificationService = {
     options?: { db?: NotificationWriter },
   ) {
     const db = options?.db ?? prisma;
+    const targetUrl =
+      input.targetUrl !== undefined
+        ? input.targetUrl
+        : resolveNotificationTarget(input);
     const notification = await db.notification.create({
       data: {
         ...(input.dedupeKey !== undefined
@@ -196,9 +201,7 @@ export const notificationService = {
           : {}),
         message: input.message.trim(),
         priority: toPrismaNotificationPriority(input.priority),
-        ...(input.targetUrl !== undefined
-          ? { targetUrl: input.targetUrl }
-          : {}),
+        ...(targetUrl !== null ? { targetUrl } : {}),
         title: input.title.trim(),
         type: toPrismaNotificationType(input.type),
         user: { connect: { id: input.userId } },

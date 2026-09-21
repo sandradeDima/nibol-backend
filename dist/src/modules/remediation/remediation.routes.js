@@ -10,6 +10,11 @@ remediationRouter.patch("/remediation-plans/:id", requireAnyPermission([recommen
 remediationRouter.post("/remediation-plans/:id/submit", requirePermission(recommended.submit), asyncHandler(remediationController.submitRemediationPlan));
 remediationRouter.delete("/remediation-plans/:id", requirePermission(recommended.delete), asyncHandler(remediationController.deleteRemediationPlan));
 remediationRouter.get("/action-plans", requirePermission("action_plans.view"), asyncHandler(remediationController.listActionPlans));
+remediationRouter.get("/action-plans/options", requireAnyPermission([
+    "action_plans.create",
+    "action_plans.edit",
+    "action_plans.view",
+]), asyncHandler(remediationController.actionPlanOptions));
 remediationRouter.get("/action-plans/:id", requirePermission("action_plans.view"), asyncHandler(remediationController.getActionPlan));
 remediationRouter.post("/observations/:id/action-plans", requirePermission("action_plans.create"), asyncHandler(remediationController.createActionPlan));
 remediationRouter.patch("/action-plans/:id", requirePermission("action_plans.edit"), asyncHandler(remediationController.updateActionPlan));

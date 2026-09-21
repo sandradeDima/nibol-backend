@@ -61,6 +61,7 @@ export type ObservationAssignmentEmailVariables = {
       dueDate?: string;
       number: number;
       risk: string;
+      riskColorToken?: string | null;
       title: string;
     }>;
     reportNumber: string;
@@ -88,6 +89,7 @@ export type DeadlineReminderEmailVariables = {
     reprogrammed: boolean;
     report: string;
     risk: string;
+    riskColorToken?: string | null;
     bucket: "OVERDUE" | "DUE_TODAY" | "UPCOMING";
   }>;
   platformLink: string;

@@ -416,7 +416,8 @@ export const ObservationScalarFieldEnum = {
     sentAt: 'sentAt',
     createdAt: 'createdAt',
     updatedAt: 'updatedAt',
-    deletedAt: 'deletedAt'
+    deletedAt: 'deletedAt',
+    deletedById: 'deletedById'
 };
 export const ObservationRiskScalarFieldEnum = {
     id: 'id',
@@ -452,6 +453,7 @@ export const RemediationPlanScalarFieldEnum = {
     createdAt: 'createdAt',
     updatedAt: 'updatedAt',
     deletedAt: 'deletedAt',
+    deletedById: 'deletedById',
     workflowInstanceId: 'workflowInstanceId'
 };
 export const ActionPlanScalarFieldEnum = {
@@ -470,7 +472,8 @@ export const ActionPlanScalarFieldEnum = {
     sortOrder: 'sortOrder',
     createdAt: 'createdAt',
     updatedAt: 'updatedAt',
-    deletedAt: 'deletedAt'
+    deletedAt: 'deletedAt',
+    deletedById: 'deletedById'
 };
 export const DeadlineExtensionRequestScalarFieldEnum = {
     id: 'id',
@@ -942,7 +945,8 @@ export const ObservationOrderByRelevanceFieldEnum = {
     source: 'source',
     process: 'process',
     category: 'category',
-    currentStage: 'currentStage'
+    currentStage: 'currentStage',
+    deletedById: 'deletedById'
 };
 export const ObservationRiskOrderByRelevanceFieldEnum = {
     id: 'id',
@@ -968,6 +972,7 @@ export const RemediationPlanOrderByRelevanceFieldEnum = {
     returnedByUserId: 'returnedByUserId',
     returnReason: 'returnReason',
     createdByUserId: 'createdByUserId',
+    deletedById: 'deletedById',
     workflowInstanceId: 'workflowInstanceId'
 };
 export const ActionPlanOrderByRelevanceFieldEnum = {
@@ -977,7 +982,8 @@ export const ActionPlanOrderByRelevanceFieldEnum = {
     observationAreaId: 'observationAreaId',
     responsibleUserId: 'responsibleUserId',
     title: 'title',
-    description: 'description'
+    description: 'description',
+    deletedById: 'deletedById'
 };
 export const DeadlineExtensionRequestOrderByRelevanceFieldEnum = {
     id: 'id',

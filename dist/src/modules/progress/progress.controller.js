@@ -81,6 +81,11 @@ export const progressController = {
         await log(request, "action_plans.submit_to_audit", "PROGRESS_EVALUATION", record, null);
         sendSuccess(response, record, 201);
     },
+    async deleteProgressEvaluation(request, response) {
+        const result = await progressService.deleteProgressEvaluation(idWith(request, progressEvaluationIdParamSchema), access(request));
+        await log(request, "action_plans.delete", "PROGRESS_EVALUATION", null, result.previous);
+        sendSuccess(response, { deleted: true, id: result.id });
+    },
     async createProgressEvaluationEvidence(request, response) {
         sendSuccess(response, await progressService.uploadProgressEvaluationEvidence(idWith(request, progressEvaluationIdParamSchema), files(request), uploadEvidenceSchema.parse(request.body), access(request)), 201);
     },
@@ -133,7 +138,9 @@ export const progressController = {
             observationId: value(request.query["filter.observationId"]),
             page: value(request.query.page),
             perPage: value(request.query.perPage),
+            responsibleUserId: value(request.query["filter.responsibleUserId"]),
             reviewStatus: value(request.query["filter.reviewStatus"]),
+            reviewQueue: value(request.query.reviewQueue),
             search: value(request.query.search),
         }), access(request));
         sendPaginated(response, result.data, result.pagination);

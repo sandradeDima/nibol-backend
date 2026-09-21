@@ -11,8 +11,10 @@ import {
   isApprovedDeadlineExtension,
   isObservationDueSoon,
   isObservationOverdue,
+  reportDeadlineStatusOptions,
 } from "./reporting-definitions.js";
 import { buildActionPlanWhere } from "./reports.service.js";
+import { reportFiltersSchema } from "./reports.validators.js";
 
 const scopedExecutor: AuthorizationSummary = {
   dataScope: "ASSIGNED",
@@ -200,4 +202,68 @@ test("el estado de vencimiento usa la fecha de corte y no la fecha actual", () =
   const serialized = JSON.stringify(where);
   assert.match(serialized, /2026-08-12T00:00:00.000Z/);
   assert.doesNotMatch(serialized, /2030-01-01/);
+});
+
+test("solo pendientes filtra por estado de observación y no por estado del plan", () => {
+  const serialized = JSON.stringify(
+    buildActionPlanWhere(
+      { activeOnly: true } as never,
+      scopedExecutor,
+      now,
+      "UTC",
+    ),
+  );
+  assert.match(serialized, /"isFinal":false/);
+  assert.doesNotMatch(serialized, /"status":\{"not":"CONCLUDED"\}/);
+});
+
+test("combina estados de observación y plazo con OR dentro de cada dimensión", () => {
+  const serialized = JSON.stringify(
+    buildActionPlanWhere(
+      {
+        cutoffDate: "2026-08-12",
+        deadlineStatuses: ["VENCIDO"],
+        observationStatusIds: ["status-1", "status-2"],
+      } as never,
+      scopedExecutor,
+      now,
+      "UTC",
+    ),
+  );
+  assert.match(serialized, /"statusId":\{"in":\["status-1","status-2"\]\}/);
+  assert.match(serialized, /"status":\{"not":"CONCLUDED"\}/);
+  assert.match(serialized, /"currentDueDate":\{"lt":"2026-08-12/);
+});
+
+test("seleccionar ambos estados de plazo no restringe el resultado", () => {
+  const serialized = JSON.stringify(
+    buildActionPlanWhere(
+      {
+        deadlineStatuses: ["VIGENTE", "VENCIDO"],
+      } as never,
+      scopedExecutor,
+      now,
+      "UTC",
+    ),
+  );
+  assert.doesNotMatch(serialized, /"status":\{"not":"CONCLUDED"\}/);
+  assert.deepEqual(reportDeadlineStatusOptions, [
+    { key: "VIGENTE", label: "Vigente" },
+    { key: "VENCIDO", label: "Vencido" },
+  ]);
+});
+
+test("los filtros multiselección aceptan CSV y conservan el estado Todos vacío", () => {
+  const parsed = reportFiltersSchema.parse({
+    deadlineStatuses: "VIGENTE,VENCIDO",
+    observationStatusIds:
+      "11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222",
+  });
+  assert.deepEqual(parsed.deadlineStatuses, ["VIGENTE", "VENCIDO"]);
+  assert.deepEqual(parsed.observationStatusIds, [
+    "11111111-1111-4111-8111-111111111111",
+    "22222222-2222-4222-8222-222222222222",
+  ]);
+  assert.equal(reportFiltersSchema.parse({}).deadlineStatuses, undefined);
+  assert.equal(reportFiltersSchema.parse({}).observationStatusIds, undefined);
 });

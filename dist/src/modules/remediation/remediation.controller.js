@@ -5,7 +5,7 @@ import { AppError } from "../../utils/app-error.js";
 import { getRequestLogActorContext } from "../../utils/request-context.js";
 import { sendPaginated, sendSuccess } from "../../utils/response.js";
 import { remediationService } from "./remediation.service.js";
-import { actionPlanIdParamSchema, createActionPlanSchema, createRemediationPlanSchema, listActionPlansQuerySchema, observationActionPlanParamsSchema, remediationPlanIdParamSchema, updateActionPlanSchema, updateRemediationPlanSchema, } from "./remediation.validators.js";
+import { actionPlanIdParamSchema, actionPlanOptionsQuerySchema, createActionPlanSchema, createRemediationPlanSchema, listActionPlansQuerySchema, observationActionPlanParamsSchema, remediationPlanIdParamSchema, updateActionPlanSchema, updateRemediationPlanSchema, } from "./remediation.validators.js";
 const value = (input) => typeof input === "string" ? input : undefined;
 const access = (request) => {
     if (!request.authorizationSummary)
@@ -117,16 +117,25 @@ export const remediationController = {
     },
     async deleteRemediationPlan(request, response) {
         const record = await remediationService.deleteRemediationPlan(remediationPlanId(request), access(request));
-        await logRemediationPlan(request, "recommended_action_plans.delete", null, record);
+        await logRemediationPlan(request, "REMEDIATION_PLAN_SOFT_DELETED", null, record);
         sendSuccess(response, { deleted: true, id: record.id });
     },
     async deleteActionPlan(request, response) {
         const record = await remediationService.deleteActionPlan(actionPlanId(request), access(request));
-        await log(request, "action_plans.delete", null, record);
+        await log(request, "ACTION_PLAN_SOFT_DELETED", null, record);
         sendSuccess(response, { deleted: true, id: record.id });
     },
     async getActionPlan(request, response) {
         sendSuccess(response, await remediationService.getActionPlanById(actionPlanId(request), access(request)));
+    },
+    async actionPlanOptions(request, response) {
+        sendSuccess(response, await remediationService.getActionPlanOptions(actionPlanOptionsQuerySchema.parse({
+            areaId: value(request.query.areaId),
+            areaResponsibleUserId: value(request.query.areaResponsibleUserId),
+            observationAreaId: value(request.query.observationAreaId),
+            observationId: value(request.query.observationId),
+            processOwnerUserId: value(request.query.processOwnerUserId),
+        }), access(request)));
     },
     async listActionPlans(request, response) {
         const result = await remediationService.listActionPlans(listActionPlansQuerySchema.parse({
@@ -139,8 +148,10 @@ export const remediationController = {
             overdue: value(request.query["filter.overdue"]),
             page: value(request.query.page),
             perPage: value(request.query.perPage),
+            processOwnerUserId: value(request.query["filter.processOwnerUserId"]),
             progressStatus: value(request.query["filter.progressStatus"]),
             reportNumber: value(request.query["filter.reportNumber"]),
+            riskLevelId: value(request.query["filter.riskLevelId"]),
             responsibleUserId: value(request.query["filter.responsibleUserId"]),
             search: value(request.query.search),
             sortBy: value(request.query.sortBy),

@@ -13,14 +13,23 @@ import {
 import type { ScheduledJobTrigger } from "../../../generated/prisma/client.js";
 
 import { emailService } from "../../emails/EmailService.js";
-import { getBusinessDateKey, getEffectiveActionPlanDueDate, getOfficialActionPlanProgress, getActionPlanDeadlineStatus, getDateOnlyKey } from "../../modules/reports/reporting-definitions.js";
+import {
+  getBusinessDateKey,
+  getEffectiveActionPlanDueDate,
+  getOfficialActionPlanProgress,
+  getActionPlanDeadlineStatus,
+  getDateOnlyKey,
+} from "../../modules/reports/reporting-definitions.js";
 import {
   buildActionPlanScopeWhere,
   type AuthorizationSummary,
 } from "../../services/authorization-service.js";
 import { notificationService } from "../../services/notification-service.js";
 import { prisma } from "../../utils/prisma.js";
-import { env } from "../../utils/env.js";
+import {
+  buildFrontendUrl,
+  buildPendingWorkUrl,
+} from "../../utils/notification-links.js";
 import { logger } from "../../utils/logger.js";
 import {
   DEADLINE_REMINDER_EVENT_TYPE,
@@ -79,6 +88,7 @@ type DigestPlan = {
   reprogrammed: boolean;
   report: string;
   risk: string;
+  riskColorToken: string | null;
   riskSeverity: number;
   reportedProgressPercent: number | null;
 };
@@ -160,6 +170,7 @@ const actionPlanSelect = {
       observationNumber: true,
       riskLevel: {
         select: {
+          colorToken: true,
           name: true,
           severityOrder: true,
         },
@@ -260,14 +271,16 @@ const readPolicies = async (): Promise<StoredPolicy[]> => {
     const windowRecord = byKey.get(
       getDeadlineReminderParameterKey(role, "upcomingWindowDays"),
     );
-    const createdAt = [
-      enabledRecord?.createdAt,
-      cutoffRecord?.createdAt,
-      cadenceRecord?.createdAt,
-      windowRecord?.createdAt,
-    ]
-      .filter((value): value is Date => Boolean(value))
-      .sort((left, right) => left.getTime() - right.getTime())[0] ?? new Date();
+    const createdAt =
+      [
+        enabledRecord?.createdAt,
+        cutoffRecord?.createdAt,
+        cadenceRecord?.createdAt,
+        windowRecord?.createdAt,
+      ]
+        .filter((value): value is Date => Boolean(value))
+        .sort((left, right) => left.getTime() - right.getTime())[0] ??
+      new Date();
 
     return {
       cadenceMonths: Math.min(
@@ -334,10 +347,7 @@ const findActionPlans = async (
   cutoffDateKey: string,
   recipientUserId: string,
 ): Promise<any[]> => {
-  const endDateKey = addDaysToDateKey(
-    cutoffDateKey,
-    policy.upcomingWindowDays,
-  );
+  const endDateKey = addDaysToDateKey(cutoffDateKey, policy.upcomingWindowDays);
   const endDate = dateAtNoonUtc(endDateKey);
   const scopeWhere = buildActionPlanScopeWhere(
     buildAccess(recipientUserId, policy.role),
@@ -355,7 +365,10 @@ const findActionPlans = async (
           },
           {
             deadlineExtensionRequests: {
-              some: { ...approvedExtensionWhere, proposedDueDate: { lte: endDate } },
+              some: {
+                ...approvedExtensionWhere,
+                proposedDueDate: { lte: endDate },
+              },
             },
           },
         ],
@@ -391,7 +404,11 @@ const toDigestPlan = (
     actionPlanId: plan.id,
     area: plan.observationArea.area.name,
     bucket,
-    deadlineStatus: getActionPlanDeadlineStatus(plan, dateAtNoonUtc(cutoffDateKey), "UTC"),
+    deadlineStatus: getActionPlanDeadlineStatus(
+      plan,
+      dateAtNoonUtc(cutoffDateKey),
+      "UTC",
+    ),
     description: plan.description,
     effectiveDueDate: dateLabel(effectiveDueDateKey),
     effectiveDueDateKey,
@@ -402,11 +419,16 @@ const toDigestPlan = (
     officialProgressPercent: officialProgress.percent,
     originalDueDate: dateLabel(getDateOnlyKey(plan.originalDueDate)),
     plan: plan.title || plan.description,
-    processOwner: policy.role === "EXECUTOR" ? undefined : plan.observationArea.processOwner?.name,
+    processOwner:
+      policy.role === "EXECUTOR"
+        ? undefined
+        : plan.observationArea.processOwner?.name,
     reprogrammed: Boolean(approvedExtension),
     report: `${plan.observation.auditReport.reportNumber} — ${plan.observation.auditReport.title}`,
-    reportedProgressPercent: plan.progressEvaluations?.[0]?.reportedProgressPercent ?? null,
+    reportedProgressPercent:
+      plan.progressEvaluations?.[0]?.reportedProgressPercent ?? null,
     risk: plan.observation.riskLevel.name,
+    riskColorToken: plan.observation.riskLevel.colorToken,
     riskSeverity: plan.observation.riskLevel.severityOrder,
   };
 };
@@ -477,7 +499,8 @@ const buildDigests = async (input: {
         if (current.planIds.has(digestPlan.actionPlanId)) continue;
         current.planIds.add(digestPlan.actionPlanId);
         current.plans.push(digestPlan);
-        if (!current.roles.includes(policy.role)) current.roles.push(policy.role);
+        if (!current.roles.includes(policy.role))
+          current.roles.push(policy.role);
         if (!current.rolePolicies.some((item) => item.role === policy.role))
           current.rolePolicies.push(policy);
         current.upcomingWindowDays = Math.max(
@@ -496,18 +519,8 @@ const buildDigests = async (input: {
   }));
 };
 
-const buildTargetUrl = (digest: RecipientDigest): string => {
-  const params = new URLSearchParams({
-    "filter.activeOnly": "true",
-    periodField: "currentDueDate",
-  });
-  if (digest.roles.length === 1 && digest.roles[0] === "EXECUTOR") {
-    params.set("filter.executorId", digest.recipient.id);
-  }
-  if (digest.roles.length === 1 && digest.roles[0] === "PROCESS_OWNER") {
-    params.set("filter.processOwnerId", digest.recipient.id);
-  }
-  return `${env.FRONTEND_URL}/reportes?${params.toString()}`;
+const buildTargetUrl = (): string => {
+  return buildPendingWorkUrl();
 };
 
 const summaryForDigest = (digest: RecipientDigest) => ({
@@ -537,15 +550,13 @@ const makePayload = (input: {
     ...counts,
     plans: input.digest.plans,
     periodKey: input.periodKey,
-    platformLink: buildTargetUrl(input.digest),
+    platformLink: buildTargetUrl(),
     recipientEmail: input.digest.recipient.email,
     recipientName: input.digest.recipient.name,
     recipientUserId: input.digest.recipient.id,
     roleCadence: cadenceLabel,
     runType: input.runType,
-    subject: `${
-      cadenceLabel.charAt(0).toUpperCase() + cadenceLabel.slice(1)
-    } de plazos — NIBOL`,
+    subject: `NIBOL · ${input.digest.plans.length} pendientes requieren atención`,
   };
 };
 
@@ -604,7 +615,11 @@ const notificationMessage = (digest: RecipientDigest): string => {
 
 const deliverReminderEmailDelivery = async (
   deliveryId: string,
-): Promise<{ attempted: boolean; status: NotificationDeliveryStatus; error?: string }> => {
+): Promise<{
+  attempted: boolean;
+  status: NotificationDeliveryStatus;
+  error?: string;
+}> => {
   const delivery = await prisma.notificationDelivery.findUnique({
     select: {
       payloadJson: true,
@@ -648,10 +663,12 @@ const deliverReminderEmailDelivery = async (
         ...payload,
         appName: "NIBOL Bolivia",
         userName: payload.recipientName,
+        platformLink: buildFrontendUrl(payload.platformLink),
         plans: payload.plans.map((plan) => ({
           area: plan.area,
           bucket: plan.bucket,
-          deadlineStatus: plan.deadlineStatus === "VENCIDO" ? "Vencido" : "Vigente",
+          deadlineStatus:
+            plan.deadlineStatus === "VENCIDO" ? "Vencido" : "Vigente",
           description: plan.description,
           effectiveDueDate: plan.effectiveDueDate,
           ...(plan.executor ? { executor: plan.executor } : {}),
@@ -662,6 +679,7 @@ const deliverReminderEmailDelivery = async (
           reprogrammed: plan.reprogrammed,
           report: plan.report,
           risk: plan.risk,
+          riskColorToken: plan.riskColorToken,
         })),
       },
     });
@@ -688,7 +706,11 @@ const deliverReminderEmailDelivery = async (
 };
 
 const deliverPendingReminderEmails = async (): Promise<
-  Array<{ attempted: boolean; status: NotificationDeliveryStatus; error?: string }>
+  Array<{
+    attempted: boolean;
+    status: NotificationDeliveryStatus;
+    error?: string;
+  }>
 > => {
   const deliveries = await prisma.notificationDelivery.findMany({
     orderBy: [{ lastAttemptAt: "asc" }, { createdAt: "asc" }],
@@ -932,7 +954,9 @@ const executePeriod = async (input: {
     });
     summary.recipientsEvaluated = digests.length;
     summary.plansIncluded = new Set(
-      digests.flatMap((digest) => digest.plans.map((plan) => plan.actionPlanId)),
+      digests.flatMap((digest) =>
+        digest.plans.map((plan) => plan.actionPlanId),
+      ),
     ).size;
     const policy = input.policies[0]!;
     const cadenceLabel = getCadenceLabel(policy.cadenceMonths);
@@ -1039,8 +1063,14 @@ export const deadlineReminderService = {
     )!;
     const values = [
       [getDeadlineReminderParameterKey(role, "enabled"), String(input.enabled)],
-      [getDeadlineReminderParameterKey(role, "cutoffDay"), String(input.cutoffDay)],
-      [getDeadlineReminderParameterKey(role, "cadenceMonths"), String(input.cadenceMonths)],
+      [
+        getDeadlineReminderParameterKey(role, "cutoffDay"),
+        String(input.cutoffDay),
+      ],
+      [
+        getDeadlineReminderParameterKey(role, "cadenceMonths"),
+        String(input.cadenceMonths),
+      ],
       [
         getDeadlineReminderParameterKey(role, "upcomingWindowDays"),
         String(input.upcomingWindowDays),
@@ -1133,7 +1163,8 @@ export const deadlineReminderService = {
       readBusinessTimeZone(),
     ]);
     const policy = policies.find((item) => item.role === input.role)!;
-    const cutoffDateKey = input.cutoffDateKey ?? getBusinessDateKey(input.now, timeZone);
+    const cutoffDateKey =
+      input.cutoffDateKey ?? getBusinessDateKey(input.now, timeZone);
     const digests = await buildDigests({
       cutoffDateKey,
       policies: [policy],
@@ -1200,15 +1231,19 @@ export const deadlineReminderService = {
       ]);
       const retryResults = await deliverPendingReminderEmails();
       baseSummary.emailsSent += retryResults.filter(
-        (result) => result.status === NotificationDeliveryStatus.SENT && result.attempted,
+        (result) =>
+          result.status === NotificationDeliveryStatus.SENT && result.attempted,
       ).length;
       baseSummary.failures.push(
         ...retryResults
-          .filter((result) => result.status === NotificationDeliveryStatus.FAILED)
+          .filter(
+            (result) => result.status === NotificationDeliveryStatus.FAILED,
+          )
           .map((result) => ({
             entityId: "pending-delivery",
             entityType: "deadline_reminder_email",
-            message: result.error ?? "No fue posible reintentar el recordatorio.",
+            message:
+              result.error ?? "No fue posible reintentar el recordatorio.",
           })),
       );
       baseSummary.failuresCount = baseSummary.failures.length;
@@ -1295,7 +1330,8 @@ export const deadlineReminderService = {
           }
         }
       }
-      baseSummary.status = baseSummary.failuresCount > 0 ? "PARTIAL" : "SUCCESS";
+      baseSummary.status =
+        baseSummary.failuresCount > 0 ? "PARTIAL" : "SUCCESS";
       baseSummary.finishedAt = new Date().toISOString();
       return baseSummary;
     } catch (error) {

@@ -35,7 +35,7 @@ export const automationNotificationEmailTemplate = {
                 contentHtml,
                 previewText: variables.title,
             }),
-            subject: `${variables.title} · ${variables.code}`,
+            subject: `NIBOL · ${variables.title} · ${variables.code}`,
             text: joinTextBlocks(greeting(variables.userName), variables.title, variables.description, `Código: ${variables.code}`, `Área responsable: ${variables.areaName}`, `Fecha límite: ${variables.dueDate}`, `Estado actual: ${variables.currentStatus}`, `Acción requerida: ${variables.actionRequired}`, `Abrir en NIBOL: ${variables.targetUrl}`, `Esta es una notificación automática de ${appName}. No adjuntamos archivos de evidencia.`),
         };
     },

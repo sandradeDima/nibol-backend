@@ -14,8 +14,34 @@ export const resolveEmailAppName = (value) => {
     }
     return candidate;
 };
-export const emailSemanticBadgeStyle = (value) => {
+export const emailRiskColor = (value, colorToken) => {
+    const token = colorToken?.trim().toLowerCase();
+    if (token === "high" || token === "alto")
+        return "#D92D20";
+    if (token === "medium" || token === "medio")
+        return "#DC6803";
+    if (token === "low" || token === "bajo")
+        return "#027A48";
     const normalized = value.trim().toLowerCase();
+    if (normalized.includes("alto"))
+        return "#D92D20";
+    if (normalized.includes("medio"))
+        return "#DC6803";
+    if (normalized.includes("bajo"))
+        return "#027A48";
+    return "#64748B";
+};
+export const emailSemanticBadgeStyle = (value, colorToken) => {
+    const normalized = value.trim().toLowerCase();
+    if (colorToken) {
+        const riskColor = emailRiskColor(value, colorToken);
+        if (riskColor === "#D92D20")
+            return "background:#fee2e2;color:#991b1b";
+        if (riskColor === "#DC6803")
+            return "background:#fef3c7;color:#92400e";
+        if (riskColor === "#027A48")
+            return "background:#dcfce7;color:#166534";
+    }
     if (normalized.includes("alto") || normalized.includes("rechaz")) {
         return "background:#fee2e2;color:#991b1b";
     }

@@ -4,6 +4,12 @@ import { z } from "zod";
 
 const DEVELOPMENT_AUTH_SECRET = "development-better-auth-secret-change-me";
 
+export const parseBooleanEnvValue = (value: unknown): unknown => {
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return value;
+};
+
 const envSchema = z.object({
   APP_NAME: z
     .string()
@@ -30,7 +36,10 @@ const envSchema = z.object({
   SMTP_PASSWORD: z.string().min(1).optional(),
   SMTP_PASS: z.string().min(1).optional(),
   SMTP_PORT: z.coerce.number().int().positive().optional(),
-  SMTP_SECURE: z.coerce.boolean().default(false),
+  SMTP_SECURE: z.preprocess(
+    parseBooleanEnvValue,
+    z.boolean().default(false),
+  ),
   SMTP_USER: z.string().min(1).optional(),
   WORKFLOW_TIMER_BATCH_SIZE: z.coerce
     .number()

@@ -24,6 +24,8 @@ export const officialProgressByStatus = {
     STARTED: 20,
     WITH_PROGRESS: 60,
 };
+export const isOfficialProgressStatusTransitionAllowed = (current, next) => current === next ||
+    officialProgressByStatus[next] > officialProgressByStatus[current];
 export const PROGRESS_ENTITY_TYPES = {
     comment: "observation_comment",
     evidence: "evidence_file",
@@ -45,6 +47,10 @@ export const PROGRESS_ACTIVITY_ACTIONS = {
 export const EDITABLE_PROGRESS_STATUSES = new Set([
     "DRAFT",
     "RETURNED",
+]);
+export const FILE_LEVEL_EVIDENCE_REVIEW_CONTEXTS = new Set([
+    "CLOSURE",
+    "FINDING",
 ]);
 export const AUDIT_VISIBLE_COMMENT_VISIBILITIES = new Set([
     "INTERNAL_AUDIT",

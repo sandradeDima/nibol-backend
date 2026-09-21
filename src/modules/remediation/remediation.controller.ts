@@ -10,6 +10,7 @@ import { sendPaginated, sendSuccess } from "../../utils/response.js";
 import { remediationService } from "./remediation.service.js";
 import {
   actionPlanIdParamSchema,
+  actionPlanOptionsQuerySchema,
   createActionPlanSchema,
   createRemediationPlanSchema,
   listActionPlansQuerySchema,
@@ -194,7 +195,7 @@ export const remediationController = {
     );
     await logRemediationPlan(
       request,
-      "recommended_action_plans.delete",
+      "REMEDIATION_PLAN_SOFT_DELETED",
       null,
       record,
     );
@@ -205,7 +206,7 @@ export const remediationController = {
       actionPlanId(request),
       access(request),
     );
-    await log(request, "action_plans.delete", null, record);
+    await log(request, "ACTION_PLAN_SOFT_DELETED", null, record);
     sendSuccess(response, { deleted: true, id: record.id });
   },
   async getActionPlan(request: Request, response: Response) {
@@ -213,6 +214,21 @@ export const remediationController = {
       response,
       await remediationService.getActionPlanById(
         actionPlanId(request),
+        access(request),
+      ),
+    );
+  },
+  async actionPlanOptions(request: Request, response: Response) {
+    sendSuccess(
+      response,
+      await remediationService.getActionPlanOptions(
+        actionPlanOptionsQuerySchema.parse({
+          areaId: value(request.query.areaId),
+          areaResponsibleUserId: value(request.query.areaResponsibleUserId),
+          observationAreaId: value(request.query.observationAreaId),
+          observationId: value(request.query.observationId),
+          processOwnerUserId: value(request.query.processOwnerUserId),
+        }),
         access(request),
       ),
     );
@@ -231,8 +247,10 @@ export const remediationController = {
         overdue: value(request.query["filter.overdue"]),
         page: value(request.query.page),
         perPage: value(request.query.perPage),
+        processOwnerUserId: value(request.query["filter.processOwnerUserId"]),
         progressStatus: value(request.query["filter.progressStatus"]),
         reportNumber: value(request.query["filter.reportNumber"]),
+        riskLevelId: value(request.query["filter.riskLevelId"]),
         responsibleUserId: value(request.query["filter.responsibleUserId"]),
         search: value(request.query.search),
         sortBy: value(request.query.sortBy),

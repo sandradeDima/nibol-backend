@@ -120,7 +120,14 @@ export const buildObservationScopeWhere = (
       return {
         ...base,
         actionPlans: {
-          some: { deletedAt: null, responsibleUserId: access.userId },
+          some: {
+            OR: [
+              { remediationPlanId: null },
+              { remediationPlan: { deletedAt: null } },
+            ],
+            deletedAt: null,
+            responsibleUserId: access.userId,
+          },
         },
       };
   }
@@ -129,17 +136,31 @@ export const buildObservationScopeWhere = (
 export const buildObservationAreaScopeWhere = (
   access: AuthorizationSummary,
 ): Prisma.ObservationAreaWhereInput => {
+  const base = {
+    observation: { deletedAt: null },
+  } satisfies Prisma.ObservationAreaWhereInput;
   if (access.dataScope === "ALL" || access.dataScope === "AUDIT_SCOPE") {
-    return {};
+    return base;
   }
   if (access.dataScope === "AREA") {
-    return access.roleCode === "PROCESS_OWNER"
-      ? { processOwnerUserId: access.userId }
-      : { areaResponsibleUserId: access.userId };
+    return {
+      ...base,
+      ...(access.roleCode === "PROCESS_OWNER"
+        ? { processOwnerUserId: access.userId }
+        : { areaResponsibleUserId: access.userId }),
+    };
   }
   return {
+    ...base,
     actionPlans: {
-      some: { deletedAt: null, responsibleUserId: access.userId },
+      some: {
+        OR: [
+          { remediationPlanId: null },
+          { remediationPlan: { deletedAt: null } },
+        ],
+        deletedAt: null,
+        responsibleUserId: access.userId,
+      },
     },
   };
 };
@@ -147,7 +168,18 @@ export const buildObservationAreaScopeWhere = (
 export const buildActionPlanScopeWhere = (
   access: AuthorizationSummary,
 ): Prisma.ActionPlanWhereInput => {
-  const base = { deletedAt: null } satisfies Prisma.ActionPlanWhereInput;
+  const base = {
+    AND: [
+      {
+        OR: [
+          { remediationPlanId: null },
+          { remediationPlan: { deletedAt: null } },
+        ],
+      },
+    ],
+    deletedAt: null,
+    observation: { deletedAt: null },
+  } satisfies Prisma.ActionPlanWhereInput;
 
   if (access.dataScope === "ALL" || access.dataScope === "AUDIT_SCOPE") {
     return base;
@@ -165,7 +197,10 @@ export const buildRemediationPlanScopeWhere = (
   access: AuthorizationSummary,
   observationId?: string,
 ): Prisma.RemediationPlanWhereInput => {
-  const base = { deletedAt: null } satisfies Prisma.RemediationPlanWhereInput;
+  const base = {
+    deletedAt: null,
+    observation: { deletedAt: null },
+  } satisfies Prisma.RemediationPlanWhereInput;
   if (access.dataScope === "ALL" || access.dataScope === "AUDIT_SCOPE") {
     return base;
   }
@@ -186,7 +221,18 @@ export const buildRemediationPlanScopeWhere = (
 export const buildEvidenceScopeWhere = (
   access: AuthorizationSummary,
 ): Prisma.EvidenceFileWhereInput => {
-  const base = { deletedAt: null } satisfies Prisma.EvidenceFileWhereInput;
+  const base = {
+    AND: [
+      {
+        OR: [
+          { actionPlanId: null },
+          { actionPlan: buildActionPlanScopeWhere(access) },
+        ],
+      },
+    ],
+    deletedAt: null,
+    observation: { deletedAt: null },
+  } satisfies Prisma.EvidenceFileWhereInput;
 
   if (access.dataScope === "ALL" || access.dataScope === "AUDIT_SCOPE") {
     return base;
@@ -221,6 +267,18 @@ export const buildExtensionRequestScopeWhere = (
   access: AuthorizationSummary,
 ): Prisma.DeadlineExtensionRequestWhereInput => {
   const base = {
+    AND: [
+      {
+        OR: [
+          { actionPlan: buildActionPlanScopeWhere(access) },
+          { actionPlanId: null, observation: { deletedAt: null } },
+          {
+            actionPlanId: null,
+            observationArea: { observation: { deletedAt: null } },
+          },
+        ],
+      },
+    ],
     deletedAt: null,
   } satisfies Prisma.DeadlineExtensionRequestWhereInput;
   if (access.dataScope === "ALL" || access.dataScope === "AUDIT_SCOPE") {

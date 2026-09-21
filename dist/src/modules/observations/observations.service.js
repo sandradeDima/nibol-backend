@@ -3,11 +3,12 @@ import { NotificationDeliveryChannel, NotificationDeliveryStatus, } from "../../
 import { authorizationService, buildActionPlanScopeWhere, buildObservationAreaScopeWhere, buildObservationScopeWhere, } from "../../services/authorization-service.js";
 import { notificationService } from "../../services/notification-service.js";
 import { emailService } from "../../emails/EmailService.js";
-import { env } from "../../utils/env.js";
 import { AppError } from "../../utils/app-error.js";
 import { logger } from "../../utils/logger.js";
+import { buildFrontendUrl } from "../../utils/notification-links.js";
 import { prisma } from "../../utils/prisma.js";
-import { observationAggregationService } from "./observation-aggregation.service.js";
+import { isObservationOverdue } from "../reports/reporting-definitions.js";
+import { countWorkflowTasksForObservation, observationAggregationService, } from "./observation-aggregation.service.js";
 import { observationDeadlineService } from "./observation-deadline.service.js";
 const userSummarySelect = {
     email: true,
@@ -69,6 +70,7 @@ export const buildObservationAssignmentGroups = (records, maxPeriods) => {
                     dueDate: record.currentDueDate?.toISOString().slice(0, 10),
                     number: record.observationNumber,
                     risk: record.riskLevel.name,
+                    riskColorToken: record.riskLevel.colorToken,
                     title: record.title,
                 };
                 observation.areaNames.add(assignment.area.name);
@@ -98,6 +100,9 @@ export const buildObservationAssignmentGroups = (records, maxPeriods) => {
                 ...(observation.dueDate ? { dueDate: observation.dueDate } : {}),
                 number: observation.number,
                 risk: observation.risk,
+                ...(observation.riskColorToken !== undefined
+                    ? { riskColorToken: observation.riskColorToken }
+                    : {}),
                 title: observation.title,
             })),
             reportNumber: report.reportNumber,
@@ -108,7 +113,15 @@ export const buildObservationAssignmentGroups = (records, maxPeriods) => {
 };
 const buildObservationInclude = (access) => ({
     actionPlans: {
-        select: { id: true, progressPercent: true, status: true },
+        select: {
+            id: true,
+            progressPercent: true,
+            progressEvaluations: {
+                select: { id: true },
+                where: { deletedAt: null },
+            },
+            status: true,
+        },
         where: buildActionPlanScopeWhere(access),
     },
     areaAssignments: {
@@ -150,11 +163,42 @@ const businessStatusLabel = {
     INICIADO: "Iniciado",
     NO_INICIADO: "No iniciado",
 };
+const getWorkflowTaskCounts = async (records) => {
+    const evaluationIds = records.flatMap((record) => record.actionPlans.flatMap((plan) => plan.progressEvaluations.map((evaluation) => evaluation.id)));
+    const taskCounts = new Map();
+    if (evaluationIds.length) {
+        const tasks = await prisma.workflowTask.findMany({
+            select: {
+                completedAt: true,
+                instance: { select: { entityId: true } },
+            },
+            where: {
+                instance: {
+                    entityId: { in: evaluationIds },
+                    entityType: "progress_evaluation",
+                },
+            },
+        });
+        for (const task of tasks) {
+            const count = taskCounts.get(task.instance.entityId) ?? {
+                completed: 0,
+                total: 0,
+            };
+            count.total += 1;
+            if (task.completedAt)
+                count.completed += 1;
+            taskCounts.set(task.instance.entityId, count);
+        }
+    }
+    return taskCounts;
+};
+const getRecordTaskCount = (record, taskCounts) => countWorkflowTasksForObservation(record.actionPlans.flatMap((plan) => plan.progressEvaluations.map((evaluation) => evaluation.id)), taskCounts);
 export const buildObservationAccessWhere = buildObservationScopeWhere;
-const formatObservation = (record) => {
+const formatObservation = (record, taskCount = { completed: 0, total: 0 }) => {
     const progressPercent = observationAggregationService.calculateProgress(record.actionPlans);
     const businessStatus = observationAggregationService.calculateStatus(record.actionPlans, record.status.isFinal);
     const now = new Date();
+    const isOverdue = isObservationOverdue(record.currentDueDate, record.status, now);
     return {
         actionPlanCount: record.actionPlans.length,
         actionPlans: record.actionPlans.map(({ id }) => ({ id })),
@@ -173,12 +217,17 @@ const formatObservation = (record) => {
         auditorUser: record.auditorUser,
         category: record.category,
         currentDueDate: record.currentDueDate.toISOString(),
+        deadlineStatus: record.status.isFinal
+            ? "NO_APLICA"
+            : isOverdue
+                ? "VENCIDO"
+                : "VIGENTE",
         currentStage: record.currentStage,
         description: record.description,
         displayCode: `${record.auditReport.reportNumber} / OBS-${String(record.observationNumber).padStart(3, "0")}`,
         id: record.id,
         sentAt: record.sentAt?.toISOString() ?? null,
-        isOverdue: !record.status.isFinal && record.currentDueDate.getTime() < now.getTime(),
+        isOverdue,
         mainObservation: record.mainObservation,
         observationNumber: record.observationNumber,
         originalDueDate: record.originalDueDate.toISOString(),
@@ -193,11 +242,12 @@ const formatObservation = (record) => {
             key: businessStatus,
             name: businessStatusLabel[businessStatus],
         },
+        completedTaskCount: taskCount.completed,
+        taskCount: taskCount.total,
         title: record.title,
         updatedAt: record.updatedAt.toISOString(),
     };
 };
-const toListItem = (record) => formatObservation(record);
 const requireEntities = async (input) => {
     const uniqueUserIds = Array.from(new Set([
         ...(input.auditorUserId ? [input.auditorUserId] : []),
@@ -268,6 +318,10 @@ const findRecord = async (id, access) => {
     if (!record)
         throw new AppError("Observation not found.", 404);
     return record;
+};
+const formatRecord = async (record) => {
+    const taskCounts = await getWorkflowTaskCounts([record]);
+    return formatObservation(record, getRecordTaskCount(record, taskCounts));
 };
 const cancelLinkedWorkflowInstances = async (tx, workflowInstanceIds, deletedAt) => {
     if (workflowInstanceIds.length === 0)
@@ -416,7 +470,7 @@ export const observationsService = {
                 });
                 const usedNumbers = new Set((await tx.observation.findMany({
                     select: { observationNumber: true },
-                    where: { auditReportId: input.auditReportId, deletedAt: null },
+                    where: { auditReportId: input.auditReportId },
                 })).map(({ observationNumber }) => observationNumber));
                 const observationNumber = nextAvailableObservationNumber(usedNumbers);
                 const observation = await tx.observation.create({
@@ -471,7 +525,7 @@ export const observationsService = {
                 }
                 return observation;
             });
-            return formatObservation(await findRecord(created.id, access));
+            return formatRecord(await findRecord(created.id, access));
         }
         catch (error) {
             if (error.code === "P2002") {
@@ -519,30 +573,16 @@ export const observationsService = {
             where: { id },
         });
         return {
-            current: formatObservation(await findRecord(id, access)),
-            previous: formatObservation(existing),
+            current: await formatRecord(await findRecord(id, access)),
+            previous: await formatRecord(existing),
         };
     },
     async deleteObservation(id, access) {
         if (!authorizationService.can(access, "observations.delete"))
             throw new AppError("No tiene permiso para eliminar observaciones.", 403);
-        const previous = formatObservation(await findRecord(id, access));
-        if (previous.sentAt)
-            throw new AppError("Las observaciones enviadas a las áreas no se pueden eliminar.", 409);
+        const previous = await formatRecord(await findRecord(id, access));
         const deletedAt = new Date();
         await prisma.$transaction(async (tx) => {
-            // Serialize deletion with the per-report allocator and preserve the composite key.
-            await tx.auditReport.update({
-                data: { updatedAt: deletedAt },
-                where: { id: previous.auditReport.id },
-            });
-            const existingNumbers = new Set((await tx.observation.findMany({
-                select: { observationNumber: true },
-                where: { auditReportId: previous.auditReport.id },
-            })).map(({ observationNumber }) => observationNumber));
-            let releasedKey = -1;
-            while (existingNumbers.has(releasedKey))
-                releasedKey -= 1;
             const [remediationPlans, extensionRequests, progressEvaluations, evidence,] = await Promise.all([
                 tx.remediationPlan.findMany({
                     select: { workflowInstanceId: true },
@@ -578,56 +618,25 @@ export const observationsService = {
                     .filter((workflowInstanceId) => Boolean(workflowInstanceId))),
             ];
             await cancelLinkedWorkflowInstances(tx, workflowInstanceIds, deletedAt);
-            await tx.deadlineExtensionAttachment.deleteMany({
-                where: {
-                    extensionRequest: extensionRequestForObservationWhere(id),
-                },
+            const deleted = await tx.observation.updateMany({
+                data: { deletedAt, deletedById: access.userId },
+                where: { deletedAt: null, id },
             });
-            await tx.progressReviewHistory.deleteMany({
-                where: { progressEvaluation: { actionPlan: { observationId: id } } },
-            });
-            await tx.observationRisk.deleteMany({ where: { observationId: id } });
-            await tx.observationComment.updateMany({
-                data: { deletedAt },
-                where: { deletedAt: null, observationId: id },
-            });
-            await tx.evidenceFile.updateMany({
-                data: { deletedAt },
-                where: { deletedAt: null, observationId: id },
-            });
-            await tx.progressEvaluation.updateMany({
-                data: { deletedAt },
-                where: { actionPlan: { observationId: id }, deletedAt: null },
-            });
-            await tx.deadlineExtensionRequest.updateMany({
+            if (deleted.count !== 1)
+                throw new AppError("La observación ya no está disponible.", 409);
+            await tx.notification.updateMany({
                 data: { deletedAt },
                 where: {
-                    ...extensionRequestForObservationWhere(id),
                     deletedAt: null,
+                    entityId: id,
+                    entityType: { in: ["OBSERVATION", "observation"] },
                 },
-            });
-            await tx.actionPlan.updateMany({
-                data: { deletedAt },
-                where: { deletedAt: null, observationId: id },
-            });
-            await tx.remediationPlan.updateMany({
-                data: { deletedAt },
-                where: { deletedAt: null, observationId: id },
-            });
-            await tx.observation.update({
-                data: {
-                    deletedAt,
-                    deletedObservationNumber: previous.observationNumber,
-                    // Keep the composite unique key while making the released number reusable.
-                    observationNumber: releasedKey,
-                },
-                where: { id },
             });
         });
         return previous;
     },
     async getObservationById(id, access) {
-        return formatObservation(await findRecord(id, access));
+        return formatRecord(await findRecord(id, access));
     },
     async sendObservation(id, access) {
         const result = await this.sendObservations([id], access);
@@ -657,7 +666,9 @@ export const observationsService = {
                             processOwner: { select: userSummarySelect },
                         },
                     },
-                    riskLevel: { select: { maxRemediationDays: true, name: true } },
+                    riskLevel: {
+                        select: { colorToken: true, maxRemediationDays: true, name: true },
+                    },
                 },
                 where: {
                     deletedAt: null,
@@ -738,7 +749,7 @@ export const observationsService = {
                 to: group.email,
                 variables: {
                     maxPeriods: group.maxPeriods,
-                    platformLink: `${env.FRONTEND_URL}${targetUrl}`,
+                    platformLink: buildFrontendUrl(targetUrl),
                     reports: group.reports,
                     total: group.observationIds.length,
                     userName: group.name,
@@ -752,8 +763,8 @@ export const observationsService = {
         });
         const current = await Promise.all(uniqueIds.map((observationId) => findRecord(observationId, access)));
         return {
-            current: current.map(formatObservation),
-            previous: previousRecords.map(formatObservation),
+            current: await Promise.all(current.map(formatRecord)),
+            previous: await Promise.all(previousRecords.map(formatRecord)),
         };
     },
     async getObservationForActionItems(id, access) {
@@ -1001,8 +1012,9 @@ export const observationsService = {
             }),
             prisma.observation.count({ where }),
         ]);
+        const taskCounts = await getWorkflowTaskCounts(records);
         return {
-            data: records.map(toListItem),
+            data: records.map((record) => formatObservation(record, getRecordTaskCount(record, taskCounts))),
             pagination: {
                 page: query.page,
                 perPage: query.perPage,
@@ -1128,8 +1140,8 @@ export const observationsService = {
             throw error;
         }
         return {
-            current: formatObservation(await findRecord(id, access)),
-            previous: formatObservation(existing),
+            current: await formatRecord(await findRecord(id, access)),
+            previous: await formatRecord(existing),
         };
     },
 };

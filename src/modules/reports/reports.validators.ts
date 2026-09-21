@@ -57,6 +57,7 @@ export const reportFiltersSchema = z.object({
   dateTo: dateFilter,
   cutoffDate: dateFilter,
   deadlineStatus: reportDeadlineStatusSchema.optional(),
+  deadlineStatuses: csvArray(reportDeadlineStatusSchema),
   dueSoon: booleanFilter,
   dueSoonDays: z.coerce.number().int().min(1).max(90).default(7),
   executorId: csvArray(z.uuid()),
@@ -73,6 +74,7 @@ export const reportFiltersSchema = z.object({
   responsibleUserId: z.uuid().optional(),
   riskLevelId: z.uuid().optional(),
   search: z.string().trim().max(191).default(""),
+  observationStatusIds: csvArray(z.uuid()),
   statusId: z.uuid().optional(),
 });
 

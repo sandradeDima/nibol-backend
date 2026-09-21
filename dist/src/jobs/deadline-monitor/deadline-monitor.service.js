@@ -2,9 +2,10 @@
 import { NotificationDeliveryChannel, NotificationDeliveryStatus, NotificationPriority, ScheduledJobExecutionStatus, } from "../../../generated/prisma/client.js";
 import { emailService } from "../../emails/EmailService.js";
 import { prisma } from "../../utils/prisma.js";
-import { env } from "../../utils/env.js";
+import { buildFrontendUrl, resolveNotificationTarget, } from "../../utils/notification-links.js";
 import { logger } from "../../utils/logger.js";
 import { entityActivityService } from "../../services/entity-activity-service.js";
+import { getEffectiveActionPlanDueDate } from "../../modules/reports/reporting-definitions.js";
 import { AUTOMATIC_NOTIFICATION_TYPES, DEADLINE_MONITOR_JOB_NAME, DEADLINE_MONITOR_PARAMETER_DEFAULTS, } from "./deadline-monitor.constants.js";
 const userSelect = {
     email: true,
@@ -31,6 +32,13 @@ const observationSelect = {
     title: true,
 };
 const actionPlanSelect = {
+    deadlineExtensionRequests: {
+        select: {
+            proposedDueDate: true,
+            status: true,
+        },
+        where: { deletedAt: null },
+    },
     description: true,
     currentDueDate: true,
     id: true,
@@ -244,7 +252,7 @@ const emitEvent = async (context, event, recipient, cycle) => {
             currentStatus: event.currentStatus,
             description: event.description,
             dueDate: event.dueDate,
-            targetUrl: event.targetUrl,
+            targetUrl: buildFrontendUrl(event.targetUrl),
             title: event.title,
             userName: recipient.name,
         },
@@ -297,9 +305,7 @@ const notifyObservation = async (context, observation, auditRecipients, now) => 
         ...(context.parameters.notify_area_manager
             ? observation.areaAssignments.map((assignment) => assignment.area.managerUser)
             : []),
-        ...(context.parameters.notify_audit_team
-            ? [observation.auditorUser, ...auditRecipients]
-            : []),
+        ...(context.parameters.notify_audit_team ? auditRecipients : []),
     ]);
     const event = {
         actionRequired: isOverdue
@@ -319,7 +325,10 @@ const notifyObservation = async (context, observation, auditRecipients, now) => 
         priority: isOverdue
             ? NotificationPriority.CRITICAL
             : NotificationPriority.HIGH,
-        targetUrl: `${env.FRONTEND_URL}/observaciones/${observation.id}`,
+        targetUrl: resolveNotificationTarget({
+            entityId: observation.id,
+            entityType: "OBSERVATION",
+        }) ?? `/observaciones/${observation.id}`,
         title: isOverdue ? "Plazo vencido" : "Próximo vencimiento",
     };
     for (const recipient of recipients) {
@@ -332,7 +341,7 @@ const notifyObservation = async (context, observation, auditRecipients, now) => 
     }
 };
 const notifyActionPlan = async (context, actionPlan, auditRecipients, now) => {
-    const dueDate = actionPlan.currentDueDate;
+    const dueDate = getEffectiveActionPlanDueDate(actionPlan);
     const code = `${actionPlan.observation.auditReport.reportNumber} / OBS-${String(actionPlan.observation.observationNumber).padStart(3, "0")}`;
     const daysUntilDue = daysBetween(now, dueDate);
     const isOverdue = daysUntilDue < 0;
@@ -346,9 +355,7 @@ const notifyActionPlan = async (context, actionPlan, auditRecipients, now) => {
         context.parameters.notify_area_manager
             ? actionPlan.observationArea.area.managerUser
             : null,
-        ...(context.parameters.notify_audit_team
-            ? [actionPlan.observation.auditorUser, ...auditRecipients]
-            : []),
+        ...(context.parameters.notify_audit_team ? auditRecipients : []),
     ]);
     const event = {
         actionRequired: isOverdue
@@ -370,7 +377,10 @@ const notifyActionPlan = async (context, actionPlan, auditRecipients, now) => {
         priority: isOverdue
             ? NotificationPriority.CRITICAL
             : NotificationPriority.HIGH,
-        targetUrl: `${env.FRONTEND_URL}/observaciones/${actionPlan.observation.id}`,
+        targetUrl: resolveNotificationTarget({
+            entityId: actionPlan.id,
+            entityType: "ACTION_PLAN",
+        }) ?? `/planes-accion/${actionPlan.id}`,
         title: isOverdue
             ? "Plan de acción vencido"
             : "Próximo vencimiento del plan de acción",
@@ -436,6 +446,7 @@ const processPendingProgress = async (context, auditRecipients, now) => {
             actionPlan: {
                 select: {
                     currentDueDate: true,
+                    id: true,
                     observationArea: { select: { area: { select: { name: true } } } },
                     observation: {
                         select: {
@@ -454,6 +465,10 @@ const processPendingProgress = async (context, auditRecipients, now) => {
             updatedAt: true,
         },
         where: {
+            actionPlan: {
+                deletedAt: null,
+                observation: { deletedAt: null },
+            },
             deletedAt: null,
             OR: [
                 { reviewStatus: "SENT_TO_AUDIT", updatedAt: { lte: threshold } },
@@ -489,7 +504,13 @@ const processPendingProgress = async (context, auditRecipients, now) => {
                 : AUTOMATIC_NOTIFICATION_TYPES.pendingProgressReview,
             observationId: observation.id,
             priority: NotificationPriority.HIGH,
-            targetUrl: `${env.FRONTEND_URL}/observaciones/${observation.id}`,
+            targetUrl: resolveNotificationTarget({
+                actionPlanId: update.actionPlan.id,
+                advanceId: update.id,
+                entityId: update.id,
+                entityType: "PROGRESS_UPDATE",
+                observationId: observation.id,
+            }) ?? "/aprobaciones/pendientes",
             title: returned
                 ? "Avance devuelto para corrección"
                 : "Avance pendiente de revisión",
@@ -550,7 +571,12 @@ const processPendingExtensions = async (context, auditRecipients, now) => {
             updatedAt: true,
         },
         where: {
+            actionPlan: {
+                deletedAt: null,
+                observation: { deletedAt: null },
+            },
             deletedAt: null,
+            observation: { deletedAt: null },
             status: "SENT_TO_MANAGER",
             updatedAt: { lte: threshold },
         },
@@ -587,7 +613,10 @@ const processPendingExtensions = async (context, auditRecipients, now) => {
                 : AUTOMATIC_NOTIFICATION_TYPES.pendingExtensionManagerReview,
             observationId: observation.id,
             priority: NotificationPriority.HIGH,
-            targetUrl: `${env.FRONTEND_URL}/ampliaciones-plazo/${request.id}`,
+            targetUrl: resolveNotificationTarget({
+                entityId: request.id,
+                entityType: "DEADLINE_EXTENSION_REQUEST",
+            }) ?? `/ampliaciones-plazo/${request.id}`,
             title: managerReview
                 ? "Ampliación pendiente de aprobación"
                 : "Ampliación pendiente de aprobación",
@@ -676,15 +705,42 @@ export const deadlineMonitorService = {
             const actionPlans = await prisma.actionPlan.findMany({
                 select: actionPlanSelect,
                 where: {
-                    deletedAt: null,
-                    currentDueDate: { lte: reminderEnd },
-                    progressPercent: { lt: 100 },
-                    status: { not: "CONCLUDED" },
+                    AND: [
+                        { deletedAt: null },
+                        { observation: { deletedAt: null } },
+                        {
+                            OR: [
+                                { remediationPlanId: null },
+                                { remediationPlan: { deletedAt: null } },
+                            ],
+                        },
+                        {
+                            OR: [
+                                {
+                                    currentDueDate: { lte: reminderEnd },
+                                    deadlineExtensionRequests: {
+                                        none: { deletedAt: null, status: "MANAGER_APPROVED" },
+                                    },
+                                },
+                                {
+                                    deadlineExtensionRequests: {
+                                        some: {
+                                            deletedAt: null,
+                                            proposedDueDate: { lte: reminderEnd },
+                                            status: "MANAGER_APPROVED",
+                                        },
+                                    },
+                                },
+                            ],
+                        },
+                        { progressPercent: { lt: 100 } },
+                        { status: { not: "CONCLUDED" } },
+                    ],
                 },
             });
             const auditRecipients = await getAuditRecipients();
             const overdueObservations = observations.filter((item) => item.currentDueDate < today);
-            const overdueActionPlans = actionPlans.filter((item) => item.currentDueDate < today);
+            const overdueActionPlans = actionPlans.filter((item) => getEffectiveActionPlanDueDate(item) < today);
             await recordOverdueActivity(context, overdueObservations, overdueActionPlans);
             for (const observation of observations) {
                 summary.processedCount += 1;

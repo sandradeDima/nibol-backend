@@ -160,6 +160,20 @@ export const progressController = {
     );
     sendSuccess(response, record, 201);
   },
+  async deleteProgressEvaluation(request: Request, response: Response) {
+    const result = await progressService.deleteProgressEvaluation(
+      idWith(request, progressEvaluationIdParamSchema),
+      access(request),
+    );
+    await log(
+      request,
+      "action_plans.delete",
+      "PROGRESS_EVALUATION",
+      null,
+      result.previous,
+    );
+    sendSuccess(response, { deleted: true, id: result.id });
+  },
   async createProgressEvaluationEvidence(request: Request, response: Response) {
     sendSuccess(
       response,
@@ -283,7 +297,9 @@ export const progressController = {
         observationId: value(request.query["filter.observationId"]),
         page: value(request.query.page),
         perPage: value(request.query.perPage),
+        responsibleUserId: value(request.query["filter.responsibleUserId"]),
         reviewStatus: value(request.query["filter.reviewStatus"]),
+        reviewQueue: value(request.query.reviewQueue),
         search: value(request.query.search),
       }),
       access(request),

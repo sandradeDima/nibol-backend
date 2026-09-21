@@ -21,6 +21,14 @@ export type OfficialActionPlanStatus =
   (typeof OFFICIAL_ACTION_PLAN_STATUSES)[number];
 export type DeadlineStatus = "VIGENTE" | "VENCIDO";
 
+export const reportDeadlineStatusOptions: Array<{
+  key: DeadlineStatus;
+  label: string;
+}> = [
+  { key: "VIGENTE", label: "Vigente" },
+  { key: "VENCIDO", label: "Vencido" },
+];
+
 export const officialActionPlanStatusMeta: Record<
   OfficialActionPlanStatus,
   { code: "NI" | "I" | "CA" | "CO"; label: string; percent: number }

@@ -9,10 +9,16 @@ import {
 } from "../../services/authorization-service.js";
 import { notificationService } from "../../services/notification-service.js";
 import { AppError } from "../../utils/app-error.js";
-import { buildObservationUrl } from "../../utils/observation-links.js";
+import { resolveNotificationTarget } from "../../utils/notification-links.js";
 import { prisma } from "../../utils/prisma.js";
 import { workflowIntegrationService } from "../workflows/workflow-integration.service.js";
-import { workflowTaskService } from "../workflows/workflow-task.service.js";
+import { workflowInstanceService } from "../workflows/workflow-instance.service.js";
+import {
+  findActiveWorkflowTaskForEntity,
+  findActiveWorkflowTasksForEntities,
+  type ActiveWorkflowTaskSummary,
+  workflowTaskService,
+} from "../workflows/workflow-task.service.js";
 import { EDITABLE_EXTENSION_REQUEST_STATUSES } from "./extension-requests.constants.js";
 import type {
   CreateExtensionRequestInput,
@@ -27,6 +33,9 @@ const addDays = (date: Date, days: number) => {
   return result;
 };
 
+export const isActiveWorkflowInstanceStatus = (status: string): boolean =>
+  ["PENDING", "ACTIVE", "WAITING"].includes(status);
+
 const userSelect = {
   email: true,
   id: true,
@@ -38,6 +47,7 @@ const include = {
     select: {
       currentDueDate: true,
       id: true,
+      description: true,
       observation: {
         select: {
           auditReport: { select: { reportNumber: true } },
@@ -48,6 +58,14 @@ const include = {
       },
       originalDueDate: true,
       responsibleUser: { select: userSelect },
+      title: true,
+      observationArea: {
+        select: {
+          area: { select: { id: true, name: true } },
+          areaResponsible: { select: userSelect },
+          processOwner: { select: userSelect },
+        },
+      },
     },
   },
   attachments: {
@@ -59,6 +77,8 @@ const include = {
           id: true,
           mimeType: true,
           originalName: true,
+          sizeBytes: true,
+          uploadedByUser: { select: userSelect },
         },
       },
     },
@@ -78,6 +98,7 @@ const include = {
       auditReport: { select: { reportNumber: true } },
       auditorUserId: true,
       id: true,
+      currentDueDate: true,
       observationNumber: true,
       originalDueDate: true,
       title: true,
@@ -97,29 +118,39 @@ type ExtensionRecord = Prisma.DeadlineExtensionRequestGetPayload<{
   include: typeof include;
 }>;
 
-const extensionTargetUrl = (record: ExtensionRecord) => {
-  const observation = record.observation ?? record.actionPlan?.observation;
-  if (!observation) return `/ampliaciones-plazo/${record.id}`;
-  return buildObservationUrl(observation.id, {
-    extensionId: record.id,
-    ...(record.actionPlan?.id ? { planId: record.actionPlan.id } : {}),
-    tab: "plans",
-  });
+type ReviewTaskSummary = {
+  allowedActions: string[];
+  canAct: boolean;
+  id: string | null;
+  status: string;
 };
 
-const format = (record: ExtensionRecord) => ({
+const extensionTargetUrl = (record: ExtensionRecord) =>
+  resolveNotificationTarget({
+    entityId: record.id,
+    entityType: "DEADLINE_EXTENSION_REQUEST",
+  }) ?? `/ampliaciones-plazo/${record.id}`;
+
+const format = (
+  record: ExtensionRecord,
+  reviewTask: ReviewTaskSummary | null = null,
+) => ({
   actionPlan: record.actionPlan
     ? {
         id: record.actionPlan.id,
         currentDueDate: record.actionPlan.currentDueDate.toISOString(),
+        description: record.actionPlan.description,
         originalDueDate: record.actionPlan.originalDueDate.toISOString(),
         responsibleUser: record.actionPlan.responsibleUser,
+        title: record.actionPlan.title,
+        observationArea: record.actionPlan.observationArea,
       }
     : null,
   attachments: record.attachments.map(({ evidenceFile }) => ({
     ...evidenceFile,
     createdAt: evidenceFile.createdAt.toISOString(),
     downloadPath: `/evidences/${evidenceFile.id}/download`,
+    sizeBytes: Number(evidenceFile.sizeBytes),
   })),
   createdAt: record.createdAt.toISOString(),
   classification: record.classification,
@@ -132,6 +163,12 @@ const format = (record: ExtensionRecord) => ({
   managerComment: record.managerComment,
   managerReviewedAt: record.managerReviewedAt?.toISOString() ?? null,
   managerReviewer: record.managerReviewer,
+  effectiveDueDate: (record.status === "MANAGER_APPROVED"
+    ? record.proposedDueDate
+    : (record.actionPlan?.currentDueDate ??
+      record.observation?.currentDueDate ??
+      record.previousDueDate)
+  ).toISOString(),
   observation:
     (record.observation ?? record.actionPlan?.observation)
       ? {
@@ -149,7 +186,50 @@ const format = (record: ExtensionRecord) => ({
   targetType: record.targetType,
   updatedAt: record.updatedAt.toISOString(),
   workflowInstanceId: record.workflowInstanceId,
+  reviewTask,
 });
+
+const legacyReviewTask = (
+  record: ExtensionRecord,
+  access: AuthorizationSummary,
+): ReviewTaskSummary | null => {
+  if (record.status !== "SENT_TO_MANAGER" || record.workflowInstanceId)
+    return null;
+  const isAreaResponsible =
+    record.observationArea?.areaResponsible.id === access.userId ||
+    record.actionPlan?.observationArea?.areaResponsible.id === access.userId;
+  const canAct = access.isAdmin || isAreaResponsible;
+  const allowedActions = [
+    ...(canAct &&
+    authorizationService.can(access, "deadline_extensions.approve")
+      ? ["APPROVE"]
+      : []),
+    ...(canAct && authorizationService.can(access, "deadline_extensions.reject")
+      ? ["REJECT"]
+      : []),
+  ];
+  return {
+    allowedActions,
+    canAct: allowedActions.length > 0,
+    id: null,
+    status: record.status,
+  };
+};
+
+const formatWithReviewTask = async (
+  record: ExtensionRecord,
+  access: AuthorizationSummary,
+): Promise<ReturnType<typeof format>> => {
+  const workflowTask = record.workflowInstanceId
+    ? await findActiveWorkflowTaskForEntity({
+        entityId: record.id,
+        entityType: "deadline_extension_request",
+        processType: "DEADLINE_EXTENSION",
+        userId: access.userId,
+      })
+    : null;
+  return format(record, workflowTask ?? legacyReviewTask(record, access));
+};
 
 const accessWhere = (
   access: AuthorizationSummary,
@@ -297,52 +377,135 @@ export const extensionRequestsService = {
   },
 
   async getById(id: string, access: AuthorizationSummary) {
-    return format(await find(id, access));
+    return formatWithReviewTask(await find(id, access), access);
   },
 
   async list(query: ListExtensionRequestsQuery, access: AuthorizationSummary) {
-    const where: Prisma.DeadlineExtensionRequestWhereInput = {
-      deletedAt: null,
-      ...accessWhere(access),
-      ...(query.actionPlanId ? { actionPlanId: query.actionPlanId } : {}),
+    const reviewTasks = query.reviewQueue
+      ? await findActiveWorkflowTasksForEntities({
+          entityType: "deadline_extension_request",
+          processType: "DEADLINE_EXTENSION",
+          userId: access.userId,
+        })
+      : new Map<string, ActiveWorkflowTaskSummary>();
+    const legacyReviewable = access.isAdmin
+      ? { workflowInstanceId: null }
+      : {
+          OR: [
+            {
+              observationArea: {
+                areaResponsibleUserId: access.userId,
+              },
+            },
+            {
+              actionPlan: {
+                observationArea: {
+                  areaResponsibleUserId: access.userId,
+                },
+              },
+            },
+            {
+              observation: {
+                areaAssignments: {
+                  some: { areaResponsibleUserId: access.userId },
+                },
+              },
+            },
+          ],
+          workflowInstanceId: null,
+        };
+    const filters: Prisma.DeadlineExtensionRequestWhereInput[] = [
+      { deletedAt: null },
+      accessWhere(access),
+      ...(query.actionPlanId ? [{ actionPlanId: query.actionPlanId }] : []),
       ...(query.areaId
-        ? {
-            AND: [
-              {
-                OR: [
-                  { observationArea: { areaId: query.areaId } },
-                  { actionPlan: { observationArea: { areaId: query.areaId } } },
-                  {
-                    observation: {
-                      areaAssignments: { some: { areaId: query.areaId } },
+        ? [
+            {
+              OR: [
+                { observationArea: { areaId: query.areaId } },
+                { actionPlan: { observationArea: { areaId: query.areaId } } },
+                {
+                  observation: {
+                    areaAssignments: { some: { areaId: query.areaId } },
+                  },
+                },
+              ],
+            },
+          ]
+        : []),
+      ...(query.executorUserId
+        ? [{ actionPlan: { responsibleUserId: query.executorUserId } }]
+        : []),
+      ...(query.observationId
+        ? [
+            {
+              OR: [
+                { observationId: query.observationId },
+                { actionPlan: { observationId: query.observationId } },
+              ],
+            },
+          ]
+        : []),
+      ...(query.requestedByUserId
+        ? [{ requestedByUserId: query.requestedByUserId }]
+        : []),
+      ...(query.responsibleUserId
+        ? [
+            {
+              OR: [
+                {
+                  observationArea: {
+                    areaResponsibleUserId: query.responsibleUserId,
+                  },
+                },
+                {
+                  actionPlan: {
+                    observationArea: {
+                      areaResponsibleUserId: query.responsibleUserId,
                     },
                   },
-                ],
-              },
-            ],
-          }
-        : {}),
-      ...(query.observationId
-        ? {
-            OR: [
-              { observationId: query.observationId },
-              { actionPlan: { observationId: query.observationId } },
-            ],
-          }
-        : {}),
-      ...(query.requestedByUserId
-        ? { requestedByUserId: query.requestedByUserId }
-        : {}),
-      ...(query.status ? { status: query.status } : {}),
-      ...(query.targetType ? { targetType: query.targetType } : {}),
+                },
+                {
+                  observation: {
+                    areaAssignments: {
+                      some: { areaResponsibleUserId: query.responsibleUserId },
+                    },
+                  },
+                },
+              ],
+            },
+          ]
+        : []),
+      ...(query.status ? [{ status: query.status }] : []),
+      ...(query.targetType ? [{ targetType: query.targetType }] : []),
       ...(query.search
-        ? {
-            OR: [
-              { reason: { contains: query.search } },
-              { observation: { title: { contains: query.search } } },
-            ],
-          }
-        : {}),
+        ? [
+            {
+              OR: [
+                { reason: { contains: query.search } },
+                { observation: { title: { contains: query.search } } },
+                { actionPlan: { title: { contains: query.search } } },
+              ],
+            },
+          ]
+        : []),
+    ];
+    if (query.reviewQueue) {
+      filters.push({
+        OR: [
+          ...(reviewTasks.size
+            ? [{ id: { in: [...reviewTasks.keys()] } }]
+            : []),
+          {
+            ...legacyReviewable,
+            status: "SENT_TO_MANAGER",
+          },
+        ],
+      });
+      if (!query.status) filters.push({ status: "SENT_TO_MANAGER" });
+    }
+    const where: Prisma.DeadlineExtensionRequestWhereInput = {
+      AND: filters,
     };
     const [records, total] = await Promise.all([
       prisma.deadlineExtensionRequest.findMany({
@@ -355,7 +518,14 @@ export const extensionRequestsService = {
       prisma.deadlineExtensionRequest.count({ where }),
     ]);
     return {
-      data: records.map(format),
+      data: records.map((record) =>
+        format(
+          record,
+          query.reviewQueue
+            ? (reviewTasks.get(record.id) ?? legacyReviewTask(record, access))
+            : null,
+        ),
+      ),
       pagination: {
         page: query.page,
         perPage: query.perPage,
@@ -530,30 +700,34 @@ export const extensionRequestsService = {
       };
     if (previous.status !== "SENT_TO_MANAGER")
       throw new AppError("This request is not pending management review.", 409);
+    if (!approved && !input.comment)
+      throw new AppError(
+        "Debe ingresar un comentario para rechazar la ampliación.",
+        400,
+      );
+    const workflowInstanceId = previous.workflowInstanceId;
+    const usedWorkflow = Boolean(workflowInstanceId);
     if (
+      !workflowInstanceId &&
       !access.isAdmin &&
-      previous.observationArea?.areaResponsible.id !== access.userId
+      previous.observationArea?.areaResponsible.id !== access.userId &&
+      previous.actionPlan?.observationArea?.areaResponsible.id !== access.userId
     )
       throw new AppError(
         "Solo el responsable del área puede decidir esta ampliación.",
         403,
       );
-    if (!approved && !input.comment)
-      throw new AppError("A rejection comment is required.", 400);
-    const workflowInstanceId = previous.workflowInstanceId;
-    const usedWorkflow = Boolean(workflowInstanceId);
     if (workflowInstanceId) {
-      const task = await prisma.workflowTask.findFirst({
-        select: { id: true },
-        where: {
-          status: { in: ["PENDING", "IN_PROGRESS"] },
-          workflowInstanceId,
-        },
+      const task = await findActiveWorkflowTaskForEntity({
+        entityId: id,
+        entityType: "deadline_extension_request",
+        processType: "DEADLINE_EXTENSION",
+        userId: access.userId,
       });
       if (!task)
         throw new AppError(
-          "La instancia de ampliación no tiene una tarea activa.",
-          409,
+          "No está autorizado para decidir la tarea pendiente de esta ampliación.",
+          403,
         );
       await workflowTaskService.actOnTask(
         task.id,
@@ -580,10 +754,18 @@ export const extensionRequestsService = {
             data: { currentDueDate: previous.proposedDueDate },
             where: { id: previous.actionPlanId },
           });
+        if (approved && previous.observationId)
+          await tx.observation.update({
+            data: { currentDueDate: previous.proposedDueDate },
+            where: { id: previous.observationId },
+          });
       });
     }
     if (!usedWorkflow && previous.requestedByUserId !== access.userId)
       await notificationService.create({
+        entityId: previous.id,
+        entityType: "DEADLINE_EXTENSION_REQUEST",
+        eventType: approved ? "EXTENSION_APPROVED" : "EXTENSION_REJECTED",
         message: approved
           ? `La ampliación fue aprobada hasta el ${previous.proposedDueDate.toISOString().slice(0, 10)}.`
           : "La solicitud de ampliación fue rechazada.",
@@ -604,6 +786,22 @@ export const extensionRequestsService = {
     const previous = await find(id, access);
     if (!access.isAdmin && previous.requestedByUserId !== access.userId)
       throw new AppError("You cannot cancel this request.", 403);
+    if (previous.workflowInstanceId) {
+      const workflowInstance = await prisma.workflowInstance.findUnique({
+        select: { status: true },
+        where: { id: previous.workflowInstanceId },
+      });
+      if (
+        workflowInstance &&
+        isActiveWorkflowInstanceStatus(workflowInstance.status)
+      ) {
+        await workflowInstanceService.cancelInstance(
+          previous.workflowInstanceId,
+          { ...access, ipAddress: null },
+          { internal: true },
+        );
+      }
+    }
     await prisma.deadlineExtensionRequest.update({
       data: { status: "CANCELLED" },
       where: { id },

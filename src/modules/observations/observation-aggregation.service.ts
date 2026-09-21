@@ -5,6 +5,26 @@ export type ActionPlanAggregationInput = {
   status: ActionPlanStatus;
 };
 
+export type WorkflowTaskCount = {
+  completed: number;
+  total: number;
+};
+
+export const countWorkflowTasksForObservation = (
+  progressEvaluationIds: readonly string[],
+  taskCounts: ReadonlyMap<string, WorkflowTaskCount>,
+): WorkflowTaskCount =>
+  progressEvaluationIds.reduce(
+    (counts, evaluationId) => {
+      const current = taskCounts.get(evaluationId);
+      return {
+        completed: counts.completed + (current?.completed ?? 0),
+        total: counts.total + (current?.total ?? 0),
+      };
+    },
+    { completed: 0, total: 0 },
+  );
+
 export type ObservationBusinessStatus =
   | "NO_INICIADO"
   | "INICIADO"

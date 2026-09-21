@@ -29,6 +29,11 @@ progressRouter.post(
   requirePermission("action_plans.submit_to_audit"),
   asyncHandler(controller.createProgressEvaluation),
 );
+progressRouter.delete(
+  "/progress-evaluations/:id",
+  requirePermission("action_plans.submit_to_audit"),
+  asyncHandler(controller.deleteProgressEvaluation),
+);
 progressRouter.patch(
   "/progress-evaluations/:id",
   requirePermission("action_plans.submit_to_audit"),

@@ -9,6 +9,10 @@ export const OFFICIAL_ACTION_PLAN_STATUSES = [
     "WITH_PROGRESS",
     "CONCLUDED",
 ];
+export const reportDeadlineStatusOptions = [
+    { key: "VIGENTE", label: "Vigente" },
+    { key: "VENCIDO", label: "Vencido" },
+];
 export const officialActionPlanStatusMeta = {
     CONCLUDED: {
         code: "CO",

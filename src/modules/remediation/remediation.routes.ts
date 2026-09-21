@@ -42,6 +42,15 @@ remediationRouter.get(
   asyncHandler(remediationController.listActionPlans),
 );
 remediationRouter.get(
+  "/action-plans/options",
+  requireAnyPermission([
+    "action_plans.create",
+    "action_plans.edit",
+    "action_plans.view",
+  ]),
+  asyncHandler(remediationController.actionPlanOptions),
+);
+remediationRouter.get(
   "/action-plans/:id",
   requirePermission("action_plans.view"),
   asyncHandler(remediationController.getActionPlan),

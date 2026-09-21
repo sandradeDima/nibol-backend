@@ -492,8 +492,12 @@ export const workflowInstanceService = {
     return mapped;
   },
 
-  async cancelInstance(instanceId: string, access: WorkflowActorContext) {
-    assertPermission(access, "workflow_instances.cancel");
+  async cancelInstance(
+    instanceId: string,
+    access: WorkflowActorContext,
+    options?: { internal?: boolean },
+  ) {
+    if (!options?.internal) assertPermission(access, "workflow_instances.cancel");
     const actor = runtimeActor(access);
     return prisma.$transaction(async (db) => {
       const instance = await db.workflowInstance.findUnique({

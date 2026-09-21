@@ -44,6 +44,23 @@ const labels = {
     STARTED: "Iniciado",
     WITH_PROGRESS: "Con avance",
 };
+const approvedExtensionFilter = {
+    deletedAt: null,
+    status: "MANAGER_APPROVED",
+};
+const buildEffectiveDueDateWhere = (range) => ({
+    OR: [
+        {
+            currentDueDate: range,
+            deadlineExtensionRequests: { none: approvedExtensionFilter },
+        },
+        {
+            deadlineExtensionRequests: {
+                some: { ...approvedExtensionFilter, proposedDueDate: range },
+            },
+        },
+    ],
+});
 const buildActionPlanDeadlineWhere = (status, today) => {
     switch (status) {
         case "REPROGRAMADO":
@@ -57,12 +74,15 @@ const buildActionPlanDeadlineWhere = (status, today) => {
             };
         case "VENCIDO":
             return {
-                currentDueDate: { lt: today },
+                ...buildEffectiveDueDateWhere({ lt: today }),
                 status: { not: "CONCLUDED" },
             };
         case "VIGENTE":
             return {
-                OR: [{ currentDueDate: { gte: today } }, { status: "CONCLUDED" }],
+                OR: [
+                    buildEffectiveDueDateWhere({ gte: today }),
+                    { status: "CONCLUDED" },
+                ],
             };
     }
 };
@@ -105,6 +125,45 @@ const format = (record) => {
     };
 };
 const accessWhere = (access) => buildActionPlanScopeWhere(access);
+export const buildApprovedCompletionEvaluationWhere = (actionPlanId) => ({
+    actionPlanId,
+    deletedAt: null,
+    reportedProgressPercent: 100,
+    reviewStatus: "APPROVED",
+});
+const uniqueById = (items) => [
+    ...new Map(items.map((item) => [item.id, item])).values(),
+];
+const cancelLinkedWorkflowInstances = async (tx, workflowInstanceIds, cancelledAt) => {
+    if (workflowInstanceIds.length === 0)
+        return;
+    await tx.workflowTimer.updateMany({
+        data: { status: "CANCELLED" },
+        where: {
+            status: { in: ["PENDING", "PROCESSING", "FAILED"] },
+            workflowInstanceId: { in: workflowInstanceIds },
+        },
+    });
+    await tx.workflowTask.updateMany({
+        data: { completedAt: cancelledAt, status: "CANCELLED" },
+        where: {
+            status: { in: ["PENDING", "IN_PROGRESS"] },
+            workflowInstanceId: { in: workflowInstanceIds },
+        },
+    });
+    await tx.workflowInstance.updateMany({
+        data: {
+            completedAt: cancelledAt,
+            finalResult: "CANCELLED",
+            lastExecutionAt: cancelledAt,
+            status: "CANCELLED",
+        },
+        where: {
+            id: { in: workflowInstanceIds },
+            status: { in: ["PENDING", "ACTIVE", "WAITING", "FAILED"] },
+        },
+    });
+};
 const validateDueDate = async (observationId, dueDate) => {
     const observation = await prisma.observation.findUnique({
         select: {
@@ -363,18 +422,25 @@ export const remediationService = {
         if (!authorizationService.can(access, "recommended_action_plans.delete"))
             throw new AppError("No tiene permiso para eliminar planes recomendados.", 403);
         const previous = await findRemediationPlan(id, access);
-        if (previous.status !== "DRAFT" && previous.status !== "RETURNED") {
-            throw new AppError("El plan no está disponible para eliminación.", 409);
-        }
-        const actionPlanCount = await prisma.actionPlan.count({
-            where: { deletedAt: null, remediationPlanId: id },
-        });
-        if (actionPlanCount > 0) {
-            throw new AppError("No se puede eliminar un plan recomendado con planes de acción asociados.", 409);
-        }
-        await prisma.remediationPlan.update({
-            data: { deletedAt: new Date() },
-            where: { id },
+        const deletedAt = new Date();
+        await prisma.$transaction(async (tx) => {
+            if (previous.workflowInstanceId) {
+                await cancelLinkedWorkflowInstances(tx, [previous.workflowInstanceId], deletedAt);
+            }
+            const deleted = await tx.remediationPlan.updateMany({
+                data: { deletedAt, deletedById: access.userId },
+                where: { deletedAt: null, id },
+            });
+            if (deleted.count !== 1)
+                throw new AppError("El plan recomendado ya no está disponible.", 409);
+            await tx.notification.updateMany({
+                data: { deletedAt },
+                where: {
+                    deletedAt: null,
+                    entityId: id,
+                    entityType: { in: ["REMEDIATION_PLAN", "remediation_plan"] },
+                },
+            });
         });
         return previous;
     },
@@ -473,12 +539,41 @@ export const remediationService = {
         if (!authorizationService.can(access, "action_plans.delete"))
             throw new AppError("No tiene permiso para eliminar planes de acción.", 403);
         const previous = await find(id, access);
-        if (previous._count.progressEvaluations > 0)
-            throw new AppError("No se puede eliminar un plan de acción que ya tiene historial de avance.", 409);
+        const deletedAt = new Date();
         await prisma.$transaction(async (tx) => {
-            await tx.actionPlan.update({
-                data: { deletedAt: new Date() },
-                where: { id },
+            const [evaluations, evidence, extensions] = await Promise.all([
+                tx.progressEvaluation.findMany({
+                    select: { workflowInstanceId: true },
+                    where: { actionPlanId: id, workflowInstanceId: { not: null } },
+                }),
+                tx.evidenceFile.findMany({
+                    select: { workflowInstanceId: true },
+                    where: { actionPlanId: id, workflowInstanceId: { not: null } },
+                }),
+                tx.deadlineExtensionRequest.findMany({
+                    select: { workflowInstanceId: true },
+                    where: { actionPlanId: id, workflowInstanceId: { not: null } },
+                }),
+            ]);
+            const workflowInstanceIds = [
+                ...new Set([...evaluations, ...evidence, ...extensions]
+                    .map((record) => record.workflowInstanceId)
+                    .filter((workflowInstanceId) => Boolean(workflowInstanceId))),
+            ];
+            await cancelLinkedWorkflowInstances(tx, workflowInstanceIds, deletedAt);
+            const deleted = await tx.actionPlan.updateMany({
+                data: { deletedAt, deletedById: access.userId },
+                where: { deletedAt: null, id },
+            });
+            if (deleted.count !== 1)
+                throw new AppError("El plan de acción ya no está disponible.", 409);
+            await tx.notification.updateMany({
+                data: { deletedAt },
+                where: {
+                    deletedAt: null,
+                    entityId: id,
+                    entityType: { in: ["ACTION_PLAN", "actionPlan"] },
+                },
             });
             await recalculateObservationFromActionPlans(tx, previous.observation.id);
         });
@@ -539,6 +634,98 @@ export const remediationService = {
             })),
         };
     },
+    async getActionPlanOptions(query, access) {
+        if (query.observationId) {
+            const observation = await prisma.observation.findFirst({
+                select: { id: true },
+                where: {
+                    id: query.observationId,
+                    ...buildObservationScopeWhere(access),
+                },
+            });
+            if (!observation)
+                throw new AppError("No se encontró la observación.", 404);
+        }
+        if (query.observationAreaId) {
+            const observationArea = await prisma.observationArea.findFirst({
+                select: { id: true },
+                where: {
+                    id: query.observationAreaId,
+                    ...(query.observationId
+                        ? { observationId: query.observationId }
+                        : {}),
+                    ...buildObservationAreaScopeWhere(access),
+                },
+            });
+            if (!observationArea)
+                throw new AppError("El área no pertenece a la observación.", 404);
+        }
+        const optionWhere = [accessWhere(access)];
+        if (query.observationAreaId)
+            optionWhere.push({ observationAreaId: query.observationAreaId });
+        if (query.observationId)
+            optionWhere.push({ observationId: query.observationId });
+        if (query.areaId?.length ||
+            query.areaResponsibleUserId?.length ||
+            query.processOwnerUserId?.length) {
+            optionWhere.push({
+                observationArea: {
+                    ...(query.areaId?.length ? { areaId: { in: query.areaId } } : {}),
+                    ...(query.areaResponsibleUserId?.length
+                        ? { areaResponsibleUserId: { in: query.areaResponsibleUserId } }
+                        : {}),
+                    ...(query.processOwnerUserId?.length
+                        ? { processOwnerUserId: { in: query.processOwnerUserId } }
+                        : {}),
+                },
+            });
+        }
+        const [records, riskLevels] = await Promise.all([
+            prisma.actionPlan.findMany({
+                select: {
+                    observationArea: {
+                        select: {
+                            area: { select: { id: true, name: true } },
+                            areaResponsible: { select: userSelect },
+                            processOwner: { select: userSelect },
+                        },
+                    },
+                    responsibleUser: { select: userSelect },
+                },
+                where: { AND: optionWhere, deletedAt: null },
+            }),
+            prisma.riskLevel.findMany({
+                orderBy: { severityOrder: "asc" },
+                select: { id: true, name: true },
+                where: { active: true, deletedAt: null },
+            }),
+        ]);
+        const executorWhere = {
+            deletedAt: null,
+            isActive: true,
+            ...(access.dataScope === "ASSIGNED" ? { id: access.userId } : {}),
+            userRoles: {
+                some: { role: { code: "EXECUTOR", deletedAt: null } },
+            },
+        };
+        const executorCandidates = query.observationId || query.observationAreaId
+            ? await prisma.user.findMany({
+                orderBy: { name: "asc" },
+                select: userSelect,
+                where: executorWhere,
+            })
+            : [];
+        return {
+            areaResponsibles: uniqueById(records.map((record) => record.observationArea.areaResponsible)),
+            areas: uniqueById(records.map((record) => record.observationArea.area)),
+            executorCandidates,
+            executors: query.observationId || query.observationAreaId
+                ? executorCandidates
+                : uniqueById(records.map((record) => record.responsibleUser)),
+            processOwners: uniqueById(records.map((record) => record.observationArea.processOwner)),
+            riskLevels,
+        };
+    },
     async listActionPlans(query, access) {
         const now = new Date();
         const today = new Date(now);
@@ -560,12 +747,12 @@ export const remediationService = {
                     ? [
                         query.overdue
                             ? {
-                                currentDueDate: { lt: today },
+                                ...buildEffectiveDueDateWhere({ lt: today }),
                                 status: { not: "CONCLUDED" },
                             }
                             : {
                                 OR: [
-                                    { currentDueDate: { gte: today } },
+                                    buildEffectiveDueDateWhere({ gte: today }),
                                     { status: "CONCLUDED" },
                                 ],
                             },
@@ -573,15 +760,15 @@ export const remediationService = {
                     : []),
                 ...(query.dueDateFrom || query.dueDateTo
                     ? [
-                        {
-                            currentDueDate: {
-                                ...(query.dueDateFrom ? { gte: query.dueDateFrom } : {}),
-                                ...(query.dueDateTo ? { lte: query.dueDateTo } : {}),
-                            },
-                        },
+                        buildEffectiveDueDateWhere({
+                            ...(query.dueDateFrom ? { gte: query.dueDateFrom } : {}),
+                            ...(query.dueDateTo ? { lte: query.dueDateTo } : {}),
+                        }),
                     ]
                     : []),
-                ...(query.areaId?.length || query.areaResponsibleUserId?.length
+                ...(query.areaId?.length ||
+                    query.areaResponsibleUserId?.length ||
+                    query.processOwnerUserId?.length
                     ? [
                         {
                             observationArea: {
@@ -592,6 +779,13 @@ export const remediationService = {
                                     ? {
                                         areaResponsibleUserId: {
                                             in: query.areaResponsibleUserId,
+                                        },
+                                    }
+                                    : {}),
+                                ...(query.processOwnerUserId?.length
+                                    ? {
+                                        processOwnerUserId: {
+                                            in: query.processOwnerUserId,
                                         },
                                     }
                                     : {}),
@@ -615,6 +809,9 @@ export const remediationService = {
                             },
                         },
                     ]
+                    : []),
+                ...(query.riskLevelId?.length
+                    ? [{ observation: { riskLevelId: { in: query.riskLevelId } } }]
                     : []),
                 ...(query.responsibleUserId?.length
                     ? [{ responsibleUserId: { in: query.responsibleUserId } }]
@@ -678,15 +875,20 @@ export const remediationService = {
             throw new AppError("El plan de acción debe alcanzar 100% de avance aprobado antes de concluirse.", 409);
         const approvedEvaluation = await prisma.progressEvaluation.findFirst({
             select: { id: true },
-            where: {
-                actionPlanId: id,
-                deletedAt: null,
-                progressPercent: 100,
-                reviewStatus: "APPROVED",
-            },
+            where: buildApprovedCompletionEvaluationWhere(id),
         });
         if (!approvedEvaluation)
             throw new AppError("Debe existir una evaluación de avance de 100% aprobada antes de concluir el plan.", 409);
+        const pendingEvaluation = await prisma.progressEvaluation.findFirst({
+            select: { id: true },
+            where: {
+                actionPlanId: id,
+                deletedAt: null,
+                reviewStatus: "SENT_TO_AUDIT",
+            },
+        });
+        if (pendingEvaluation)
+            throw new AppError("No se puede concluir un plan con un avance pendiente de revisión.", 409);
         await prisma.$transaction(async (tx) => {
             await tx.actionPlan.update({
                 data: { completedAt: new Date(), status: "CONCLUDED" },

@@ -25,10 +25,13 @@ export const reviewExtensionRequestSchema = z.object({
 export const listExtensionRequestsQuerySchema = z.object({
     actionPlanId: z.uuid().optional(),
     areaId: z.uuid().optional(),
+    executorUserId: z.uuid().optional(),
     observationId: z.uuid().optional(),
     page: z.coerce.number().int().positive().default(1),
     perPage: z.coerce.number().int().positive().max(100).default(20),
     requestedByUserId: z.uuid().optional(),
+    responsibleUserId: z.uuid().optional(),
+    reviewQueue: z.coerce.boolean().default(false),
     search: z.string().trim().default(""),
     status: z
         .enum([

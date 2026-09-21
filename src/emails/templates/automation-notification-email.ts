@@ -47,7 +47,7 @@ export const automationNotificationEmailTemplate: EmailTemplateDefinition<"autom
           contentHtml,
           previewText: variables.title,
         }),
-        subject: `${variables.title} · ${variables.code}`,
+        subject: `NIBOL · ${variables.title} · ${variables.code}`,
         text: joinTextBlocks(
           greeting(variables.userName),
           variables.title,

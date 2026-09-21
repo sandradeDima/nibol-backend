@@ -26,6 +26,7 @@ import type {
   RoleDashboardData,
   RoleDashboardExecutorNode,
   RoleDashboardNodeStatus,
+  RoleDashboardObservationRow,
   RoleDashboardOption,
   RoleDashboardPriority,
   RoleDashboardQuickAction,
@@ -733,6 +734,7 @@ const roleObservationInclude = (
       where: roleObservationAreaWhere(access, query),
     },
     auditReport: { select: { reportNumber: true } },
+    riskLevel: { select: { colorToken: true, key: true, name: true } },
     status: { select: { isFinal: true, key: true, name: true } },
   }) satisfies Prisma.ObservationInclude;
 
@@ -899,7 +901,7 @@ const sortedRoleChildren = (bucket: RoleHierarchyBucket) =>
     left.name.localeCompare(right.name, "es"),
   );
 
-const buildRoleDashboardHierarchy = (
+export const buildRoleDashboardHierarchy = (
   records: RoleObservationRecord[],
   roleCode: RoleDashboardRole,
 ): RoleDashboardAreaNode[] => {
@@ -970,6 +972,41 @@ const buildRoleDashboardHierarchy = (
       id: area.id,
       name: area.name,
     }));
+};
+
+const roleObservationRow = (
+  record: RoleObservationRecord,
+  now: Date,
+): RoleDashboardObservationRow => {
+  const assignment = record.areaAssignments[0];
+  const executorNames = [
+    ...new Set(
+      record.areaAssignments.flatMap((item) =>
+        item.actionPlans.map((plan) => plan.responsibleUser.name),
+      ),
+    ),
+  ];
+
+  return {
+    area: assignment?.area ?? { id: "", name: "Sin área" },
+    code: displayCode(record),
+    dueDate: record.currentDueDate.toISOString(),
+    executorNames,
+    href: buildObservationUrl(record.id),
+    id: record.id,
+    isOverdue:
+      !record.status.isFinal && record.currentDueDate.getTime() < now.getTime(),
+    progressPercent: record.progressPercent,
+    responsibleUser: assignment?.areaResponsible ?? null,
+    riskLevel: record.riskLevel,
+    status: {
+      isFinal: record.status.isFinal,
+      key: record.status.key,
+      name: record.status.name,
+    },
+    title: record.title,
+    updatedAt: record.updatedAt.toISOString(),
+  };
 };
 
 const priority = (
@@ -1195,6 +1232,9 @@ export const dashboardService = {
         totalObservations: globalObservations.length,
       },
       hierarchy: buildRoleDashboardHierarchy(observations, roleCode),
+      observations: observations.map((observation) =>
+        roleObservationRow(observation, now),
+      ),
       priorities,
       quickActions: quickActions(access, roleQuery),
       roleCode,
@@ -1206,6 +1246,7 @@ export const dashboardService = {
       selectedResponsibleIds: roleQuery.areaResponsibleUserId ?? [],
       summary: {
         concludedObservations: concludedObservations.length,
+        overdueObservations,
         pendingObservations: pendingObservations.length,
         totalObservations: observations.length,
       },

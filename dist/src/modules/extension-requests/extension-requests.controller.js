@@ -69,10 +69,13 @@ export const extensionRequestsController = {
         const result = await service.list(listExtensionRequestsQuerySchema.parse({
             actionPlanId: value(request.query["filter.actionPlanId"]),
             areaId: value(request.query["filter.areaId"]),
+            executorUserId: value(request.query["filter.executorUserId"]),
             observationId: value(request.query["filter.observationId"]),
             page: value(request.query.page),
             perPage: value(request.query.perPage),
             requestedByUserId: value(request.query["filter.requestedByUserId"]),
+            responsibleUserId: value(request.query["filter.responsibleUserId"]),
+            reviewQueue: value(request.query.reviewQueue),
             search: value(request.query.search),
             status: value(request.query["filter.status"]),
             targetType: value(request.query["filter.targetType"]),

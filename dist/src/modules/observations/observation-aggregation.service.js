@@ -1,3 +1,10 @@
+export const countWorkflowTasksForObservation = (progressEvaluationIds, taskCounts) => progressEvaluationIds.reduce((counts, evaluationId) => {
+    const current = taskCounts.get(evaluationId);
+    return {
+        completed: counts.completed + (current?.completed ?? 0),
+        total: counts.total + (current?.total ?? 0),
+    };
+}, { completed: 0, total: 0 });
 export const observationAggregationService = {
     calculateProgress(actionPlans) {
         if (actionPlans.length === 0)

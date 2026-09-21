@@ -201,7 +201,7 @@ export const buildObservationActionItems = (
     items.push({
       actionLabel: "Subir evidencia",
       actionType: "ADD_FINDING_EVIDENCE",
-      actionUrl: `${observationUrl}?tab=evidence`,
+      actionUrl: `${observationUrl}?tab=detail#documentos-observacion`,
       code: "FINDING_EVIDENCE_MISSING",
       label: "Falta evidencia del hallazgo",
       permission: "evidence.create",
@@ -293,7 +293,14 @@ const loadContexts = async (
         responsibleUserId: true,
         status: true,
       },
-      where: { deletedAt: null, observationId: { in: ids } },
+      where: {
+        deletedAt: null,
+        observationId: { in: ids },
+        OR: [
+          { remediationPlanId: null },
+          { remediationPlan: { deletedAt: null } },
+        ],
+      },
     }),
     prisma.evidenceFile.groupBy({
       _count: { _all: true },
@@ -302,12 +309,31 @@ const loadContexts = async (
         context: "FINDING",
         deletedAt: null,
         observationId: { in: ids },
+        OR: [
+          { actionPlanId: null },
+          {
+            actionPlan: {
+              deletedAt: null,
+              OR: [
+                { remediationPlanId: null },
+                { remediationPlan: { deletedAt: null } },
+              ],
+            },
+          },
+        ],
       },
     }),
     prisma.progressEvaluation.findMany({
       select: { actionPlan: { select: { observationId: true } } },
       where: {
-        actionPlan: { observationId: { in: ids } },
+        actionPlan: {
+          observationId: { in: ids },
+          deletedAt: null,
+          OR: [
+            { remediationPlanId: null },
+            { remediationPlan: { deletedAt: null } },
+          ],
+        },
         deletedAt: null,
         reviewStatus: { in: ["SENT_TO_AUDIT", "RETURNED"] },
       },

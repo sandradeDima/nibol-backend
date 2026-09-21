@@ -11,6 +11,7 @@ export const progressRouter = Router();
 progressRouter.get("/progress-evaluations", requirePermission("action_plans.view"), asyncHandler(controller.listProgressEvaluations));
 progressRouter.get("/progress-evaluations/:id", requirePermission("action_plans.view"), asyncHandler(controller.getProgressEvaluation));
 progressRouter.post("/action-plans/:id/evaluations", requirePermission("action_plans.submit_to_audit"), asyncHandler(controller.createProgressEvaluation));
+progressRouter.delete("/progress-evaluations/:id", requirePermission("action_plans.submit_to_audit"), asyncHandler(controller.deleteProgressEvaluation));
 progressRouter.patch("/progress-evaluations/:id", requirePermission("action_plans.submit_to_audit"), asyncHandler(controller.updateProgressEvaluation));
 progressRouter.post("/progress-evaluations/:id/submit", requirePermission("action_plans.submit_to_audit"), asyncHandler(controller.sendProgressEvaluationToAudit));
 progressRouter.post("/progress-evaluations/:id/approve", requireAllPermissions(["action_plans.evaluate", "action_plans.approve"]), asyncHandler(controller.approveProgressEvaluation));

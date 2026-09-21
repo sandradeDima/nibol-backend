@@ -27,6 +27,7 @@ const reportQueryInput = (request) => ({
         getQueryValue(request.query["filter.cutoffDate"]) ??
         getQueryValue(request.query["filter.fechaCorte"]),
     deadlineStatus: getQueryValue(request.query["filter.deadlineStatus"]),
+    deadlineStatuses: getQueryValue(request.query["filter.deadlineStatuses"]),
     dueSoon: getQueryValue(request.query["filter.dueSoon"]),
     dueSoonDays: getQueryValue(request.query["filter.dueSoonDays"]),
     executorId: getQueryValue(request.query["filter.executorId"]),
@@ -48,6 +49,7 @@ const reportQueryInput = (request) => ({
     search: getQueryValue(request.query["filter.search"]) ??
         getQueryValue(request.query.search),
     statusId: getQueryValue(request.query["filter.statusId"]),
+    observationStatusIds: getQueryValue(request.query["filter.observationStatusIds"]),
     type: getQueryValue(request.query.type),
 });
 const auditQueryInput = (request) => ({

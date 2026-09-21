@@ -10,6 +10,7 @@ import type {
   reportPreviewQuerySchema,
   reportTypeSchema,
 } from "./reports.validators.js";
+import type { DeadlineStatus } from "./reporting-definitions.js";
 
 export type ReportType = z.infer<typeof reportTypeSchema>;
 export type ReportFilters = z.infer<typeof reportFiltersSchema>;
@@ -97,22 +98,24 @@ export type ReportActionPlanRow = {
 export type ReportCriticalObservation = {
   area: { id: string; name: string };
   dueDate: string;
+  deadlineStatus: DeadlineStatus;
   href: string;
   id: string;
   progressPercent: number;
   riskLevel: { colorToken: string | null; name: string };
-  status: { key: string; name: string };
+  observationStatus: { key: string; name: string };
   title: string;
 };
 
 export type ReportUpcomingActionPlan = {
   actionPlanId: string;
+  deadlineStatus: DeadlineStatus;
   effectiveDueDate: string;
   executorName: string;
   href: string;
   observationCode: string;
+  observationStatus: string;
   progress: { code: "NI" | "I" | "CA" | "CO"; label: string; percent: number };
-  status: string;
   title: string;
 };
 
@@ -138,7 +141,13 @@ export type ReportOptions = {
   areaResponsibles: Array<{ email: string; id: string; name: string }>;
   executors: Array<{ email: string; id: string; name: string }>;
   filterCapabilities: ReportFilterCapabilities;
-  observationStatuses: Array<{ id: string; key: string; name: string }>;
+  deadlineStatuses: Array<{ key: DeadlineStatus; label: string }>;
+  observationStatuses: Array<{
+    id: string;
+    isFinal: boolean;
+    key: string;
+    name: string;
+  }>;
   processOwners: Array<{ email: string; id: string; name: string }>;
   progressStatuses: Array<{
     code: "NI" | "I" | "CA" | "CO";

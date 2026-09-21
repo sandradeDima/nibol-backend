@@ -1,4 +1,5 @@
 import type {
+  ActionPlanOptionsQuery,
   CreateActionPlanInput,
   CreateRemediationPlanInput,
   ListActionPlansQuery,
@@ -7,11 +8,28 @@ import type {
 } from "./remediation.validators.js";
 
 export type {
+  ActionPlanOptionsQuery,
   CreateActionPlanInput,
   CreateRemediationPlanInput,
   ListActionPlansQuery,
   UpdateActionPlanInput,
   UpdateRemediationPlanInput,
+};
+
+export type ActionPlanOptionUser = {
+  email: string;
+  id: string;
+  jobTitle: string | null;
+  name: string;
+};
+
+export type ActionPlanFilterOptions = {
+  areaResponsibles: ActionPlanOptionUser[];
+  areas: Array<{ id: string; name: string }>;
+  executorCandidates: ActionPlanOptionUser[];
+  executors: ActionPlanOptionUser[];
+  processOwners: ActionPlanOptionUser[];
+  riskLevels: Array<{ id: string; name: string }>;
 };
 
 export type ActionPlanStatusValue =

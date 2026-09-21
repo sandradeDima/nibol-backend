@@ -187,7 +187,17 @@ export const auditReportsService = {
                     const observations = await tx.observation.findMany({
                         select: {
                             _count: {
-                                select: { actionPlans: { where: { deletedAt: null } } },
+                                select: {
+                                    actionPlans: {
+                                        where: {
+                                            deletedAt: null,
+                                            OR: [
+                                                { remediationPlanId: null },
+                                                { remediationPlan: { deletedAt: null } },
+                                            ],
+                                        },
+                                    },
+                                },
                             },
                             deadlineExtensionRequests: {
                                 select: { id: true },

@@ -50,10 +50,10 @@ const assertPermission = (access: WorkflowActorContext, permission: string) => {
   }
 };
 
-const taskIsActionable = (status: string): boolean =>
+export const taskIsActionable = (status: string): boolean =>
   status === "PENDING" || status === "IN_PROGRESS";
 
-const taskAuthorizationWhere = (userId: string) => ({
+export const taskAuthorizationWhere = (userId: string) => ({
   OR: [
     { assignedUserId: userId },
     { assignedRole: { userRoles: { some: { userId } } } },
@@ -156,8 +156,80 @@ const getAllowedActions = (
   configuration: ReturnType<typeof getNodeConfiguration>,
 ) =>
   configuration.nodeType === "STAGE" || configuration.nodeType === "APPROVAL"
-    ? configuration.allowedActions
-    : [];
+      ? configuration.allowedActions
+      : [];
+
+export type ActiveWorkflowTaskSummary = {
+  allowedActions: string[];
+  canAct: boolean;
+  id: string;
+  status: string;
+};
+
+const activeTaskWhere = (input: {
+  entityIds?: readonly string[];
+  entityType: string;
+  processType: string;
+  userId: string;
+}): Prisma.WorkflowTaskWhereInput => ({
+  AND: [
+    taskAuthorizationWhere(input.userId),
+    {
+      instance: {
+        entityType: input.entityType,
+        ...(input.entityIds ? { entityId: { in: [...input.entityIds] } } : {}),
+        processType: input.processType,
+        status: { in: ["ACTIVE", "WAITING"] },
+      },
+    },
+  ],
+  status: { in: ["PENDING", "IN_PROGRESS"] },
+});
+
+export const findActiveWorkflowTasksForEntities = async (input: {
+  entityIds?: readonly string[];
+  entityType: string;
+  processType: string;
+  userId: string;
+}): Promise<Map<string, ActiveWorkflowTaskSummary>> => {
+  if (input.entityIds && input.entityIds.length === 0) return new Map();
+  const tasks = await prisma.workflowTask.findMany({
+    orderBy: [{ entrySequence: "desc" }, { createdAt: "desc" }],
+    select: {
+      id: true,
+      instance: { select: { entityId: true } },
+      node: { select: { configurationJson: true } },
+      status: true,
+    },
+    where: activeTaskWhere(input),
+  });
+  const result = new Map<string, ActiveWorkflowTaskSummary>();
+  for (const task of tasks) {
+    if (result.has(task.instance.entityId)) continue;
+    result.set(task.instance.entityId, {
+      allowedActions: getAllowedActions(
+        getNodeConfiguration(task.node.configurationJson),
+      ),
+      canAct: true,
+      id: task.id,
+      status: task.status,
+    });
+  }
+  return result;
+};
+
+export const findActiveWorkflowTaskForEntity = async (input: {
+  entityId: string;
+  entityType: string;
+  processType: string;
+  userId: string;
+}): Promise<ActiveWorkflowTaskSummary | null> =>
+  (
+    await findActiveWorkflowTasksForEntities({
+      ...input,
+      entityIds: [input.entityId],
+    })
+  ).get(input.entityId) ?? null;
 
 const assertActionRequirements = ({
   action,

@@ -1,5 +1,6 @@
 import { NotificationDeliveryChannel, NotificationDeliveryStatus, NotificationPriority as PrismaNotificationPriority, NotificationType as PrismaNotificationType, } from "../../generated/prisma/client.js";
 import { AppError } from "../utils/app-error.js";
+import { resolveNotificationTarget } from "../utils/notification-links.js";
 import { prisma } from "../utils/prisma.js";
 const notificationDeliveryMaxAttempts = 3;
 const notificationDeliveryClaimLeaseMs = 15 * 60_000;
@@ -89,6 +90,9 @@ const getNotificationForUser = async (userId, notificationId, db = prisma) => db
 export const notificationService = {
     async create(input, options) {
         const db = options?.db ?? prisma;
+        const targetUrl = input.targetUrl !== undefined
+            ? input.targetUrl
+            : resolveNotificationTarget(input);
         const notification = await db.notification.create({
             data: {
                 ...(input.dedupeKey !== undefined
@@ -103,9 +107,7 @@ export const notificationService = {
                     : {}),
                 message: input.message.trim(),
                 priority: toPrismaNotificationPriority(input.priority),
-                ...(input.targetUrl !== undefined
-                    ? { targetUrl: input.targetUrl }
-                    : {}),
+                ...(targetUrl !== null ? { targetUrl } : {}),
                 title: input.title.trim(),
                 type: toPrismaNotificationType(input.type),
                 user: { connect: { id: input.userId } },

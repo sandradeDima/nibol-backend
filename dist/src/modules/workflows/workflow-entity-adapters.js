@@ -1,5 +1,6 @@
 import { AppError } from "../../utils/app-error.js";
 import { buildObservationUrl } from "../../utils/observation-links.js";
+import { FILE_LEVEL_EVIDENCE_REVIEW_CONTEXTS } from "../progress/progress.constants.js";
 const database = (db) => {
     // Adapters are called from runtime transactions. The fallback is injected by
     // the registry only for validation/context reads in standalone callers.
@@ -115,6 +116,12 @@ const deadlineExtensionAdapter = {
             riskLevel: observation.riskLevel.key,
         });
     },
+    async validateTaskAction({ action, comment }) {
+        if (["REJECT", "REQUEST_CORRECTION", "OBSERVE"].includes(action) &&
+            !comment?.trim()) {
+            throw new AppError("Debe ingresar un comentario para rechazar o devolver la solicitud de ampliación.", 400);
+        }
+    },
     async applyDecision({ action, actorUserId, comment, db, entityId }) {
         const request = await database(db).deadlineExtensionRequest.findFirst({
             select: {
@@ -144,16 +151,11 @@ const deadlineExtensionAdapter = {
                 managerComment: comment?.trim() || null,
                 managerReviewedAt: new Date(),
                 managerReviewerId: actorUserId,
-                finalApprovedAt: approved ? new Date() : null,
+                finalApprovedAt: null,
                 status: approved ? "MANAGER_APPROVED" : "MANAGER_REJECTED",
             },
             where: { id: entityId },
         });
-        if (approved && request.actionPlanId)
-            await db.actionPlan.update({
-                data: { currentDueDate: request.proposedDueDate },
-                where: { id: request.actionPlanId },
-            });
     },
     async applyCompletion({ actorUserId, db, entityId, finalResult }) {
         const request = await db.deadlineExtensionRequest.findFirst({
@@ -263,8 +265,6 @@ const observationClosureAdapter = {
             throw new AppError("La observación ya está cerrada.", 409);
         if (update.reportedProgressPercent !== 100)
             throw new AppError("El cierre requiere 100% de avance.", 400);
-        if (update.evidenceFiles.length === 0)
-            throw new AppError("El cierre requiere evidencia.", 400);
         if (!["DRAFT", "RETURNED"].includes(update.reviewStatus))
             throw new AppError("El cierre no está disponible para envío.", 409);
     },
@@ -285,12 +285,11 @@ const observationClosureAdapter = {
             riskLevel: update.actionPlan.observation.riskLevel.key,
         });
     },
-    async validateTaskAction({ action, db, entityId }) {
-        if (!["APPROVE", "COMPLETE"].includes(action))
-            return;
-        const update = (await this.getEntity(entityId, db));
-        if (update.evidenceFiles.length === 0)
-            throw new AppError("El cierre requiere evidencia.", 400);
+    async validateTaskAction({ action, comment }) {
+        if (["REJECT", "REQUEST_CORRECTION", "OBSERVE"].includes(action) &&
+            !comment?.trim()) {
+            throw new AppError("Debe ingresar un comentario para devolver o rechazar el avance.", 400);
+        }
     },
     async applyDecision({ action, actorUserId, comment, db, entityId }) {
         const update = await db.progressEvaluation.findUnique({
@@ -578,6 +577,8 @@ const evidenceReviewAdapter = {
         });
         if (!evidence)
             throw new AppError("No se encontró la evidencia.", 404);
+        if (!FILE_LEVEL_EVIDENCE_REVIEW_CONTEXTS.has(evidence.context))
+            throw new AppError("La revisión corresponde al plan o avance, no a cada archivo de evidencia.", 409);
         return evidence;
     },
     async validateStart({ entityId, db }) {

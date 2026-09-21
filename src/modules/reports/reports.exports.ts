@@ -240,8 +240,8 @@ const buildDashboardSvg = (input: ReportExportInput): string => {
       })
       .join("")}
     ${svgChart("Riesgo", input.charts?.riskDistribution ?? [], 42, 280, 544, 235)}
-    ${svgChart("Estado de plazo", input.charts?.deadlineDistribution ?? [], 614, 280, 544, 235)}
-    ${svgChart("Estado de avance", input.charts?.progressDistribution ?? [], 42, 542, 544, 235)}
+    ${svgChart("Estado según plazo", input.charts?.deadlineDistribution ?? [], 614, 280, 544, 235)}
+    ${svgChart("Estado del plan de acción", input.charts?.progressDistribution ?? [], 42, 542, 544, 235)}
     ${svgChart("Distribución por área", input.charts?.areaDistribution ?? [], 614, 542, 544, 235)}
   </svg>`;
 };
@@ -570,7 +570,7 @@ const makePdf = (input: ReportExportInput): Buffer => {
   );
   pdfBarList(
     first,
-    "Estado de plazo",
+    "Estado según plazo",
     charts?.deadlineDistribution ?? [],
     308,
     467,
@@ -579,7 +579,7 @@ const makePdf = (input: ReportExportInput): Buffer => {
   );
   pdfBarList(
     first,
-    "Estado de avance",
+    "Estado del plan de acción",
     charts?.progressDistribution ?? [],
     34,
     279,

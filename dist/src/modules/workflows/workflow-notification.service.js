@@ -1,6 +1,7 @@
 import { NotificationDeliveryChannel, NotificationDeliveryStatus, NotificationPriority, NotificationType, } from "../../../generated/prisma/client.js";
 import { emailService } from "../../emails/EmailService.js";
 import { logger } from "../../utils/logger.js";
+import { buildFrontendUrl, resolveNotificationTarget, } from "../../utils/notification-links.js";
 import { prisma } from "../../utils/prisma.js";
 import { toLogJsonValue } from "../../services/logging-utils.js";
 import { restoreWorkflowRuntimeContext } from "./workflow-runtime-context.js";
@@ -218,7 +219,13 @@ export const createWorkflowNotificationIntent = async (db, event) => {
     const entityId = event.entityId ?? event.instanceId;
     const entityType = event.entityType ?? "workflow_instance";
     const priority = event.priority ?? NotificationPriority.NORMAL;
-    const targetUrl = event.targetUrl ?? `/configuracion/flujos/instancias/${event.instanceId}`;
+    const targetUrl = event.targetUrl ??
+        resolveNotificationTarget({
+            entityId,
+            entityType,
+            eventType: event.eventType,
+        }) ??
+        `/configuracion/flujos/instancias/${event.instanceId}`;
     const createdDeliveries = [];
     for (const recipient of recipients) {
         const notification = await createNotificationIfMissing(db, {
@@ -412,7 +419,7 @@ export const deliverWorkflowNotificationDelivery = async (deliveryId) => {
             ...(delivery.notification?.targetUrl
                 ? {
                     actionLabel: "Abrir en NIBOL",
-                    actionLink: delivery.notification.targetUrl,
+                    actionLink: buildFrontendUrl(delivery.notification.targetUrl),
                 }
                 : {}),
             message: delivery.notification?.message ?? "Tiene una notificación pendiente.",

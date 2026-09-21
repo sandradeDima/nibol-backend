@@ -2,11 +2,11 @@
 import { randomUUID } from "node:crypto";
 import { NotificationDeliveryChannel, NotificationDeliveryStatus, NotificationPriority, NotificationType, ScheduledJobExecutionStatus, } from "../../../generated/prisma/client.js";
 import { emailService } from "../../emails/EmailService.js";
-import { getBusinessDateKey, getEffectiveActionPlanDueDate, getOfficialActionPlanProgress, getActionPlanDeadlineStatus, getDateOnlyKey } from "../../modules/reports/reporting-definitions.js";
+import { getBusinessDateKey, getEffectiveActionPlanDueDate, getOfficialActionPlanProgress, getActionPlanDeadlineStatus, getDateOnlyKey, } from "../../modules/reports/reporting-definitions.js";
 import { buildActionPlanScopeWhere, } from "../../services/authorization-service.js";
 import { notificationService } from "../../services/notification-service.js";
 import { prisma } from "../../utils/prisma.js";
-import { env } from "../../utils/env.js";
+import { buildFrontendUrl, buildPendingWorkUrl, } from "../../utils/notification-links.js";
 import { logger } from "../../utils/logger.js";
 import { DEADLINE_REMINDER_EVENT_TYPE, DEADLINE_REMINDER_JOB_NAME, DEADLINE_REMINDER_LOCK_NAME, DEADLINE_REMINDER_PARAMETER_DEFAULTS, DEADLINE_REMINDER_POLICY_DEFAULTS, DEADLINE_REMINDER_ROLE_LABELS, DEADLINE_REMINDER_ROLES, getDeadlineReminderParameterKey, } from "./deadline-reminder.constants.js";
 import { addDaysToDateKey, getCadenceLabel, getReminderBucket, getScheduleGroupKey, getScheduledReminderPeriods, getNextScheduledReminderPeriod, } from "./deadline-reminder.policy.js";
@@ -44,6 +44,7 @@ const actionPlanSelect = {
             observationNumber: true,
             riskLevel: {
                 select: {
+                    colorToken: true,
                     name: true,
                     severityOrder: true,
                 },
@@ -120,7 +121,8 @@ const readPolicies = async () => {
             windowRecord?.createdAt,
         ]
             .filter((value) => Boolean(value))
-            .sort((left, right) => left.getTime() - right.getTime())[0] ?? new Date();
+            .sort((left, right) => left.getTime() - right.getTime())[0] ??
+            new Date();
         return {
             cadenceMonths: Math.min(24, parsePositiveInteger(cadenceRecord?.value, defaults.cadenceMonths)),
             cutoffDay: Math.min(28, Math.max(1, parsePositiveInteger(cutoffRecord?.value, defaults.cutoffDay))),
@@ -180,7 +182,10 @@ const findActionPlans = async (policy, cutoffDateKey, recipientUserId) => {
                     },
                     {
                         deadlineExtensionRequests: {
-                            some: { ...approvedExtensionWhere, proposedDueDate: { lte: endDate } },
+                            some: {
+                                ...approvedExtensionWhere,
+                                proposedDueDate: { lte: endDate },
+                            },
                         },
                     },
                 ],
@@ -220,11 +225,14 @@ const toDigestPlan = (plan, cutoffDateKey, policy, showExecutor) => {
         officialProgressPercent: officialProgress.percent,
         originalDueDate: dateLabel(getDateOnlyKey(plan.originalDueDate)),
         plan: plan.title || plan.description,
-        processOwner: policy.role === "EXECUTOR" ? undefined : plan.observationArea.processOwner?.name,
+        processOwner: policy.role === "EXECUTOR"
+            ? undefined
+            : plan.observationArea.processOwner?.name,
         reprogrammed: Boolean(approvedExtension),
         report: `${plan.observation.auditReport.reportNumber} — ${plan.observation.auditReport.title}`,
         reportedProgressPercent: plan.progressEvaluations?.[0]?.reportedProgressPercent ?? null,
         risk: plan.observation.riskLevel.name,
+        riskColorToken: plan.observation.riskLevel.colorToken,
         riskSeverity: plan.observation.riskLevel.severityOrder,
     };
 };
@@ -290,18 +298,8 @@ const buildDigests = async (input) => {
         upcomingWindowDays: digest.upcomingWindowDays,
     }));
 };
-const buildTargetUrl = (digest) => {
-    const params = new URLSearchParams({
-        "filter.activeOnly": "true",
-        periodField: "currentDueDate",
-    });
-    if (digest.roles.length === 1 && digest.roles[0] === "EXECUTOR") {
-        params.set("filter.executorId", digest.recipient.id);
-    }
-    if (digest.roles.length === 1 && digest.roles[0] === "PROCESS_OWNER") {
-        params.set("filter.processOwnerId", digest.recipient.id);
-    }
-    return `${env.FRONTEND_URL}/reportes?${params.toString()}`;
+const buildTargetUrl = () => {
+    return buildPendingWorkUrl();
 };
 const summaryForDigest = (digest) => ({
     dueToday: digest.plans.filter((plan) => plan.bucket === "DUE_TODAY").length,
@@ -322,13 +320,13 @@ const makePayload = (input) => {
         ...counts,
         plans: input.digest.plans,
         periodKey: input.periodKey,
-        platformLink: buildTargetUrl(input.digest),
+        platformLink: buildTargetUrl(),
         recipientEmail: input.digest.recipient.email,
         recipientName: input.digest.recipient.name,
         recipientUserId: input.digest.recipient.id,
         roleCadence: cadenceLabel,
         runType: input.runType,
-        subject: `${cadenceLabel.charAt(0).toUpperCase() + cadenceLabel.slice(1)} de plazos — NIBOL`,
+        subject: `NIBOL · ${input.digest.plans.length} pendientes requieren atención`,
     };
 };
 const createNotificationIfMissing = async (input) => {
@@ -422,6 +420,7 @@ const deliverReminderEmailDelivery = async (deliveryId) => {
                 ...payload,
                 appName: "NIBOL Bolivia",
                 userName: payload.recipientName,
+                platformLink: buildFrontendUrl(payload.platformLink),
                 plans: payload.plans.map((plan) => ({
                     area: plan.area,
                     bucket: plan.bucket,
@@ -436,6 +435,7 @@ const deliverReminderEmailDelivery = async (deliveryId) => {
                     reprogrammed: plan.reprogrammed,
                     report: plan.report,
                     risk: plan.risk,
+                    riskColorToken: plan.riskColorToken,
                 })),
             },
         });
@@ -768,8 +768,14 @@ export const deadlineReminderService = {
         const previous = (await readPolicies()).find((policy) => policy.role === role);
         const values = [
             [getDeadlineReminderParameterKey(role, "enabled"), String(input.enabled)],
-            [getDeadlineReminderParameterKey(role, "cutoffDay"), String(input.cutoffDay)],
-            [getDeadlineReminderParameterKey(role, "cadenceMonths"), String(input.cadenceMonths)],
+            [
+                getDeadlineReminderParameterKey(role, "cutoffDay"),
+                String(input.cutoffDay),
+            ],
+            [
+                getDeadlineReminderParameterKey(role, "cadenceMonths"),
+                String(input.cadenceMonths),
+            ],
             [
                 getDeadlineReminderParameterKey(role, "upcomingWindowDays"),
                 String(input.upcomingWindowDays),
@@ -990,7 +996,8 @@ export const deadlineReminderService = {
                     }
                 }
             }
-            baseSummary.status = baseSummary.failuresCount > 0 ? "PARTIAL" : "SUCCESS";
+            baseSummary.status =
+                baseSummary.failuresCount > 0 ? "PARTIAL" : "SUCCESS";
             baseSummary.finishedAt = new Date().toISOString();
             return baseSummary;
         }

@@ -53,6 +53,7 @@ export type DashboardRiskSummary = {
 };
 
 export type DashboardStatusSummary = {
+  isFinal?: boolean;
   key: string;
   name: string;
 };
@@ -265,6 +266,10 @@ export type RoleDashboardExecutorNode = {
   total: number;
 };
 
+export type RoleDashboardObservationRow = DashboardObservationRow & {
+  executorNames: string[];
+};
+
 export type RoleDashboardResponsibleNode = {
   concluded: number;
   executors: RoleDashboardExecutorNode[];
@@ -318,6 +323,7 @@ export type RoleDashboardData = {
     totalObservations: number;
   };
   hierarchy: RoleDashboardAreaNode[];
+  observations: RoleDashboardObservationRow[];
   priorities: RoleDashboardPriority[];
   quickActions: RoleDashboardQuickAction[];
   roleCode: RoleDashboardRole;
@@ -329,6 +335,7 @@ export type RoleDashboardData = {
   selectedResponsibleIds?: string[];
   summary: {
     concludedObservations: number;
+    overdueObservations: number;
     pendingObservations: number;
     totalObservations: number;
   };

@@ -49,6 +49,14 @@ export const updateActionPlanSchema = z
     message: "At least one field is required.",
   });
 
+export const actionPlanOptionsQuerySchema = z.object({
+  areaId: csvArray(z.uuid()),
+  areaResponsibleUserId: csvArray(z.uuid()),
+  observationAreaId: z.uuid().optional(),
+  observationId: z.uuid().optional(),
+  processOwnerUserId: csvArray(z.uuid()),
+});
+
 export const listActionPlansQuerySchema = z.object({
   areaId: csvArray(z.uuid()),
   areaResponsibleUserId: csvArray(z.uuid()),
@@ -62,10 +70,12 @@ export const listActionPlansQuerySchema = z.object({
     .optional(),
   page: z.coerce.number().int().positive().default(1),
   perPage: z.coerce.number().int().positive().max(100).default(20),
+  processOwnerUserId: csvArray(z.uuid()),
   progressStatus: csvArray(
     z.enum(["NOT_STARTED", "STARTED", "WITH_PROGRESS", "CONCLUDED"]),
   ),
   reportNumber: z.string().trim().max(64).optional(),
+  riskLevelId: csvArray(z.uuid()),
   responsibleUserId: csvArray(z.uuid()),
   search: z.string().trim().default(""),
   sortBy: z
@@ -78,6 +88,9 @@ export const listActionPlansQuerySchema = z.object({
 });
 
 export type CreateActionPlanInput = z.infer<typeof createActionPlanSchema>;
+export type ActionPlanOptionsQuery = z.infer<
+  typeof actionPlanOptionsQuerySchema
+>;
 export type CreateRemediationPlanInput = z.infer<
   typeof createRemediationPlanSchema
 >;

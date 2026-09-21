@@ -60,9 +60,11 @@ export const listProgressEvaluationsQuerySchema = z.object({
     observationId: z.uuid().optional(),
     page: z.coerce.number().int().positive().default(1),
     perPage: z.coerce.number().int().positive().max(100).default(20),
+    responsibleUserId: z.uuid().optional(),
     reviewStatus: z
         .enum(["DRAFT", "SENT_TO_AUDIT", "APPROVED", "RETURNED"])
         .optional(),
+    reviewQueue: z.coerce.boolean().default(false),
     search: z.string().trim().default(""),
 });
 //# sourceMappingURL=progress.validators.js.map

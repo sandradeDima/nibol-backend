@@ -294,7 +294,7 @@ export const observationsController = {
     await Promise.all([
       activityLogService.logUserAction({
         ...actor,
-        action: OBSERVATIONS_PERMISSIONS.delete,
+        action: "OBSERVATION_SOFT_DELETED",
         entityId: previous.id,
         entityType: OBSERVATIONS_ENTITY_TYPE,
         metadata: {

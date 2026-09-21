@@ -75,28 +75,60 @@ export const buildObservationScopeWhere = (access) => {
             return {
                 ...base,
                 actionPlans: {
-                    some: { deletedAt: null, responsibleUserId: access.userId },
+                    some: {
+                        OR: [
+                            { remediationPlanId: null },
+                            { remediationPlan: { deletedAt: null } },
+                        ],
+                        deletedAt: null,
+                        responsibleUserId: access.userId,
+                    },
                 },
             };
     }
 };
 export const buildObservationAreaScopeWhere = (access) => {
+    const base = {
+        observation: { deletedAt: null },
+    };
     if (access.dataScope === "ALL" || access.dataScope === "AUDIT_SCOPE") {
-        return {};
+        return base;
     }
     if (access.dataScope === "AREA") {
-        return access.roleCode === "PROCESS_OWNER"
-            ? { processOwnerUserId: access.userId }
-            : { areaResponsibleUserId: access.userId };
+        return {
+            ...base,
+            ...(access.roleCode === "PROCESS_OWNER"
+                ? { processOwnerUserId: access.userId }
+                : { areaResponsibleUserId: access.userId }),
+        };
     }
     return {
+        ...base,
         actionPlans: {
-            some: { deletedAt: null, responsibleUserId: access.userId },
+            some: {
+                OR: [
+                    { remediationPlanId: null },
+                    { remediationPlan: { deletedAt: null } },
+                ],
+                deletedAt: null,
+                responsibleUserId: access.userId,
+            },
         },
     };
 };
 export const buildActionPlanScopeWhere = (access) => {
-    const base = { deletedAt: null };
+    const base = {
+        AND: [
+            {
+                OR: [
+                    { remediationPlanId: null },
+                    { remediationPlan: { deletedAt: null } },
+                ],
+            },
+        ],
+        deletedAt: null,
+        observation: { deletedAt: null },
+    };
     if (access.dataScope === "ALL" || access.dataScope === "AUDIT_SCOPE") {
         return base;
     }
@@ -109,7 +141,10 @@ export const buildActionPlanScopeWhere = (access) => {
     return { ...base, responsibleUserId: access.userId };
 };
 export const buildRemediationPlanScopeWhere = (access, observationId) => {
-    const base = { deletedAt: null };
+    const base = {
+        deletedAt: null,
+        observation: { deletedAt: null },
+    };
     if (access.dataScope === "ALL" || access.dataScope === "AUDIT_SCOPE") {
         return base;
     }
@@ -127,7 +162,18 @@ export const buildRemediationPlanScopeWhere = (access, observationId) => {
     };
 };
 export const buildEvidenceScopeWhere = (access) => {
-    const base = { deletedAt: null };
+    const base = {
+        AND: [
+            {
+                OR: [
+                    { actionPlanId: null },
+                    { actionPlan: buildActionPlanScopeWhere(access) },
+                ],
+            },
+        ],
+        deletedAt: null,
+        observation: { deletedAt: null },
+    };
     if (access.dataScope === "ALL" || access.dataScope === "AUDIT_SCOPE") {
         return base;
     }
@@ -155,6 +201,18 @@ export const buildProgressEvaluationScopeWhere = (access) => ({
 });
 export const buildExtensionRequestScopeWhere = (access) => {
     const base = {
+        AND: [
+            {
+                OR: [
+                    { actionPlan: buildActionPlanScopeWhere(access) },
+                    { actionPlanId: null, observation: { deletedAt: null } },
+                    {
+                        actionPlanId: null,
+                        observationArea: { observation: { deletedAt: null } },
+                    },
+                ],
+            },
+        ],
         deletedAt: null,
     };
     if (access.dataScope === "ALL" || access.dataScope === "AUDIT_SCOPE") {

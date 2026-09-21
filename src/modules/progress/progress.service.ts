@@ -10,21 +10,34 @@ import {
 
 import {
   authorizationService,
+  buildActionPlanScopeWhere,
   buildEvidenceScopeWhere,
+  buildObservationAreaScopeWhere,
   buildObservationScopeWhere,
   buildProgressEvaluationScopeWhere,
+  buildRemediationPlanScopeWhere,
   type AuthorizationSummary,
 } from "../../services/authorization-service.js";
 import { emailService } from "../../emails/EmailService.js";
 import { notificationService } from "../../services/notification-service.js";
 import { AppError } from "../../utils/app-error.js";
-import { env } from "../../utils/env.js";
 import { logger } from "../../utils/logger.js";
 import { buildObservationUrl } from "../../utils/observation-links.js";
+import { buildFrontendUrl } from "../../utils/notification-links.js";
 import { prisma } from "../../utils/prisma.js";
 import { uploadsRootDir } from "../../utils/uploads.js";
 import { recalculateObservationFromActionPlans } from "../remediation/remediation.service.js";
+import {
+  getActionPlanDeadlineStatus,
+  getEffectiveActionPlanDueDate,
+} from "../reports/reporting-definitions.js";
 import { workflowIntegrationService } from "../workflows/workflow-integration.service.js";
+import {
+  findActiveWorkflowTaskForEntity,
+  findActiveWorkflowTasksForEntities,
+  type ActiveWorkflowTaskSummary,
+  workflowTaskService,
+} from "../workflows/workflow-task.service.js";
 import type {
   CreateCommentInput,
   CreateProgressEvaluationInput,
@@ -34,7 +47,12 @@ import type {
   UpdateProgressEvaluationInput,
   UploadEvidenceInput,
 } from "./progress.validators.js";
-import { officialProgressByStatus } from "./progress.constants.js";
+import {
+  EDITABLE_PROGRESS_STATUSES,
+  FILE_LEVEL_EVIDENCE_REVIEW_CONTEXTS,
+  isOfficialProgressStatusTransitionAllowed,
+  officialProgressByStatus,
+} from "./progress.constants.js";
 
 type UploadFile = {
   buffer: Buffer;
@@ -51,6 +69,57 @@ type PreparedFile = {
   sizeBytes: bigint;
   storedName: string;
 };
+
+export const removeStoredEvidenceFiles = async (
+  relativePaths: readonly string[],
+): Promise<void> => {
+  await Promise.all(
+    relativePaths.map((relativePath) =>
+      unlink(path.join(uploadsRootDir, relativePath)).catch(() => undefined),
+    ),
+  );
+};
+
+export const canSubmitProgressEvaluationForPlan = (status: string): boolean =>
+  status !== "CONCLUDED";
+
+export const buildProgressEvaluationSubmissionData = (submittedAt: Date) => ({
+  reviewComment: null,
+  reviewedAt: null,
+  reviewedByUserId: null,
+  reviewStatus: "SENT_TO_AUDIT" as const,
+  submittedAt,
+});
+
+const buildCommentParentWhere = (
+  access: AuthorizationSummary,
+): Prisma.ObservationCommentWhereInput => ({
+  AND: [
+    {
+      OR: [
+        { actionPlanId: null },
+        { actionPlan: buildActionPlanScopeWhere(access) },
+      ],
+    },
+    {
+      OR: [
+        { remediationPlanId: null },
+        { remediationPlan: buildRemediationPlanScopeWhere(access) },
+      ],
+    },
+    {
+      OR: [
+        { progressEvaluationId: null },
+        {
+          progressEvaluation: {
+            deletedAt: null,
+            actionPlan: buildActionPlanScopeWhere(access),
+          },
+        },
+      ],
+    },
+  ],
+});
 
 const allowedTypes: Record<string, Set<string>> = {
   ".doc": new Set(["application/msword"]),
@@ -75,23 +144,43 @@ const userSelect = {
 const evaluationInclude = {
   actionPlan: {
     select: {
+      currentDueDate: true,
+      deadlineExtensionRequests: {
+        orderBy: { createdAt: "desc" },
+        select: {
+          finalApprovedAt: true,
+          proposedDueDate: true,
+          status: true,
+        },
+        where: { deletedAt: null },
+      },
+      description: true,
       id: true,
       observationAreaId: true,
       observation: {
         select: {
           auditReport: { select: { reportNumber: true } },
           auditorUserId: true,
+          currentDueDate: true,
           id: true,
           observationNumber: true,
+          originalDueDate: true,
           title: true,
         },
       },
       observationArea: {
-        select: { area: { select: { id: true, name: true } }, id: true },
+        select: {
+          area: { select: { id: true, name: true } },
+          areaResponsible: { select: userSelect },
+          id: true,
+          processOwner: { select: userSelect },
+        },
       },
+      originalDueDate: true,
       progressPercent: true,
       responsibleUser: { select: userSelect },
       status: true,
+      title: true,
     },
   },
   evidenceFiles: {
@@ -106,7 +195,12 @@ const evaluationInclude = {
         select: { area: { select: { id: true, name: true } }, id: true },
       },
       originalName: true,
+      reviewComment: true,
+      reviewedAt: true,
+      reviewStatus: true,
       sizeBytes: true,
+      submittedAt: true,
+      uploadedByUser: { select: userSelect },
     },
     where: { deletedAt: null },
   },
@@ -121,6 +215,10 @@ const evaluationInclude = {
 type EvaluationRecord = Prisma.ProgressEvaluationGetPayload<{
   include: typeof evaluationInclude;
 }>;
+
+type ReviewTaskSummary = Omit<ActiveWorkflowTaskSummary, "id"> & {
+  id: string | null;
+};
 
 const evaluationAccessWhere = (
   access: AuthorizationSummary,
@@ -159,7 +257,7 @@ const deliverEvidenceNotificationEmails = async (
           to: recipient.email,
           variables: {
             actionLabel: "Revisar evidencia",
-            actionLink: `${env.FRONTEND_URL}${targetUrl}`,
+            actionLink: buildFrontendUrl(targetUrl),
             message,
             title,
             userName: recipient.name,
@@ -236,6 +334,7 @@ const queueEvidenceNotifications = async (input: {
 };
 
 const evidenceReviewSelect = {
+  context: true,
   createdAt: true,
   id: true,
   observation: {
@@ -260,6 +359,14 @@ const evidenceReviewSelect = {
 type EvidenceReviewRecord = Prisma.EvidenceFileGetPayload<{
   select: typeof evidenceReviewSelect;
 }>;
+
+const assertFileLevelReviewable = (context: string) => {
+  if (!FILE_LEVEL_EVIDENCE_REVIEW_CONTEXTS.has(context))
+    throw new AppError(
+      "La revisión corresponde al plan o avance, no a cada archivo de evidencia.",
+      409,
+    );
+};
 
 const evidenceReviewTargetUrl = (observationId: string, evidenceId: string) =>
   `/observaciones/${observationId}?tab=evidence&evidenceId=${encodeURIComponent(evidenceId)}`;
@@ -330,11 +437,20 @@ const getEvidenceReviewRecord = async (
   return evidence;
 };
 
-const formatEvaluation = (record: EvaluationRecord) => ({
+const formatEvaluation = (
+  record: EvaluationRecord,
+  reviewTask: ReviewTaskSummary | null = null,
+) => ({
   actionPlan: {
     area: record.actionPlan.observationArea.area,
+    areaResponsible: record.actionPlan.observationArea.areaResponsible,
+    currentDueDate: record.actionPlan.currentDueDate.toISOString(),
+    description: record.actionPlan.description,
     id: record.actionPlan.id,
+    originalDueDate: record.actionPlan.originalDueDate.toISOString(),
+    processOwner: record.actionPlan.observationArea.processOwner,
     responsibleUser: record.actionPlan.responsibleUser,
+    title: record.actionPlan.title,
   },
   evaluatedStatus: record.evaluatedStatus,
   comment: record.comment,
@@ -345,7 +461,9 @@ const formatEvaluation = (record: EvaluationRecord) => ({
     observationArea: file.observationArea
       ? { id: file.observationArea.id, name: file.observationArea.area.name }
       : null,
+    reviewedAt: file.reviewedAt?.toISOString() ?? null,
     sizeBytes: Number(file.sizeBytes),
+    submittedAt: file.submittedAt?.toISOString() ?? null,
   })),
   history: record.reviewHistory.map((item) => ({
     ...item,
@@ -357,6 +475,10 @@ const formatEvaluation = (record: EvaluationRecord) => ({
     id: record.actionPlan.observation.id,
     title: record.actionPlan.observation.title,
   },
+  effectiveDueDate: getEffectiveActionPlanDueDate(
+    record.actionPlan,
+  ).toISOString(),
+  deadlineStatus: getActionPlanDeadlineStatus(record.actionPlan),
   officialProgressPercent: record.actionPlan.progressPercent,
   officialStatus: record.actionPlan.status,
   reportedProgressPercent: record.reportedProgressPercent,
@@ -369,7 +491,48 @@ const formatEvaluation = (record: EvaluationRecord) => ({
   type: record.type,
   updatedAt: record.updatedAt.toISOString(),
   workflowInstanceId: record.workflowInstanceId,
+  reviewTask,
 });
+
+const legacyReviewTask = (
+  record: EvaluationRecord,
+  access: AuthorizationSummary,
+): ReviewTaskSummary | null => {
+  if (record.reviewStatus !== "SENT_TO_AUDIT" || record.workflowInstanceId)
+    return null;
+  const allowedActions = [
+    ...(authorizationService.can(access, "action_plans.approve")
+      ? ["APPROVE"]
+      : []),
+    ...(authorizationService.can(access, "action_plans.return")
+      ? ["REQUEST_CORRECTION"]
+      : []),
+  ];
+  return {
+    allowedActions,
+    canAct: allowedActions.length > 0,
+    id: null,
+    status: "PENDING",
+  };
+};
+
+const formatWithReviewTask = async (
+  record: EvaluationRecord,
+  access: AuthorizationSummary,
+): Promise<ReturnType<typeof formatEvaluation>> => {
+  const workflowTask = record.workflowInstanceId
+    ? await findActiveWorkflowTaskForEntity({
+        entityId: record.id,
+        entityType: "progress_evaluation",
+        processType: "OBSERVATION_CLOSURE",
+        userId: access.userId,
+      })
+    : null;
+  return formatEvaluation(
+    record,
+    workflowTask ?? legacyReviewTask(record, access),
+  );
+};
 
 const findEvaluation = async (
   id: string,
@@ -390,7 +553,7 @@ const canEdit = (
 ): boolean =>
   authorizationService.can(access, "action_plans.submit_to_audit") &&
   record.submittedByUserId === access.userId &&
-  ["DRAFT", "RETURNED"].includes(record.reviewStatus);
+  EDITABLE_PROGRESS_STATUSES.has(record.reviewStatus);
 
 const maxFileSize = async () => {
   const parameter = await prisma.systemParameter.findFirst({
@@ -477,11 +640,11 @@ const requireActionPlan = async (id: string, access: AuthorizationSummary) => {
       observationAreaId: true,
       observation: { select: { auditorUserId: true, id: true } },
       responsibleUserId: true,
+      status: true,
     },
     where: {
-      deletedAt: null,
+      ...buildActionPlanScopeWhere(access),
       id,
-      observation: buildObservationScopeWhere(access),
     },
   });
   if (!actionPlan) throw new AppError("No se encontró el plan de acción.", 404);
@@ -495,6 +658,11 @@ export const progressService = {
     access: AuthorizationSummary,
   ) {
     const actionPlan = await requireActionPlan(actionPlanId, access);
+    if (!canSubmitProgressEvaluationForPlan(actionPlan.status))
+      throw new AppError(
+        "No se pueden registrar avances en un plan concluido.",
+        409,
+      );
     const allowed =
       access.isAdmin ||
       actionPlan.responsibleUserId === access.userId ||
@@ -512,52 +680,83 @@ export const progressService = {
   },
 
   async getProgressEvaluation(id: string, access: AuthorizationSummary) {
-    return formatEvaluation(await findEvaluation(id, access));
+    return formatWithReviewTask(await findEvaluation(id, access), access);
   },
 
   async listProgressEvaluations(
     query: ListProgressEvaluationsQuery,
     access: AuthorizationSummary,
   ) {
-    const where: Prisma.ProgressEvaluationWhereInput = {
-      deletedAt: null,
-      ...evaluationAccessWhere(access),
-      ...(query.actionPlanId ? { actionPlanId: query.actionPlanId } : {}),
+    const reviewTasks = query.reviewQueue
+      ? await findActiveWorkflowTasksForEntities({
+          entityType: "progress_evaluation",
+          processType: "OBSERVATION_CLOSURE",
+          userId: access.userId,
+        })
+      : new Map<string, ActiveWorkflowTaskSummary>();
+    const filters: Prisma.ProgressEvaluationWhereInput[] = [
+      { deletedAt: null },
+      evaluationAccessWhere(access),
+      ...(query.actionPlanId ? [{ actionPlanId: query.actionPlanId }] : []),
       ...(query.areaId
-        ? { actionPlan: { observationArea: { areaId: query.areaId } } }
-        : {}),
+        ? [{ actionPlan: { observationArea: { areaId: query.areaId } } }]
+        : []),
       ...(query.observationId
-        ? { actionPlan: { observationId: query.observationId } }
-        : {}),
+        ? [{ actionPlan: { observationId: query.observationId } }]
+        : []),
+      ...(query.responsibleUserId
+        ? [{ actionPlan: { responsibleUserId: query.responsibleUserId } }]
+        : []),
       ...(query.dateFrom || query.dateTo
-        ? {
-            submittedAt: {
-              ...(query.dateFrom ? { gte: query.dateFrom } : {}),
-              ...(query.dateTo ? { lte: query.dateTo } : {}),
-            },
-          }
-        : {}),
-      ...(query.reviewStatus ? { reviewStatus: query.reviewStatus } : {}),
-      ...(query.search
-        ? {
-            OR: [
-              { comment: { contains: query.search } },
-              {
-                actionPlan: {
-                  observation: { title: { contains: query.search } },
-                },
+        ? [
+            {
+              submittedAt: {
+                ...(query.dateFrom ? { gte: query.dateFrom } : {}),
+                ...(query.dateTo ? { lte: query.dateTo } : {}),
               },
-              {
-                actionPlan: {
-                  observation: {
-                    auditReport: { reportNumber: { contains: query.search } },
+            },
+          ]
+        : []),
+      ...(query.reviewStatus ? [{ reviewStatus: query.reviewStatus }] : []),
+      ...(query.search
+        ? [
+            {
+              OR: [
+                { comment: { contains: query.search } },
+                {
+                  actionPlan: {
+                    observation: { title: { contains: query.search } },
                   },
                 },
-              },
-            ],
-          }
-        : {}),
-    };
+                {
+                  actionPlan: {
+                    title: { contains: query.search },
+                  },
+                },
+                {
+                  actionPlan: {
+                    observation: {
+                      auditReport: { reportNumber: { contains: query.search } },
+                    },
+                  },
+                },
+              ],
+            },
+          ]
+        : []),
+    ];
+    if (query.reviewQueue) {
+      filters.push({
+        OR: [
+          { workflowInstanceId: null },
+          ...(reviewTasks.size
+            ? [{ id: { in: [...reviewTasks.keys()] } }]
+            : []),
+        ],
+      });
+      if (!query.reviewStatus) filters.push({ reviewStatus: "SENT_TO_AUDIT" });
+    }
+    const where: Prisma.ProgressEvaluationWhereInput = { AND: filters };
     const [records, total] = await Promise.all([
       prisma.progressEvaluation.findMany({
         include: evaluationInclude,
@@ -569,7 +768,14 @@ export const progressService = {
       prisma.progressEvaluation.count({ where }),
     ]);
     return {
-      data: records.map(formatEvaluation),
+      data: records.map((record) =>
+        formatEvaluation(
+          record,
+          query.reviewQueue
+            ? (reviewTasks.get(record.id) ?? legacyReviewTask(record, access))
+            : null,
+        ),
+      ),
       pagination: {
         page: query.page,
         perPage: query.perPage,
@@ -612,18 +818,91 @@ export const progressService = {
         "Debe ingresar un comentario para devolver la evaluación.",
         400,
       );
+    if (previous.workflowInstanceId) {
+      const task = await findActiveWorkflowTaskForEntity({
+        entityId: id,
+        entityType: "progress_evaluation",
+        processType: "OBSERVATION_CLOSURE",
+        userId: access.userId,
+      });
+      if (!task)
+        throw new AppError(
+          "No está autorizado para decidir la tarea pendiente de esta evaluación.",
+          403,
+        );
+      if (action === "approve") {
+        if (!task.allowedActions.includes("APPROVE"))
+          throw new AppError(
+            "La aprobación no está disponible en este workflow.",
+            409,
+          );
+        await workflowTaskService.actOnTask(
+          task.id,
+          "APPROVE",
+          { ...(input.comment ? { comment: input.comment } : {}) },
+          { ...access, ipAddress: null },
+        );
+      } else {
+        const workflowAction = task.allowedActions.includes(
+          "REQUEST_CORRECTION",
+        )
+          ? "REQUEST_CORRECTION"
+          : task.allowedActions.includes("REJECT")
+            ? "REJECT"
+            : null;
+        if (!workflowAction)
+          throw new AppError(
+            "La devolución no está disponible en este workflow.",
+            409,
+          );
+        await workflowTaskService.actOnTask(
+          task.id,
+          workflowAction,
+          { comment: input.comment ?? undefined },
+          { ...access, ipAddress: null },
+        );
+      }
+      return {
+        current: formatEvaluation(await findEvaluation(id, access)),
+        previous: formatEvaluation(previous),
+      };
+    }
+    if (
+      action === "approve" &&
+      !isOfficialProgressStatusTransitionAllowed(
+        previous.actionPlan.status,
+        input.officialStatus,
+      )
+    )
+      throw new AppError(
+        "El estado oficial seleccionado no es una transición válida.",
+        400,
+      );
+    if (
+      action === "approve" &&
+      input.officialStatus === "CONCLUDED" &&
+      previous.reportedProgressPercent !== 100
+    )
+      throw new AppError(
+        "El estado Concluido requiere un avance reportado de 100%.",
+        400,
+      );
     const next = action === "approve" ? "APPROVED" : "RETURNED";
     await prisma.$transaction(async (tx) => {
-      await tx.progressEvaluation.update({
+      const updated = await tx.progressEvaluation.updateMany({
         data: {
           reviewComment: input.comment,
           reviewedAt: new Date(),
           reviewedByUserId: access.userId,
-          evaluatedStatus: input.officialStatus,
+          ...(action === "approve"
+            ? { evaluatedStatus: input.officialStatus }
+            : {}),
           reviewStatus: next,
         },
-        where: { id },
+        where: { id, reviewStatus: "SENT_TO_AUDIT" },
       });
+      if (updated.count !== 1)
+        throw new AppError("La evaluación ya fue revisada.", 409);
       await tx.progressReviewHistory.create({
         data: {
           action: action === "approve" ? "APPROVED" : "RETURNED",
@@ -643,6 +922,10 @@ export const progressService = {
     });
     if (previous.submittedByUser.id !== access.userId) {
       await notificationService.create({
+        entityId: id,
+        entityType: "PROGRESS_EVALUATION",
+        eventType:
+          next === "APPROVED" ? "PROGRESS_APPROVED" : "PROGRESS_RETURNED",
         message: `La evaluación de avance del plan de acción fue ${next === "APPROVED" ? "aprobada" : "devuelta"}.`,
         title: "Evaluación de avance revisada",
         targetUrl: progressEvaluationTargetUrl(
@@ -667,10 +950,10 @@ export const progressService = {
     const previous = await findEvaluation(id, access);
     if (!canEdit(previous, access))
       throw new AppError("No tiene permisos para enviar esta evaluación.", 403);
-    if (previous.type === "FINALIZATION" && previous.evidenceFiles.length === 0)
+    if (!canSubmitProgressEvaluationForPlan(previous.actionPlan.status))
       throw new AppError(
-        "Una evaluación de finalización requiere al menos un archivo de evidencia.",
-        400,
+        "No se pueden enviar avances de un plan concluido.",
+        409,
       );
     if (previous.type === "FINALIZATION") {
       await workflowIntegrationService.startForEntity({
@@ -681,11 +964,15 @@ export const progressService = {
         processType: "OBSERVATION_CLOSURE",
       });
     }
-    await prisma.$transaction(async (tx) => {
-      await tx.progressEvaluation.update({
-        data: { reviewStatus: "SENT_TO_AUDIT", submittedAt: new Date() },
-        where: { id },
+    const updated = await prisma.$transaction(async (tx) => {
+      const changed = await tx.progressEvaluation.updateMany({
+        data: buildProgressEvaluationSubmissionData(new Date()),
+        where: {
+          id,
+          reviewStatus: { in: ["DRAFT", "RETURNED"] },
+        },
       });
+      if (changed.count !== 1) return false;
       await tx.progressReviewHistory.create({
         data: {
           action: "SENT",
@@ -695,10 +982,26 @@ export const progressService = {
           userId: access.userId,
         },
       });
+      return true;
     });
+    if (!updated) {
+      const current = await findEvaluation(id, access);
+      if (current.reviewStatus === "SENT_TO_AUDIT")
+        return {
+          current: formatEvaluation(current),
+          previous: formatEvaluation(previous),
+        };
+      throw new AppError(
+        "La evaluación ya no está disponible para envío.",
+        409,
+      );
+    }
     const auditorId = previous.actionPlan.observation.auditorUserId;
     if (auditorId && auditorId !== access.userId) {
       await notificationService.create({
+        entityId: id,
+        entityType: "PROGRESS_EVALUATION",
+        eventType: "PROGRESS_PENDING_REVIEW",
         message:
           "Hay una evaluación de avance pendiente para un plan de acción.",
         title: "Avance pendiente de revisión",
@@ -741,6 +1044,66 @@ export const progressService = {
     };
   },
 
+  async deleteProgressEvaluation(id: string, access: AuthorizationSummary) {
+    const previous = await findEvaluation(id, access);
+    if (previous.reviewStatus !== "DRAFT" || previous.workflowInstanceId)
+      throw new AppError(
+        "Solo se pueden eliminar evaluaciones que aún están en borrador.",
+        409,
+      );
+    if (!canEdit(previous, access))
+      throw new AppError(
+        "No tiene permisos para eliminar esta evaluación.",
+        403,
+      );
+
+    const evidenceFiles = await prisma.evidenceFile.findMany({
+      select: { relativePath: true },
+      where: { deletedAt: null, progressEvaluationId: id },
+    });
+    const deletedAt = new Date();
+    await prisma.$transaction(async (tx) => {
+      const deleted = await tx.progressEvaluation.updateMany({
+        data: { deletedAt },
+        where: {
+          deletedAt: null,
+          id,
+          reviewStatus: "DRAFT",
+          submittedByUserId: access.userId,
+          workflowInstanceId: null,
+        },
+      });
+      if (deleted.count !== 1)
+        throw new AppError(
+          "La evaluación ya no está disponible para eliminarse.",
+          409,
+        );
+      await Promise.all([
+        tx.evidenceFile.updateMany({
+          data: { deletedAt },
+          where: { deletedAt: null, progressEvaluationId: id },
+        }),
+        tx.observationComment.updateMany({
+          data: { deletedAt },
+          where: { deletedAt: null, progressEvaluationId: id },
+        }),
+        tx.notification.updateMany({
+          data: { deletedAt },
+          where: {
+            deletedAt: null,
+            entityId: id,
+            entityType: { in: ["PROGRESS_EVALUATION", "progressEvaluation"] },
+          },
+        }),
+      ]);
+    });
+    await removeStoredEvidenceFiles(
+      evidenceFiles.map(({ relativePath }) => relativePath),
+    );
+
+    return { id, previous };
+  },
+
   async uploadEvidence(
     target: {
       actionPlanId?: string;
@@ -779,6 +1142,7 @@ export const progressService = {
         where: {
           id: target.observationAreaId,
           observationId: target.observationId,
+          ...buildObservationAreaScopeWhere(access),
         },
       });
       if (!observationArea)
@@ -947,7 +1311,12 @@ export const progressService = {
         observationArea: {
           select: { area: { select: { id: true, name: true } }, id: true },
         },
-        progressEvaluation: { select: { id: true } },
+        progressEvaluation: {
+          select: {
+            actionPlan: { select: { id: true, title: true } },
+            id: true,
+          },
+        },
         uploadedByUser: { select: userSelect },
       },
       orderBy: { createdAt: "desc" },
@@ -959,8 +1328,14 @@ export const progressService = {
     });
     return records.map((record) => ({
       ...record,
-      actionPlanId: record.actionPlan?.id ?? null,
-      actionPlanTitle: record.actionPlan?.title ?? null,
+      actionPlanId:
+        record.actionPlan?.id ??
+        record.progressEvaluation?.actionPlan.id ??
+        null,
+      actionPlanTitle:
+        record.actionPlan?.title ??
+        record.progressEvaluation?.actionPlan.title ??
+        null,
       createdAt: record.createdAt.toISOString(),
       downloadPath: `/evidences/${record.id}/download`,
       observationArea: record.observationArea
@@ -978,6 +1353,7 @@ export const progressService = {
 
   async submitEvidenceForReview(id: string, access: AuthorizationSummary) {
     const evidence = await getEvidenceReviewRecord(id, access);
+    assertFileLevelReviewable(evidence.context);
     if (!access.isAdmin && evidence.uploadedByUserId !== access.userId)
       throw new AppError("You cannot submit this evidence.", 403);
     if (evidence.reviewStatus === "PENDING") {
@@ -1075,6 +1451,7 @@ export const progressService = {
         403,
       );
     const previous = await getEvidenceReviewRecord(id, access);
+    assertFileLevelReviewable(previous.context);
     if (previous.reviewStatus !== "PENDING")
       throw new AppError("La evidencia no está pendiente de revisión.", 409);
     if (previous.workflowInstanceId)
@@ -1142,7 +1519,12 @@ export const progressService = {
         observationArea: {
           select: { area: { select: { id: true, name: true } }, id: true },
         },
-        progressEvaluation: { select: { id: true } },
+        progressEvaluation: {
+          select: {
+            actionPlan: { select: { id: true, title: true } },
+            id: true,
+          },
+        },
         uploadedByUser: { select: userSelect },
       },
       where: {
@@ -1153,8 +1535,14 @@ export const progressService = {
     });
     return records.map((record) => ({
       ...record,
-      actionPlanId: record.actionPlan?.id ?? null,
-      actionPlanTitle: record.actionPlan?.title ?? null,
+      actionPlanId:
+        record.actionPlan?.id ??
+        record.progressEvaluation?.actionPlan.id ??
+        null,
+      actionPlanTitle:
+        record.actionPlan?.title ??
+        record.progressEvaluation?.actionPlan.title ??
+        null,
       createdAt: record.createdAt.toISOString(),
       downloadPath: `/evidences/${record.id}/download`,
       observationArea: record.observationArea
@@ -1172,7 +1560,10 @@ export const progressService = {
 
   async deleteEvidence(id: string, access: AuthorizationSummary) {
     const record = await prisma.evidenceFile.findFirst({
-      include: { observation: { select: { id: true } } },
+      include: {
+        observation: { select: { id: true } },
+        progressEvaluation: { select: { reviewStatus: true } },
+      },
       where: {
         deletedAt: null,
         id,
@@ -1185,12 +1576,21 @@ export const progressService = {
         "No se puede eliminar evidencia pendiente o aprobada.",
         409,
       );
+    if (
+      record.progressEvaluation &&
+      !EDITABLE_PROGRESS_STATUSES.has(record.progressEvaluation.reviewStatus)
+    )
+      throw new AppError(
+        "La evidencia de un avance enviado no se puede modificar.",
+        409,
+      );
     if (!access.isAdmin && record.uploadedByUserId !== access.userId)
       throw new AppError("You cannot delete this evidence.", 403);
     await prisma.evidenceFile.update({
       data: { deletedAt: new Date() },
       where: { id },
     });
+    await removeStoredEvidenceFiles([record.relativePath]);
     return {
       id: record.id,
       observationId: record.observation.id,
@@ -1237,7 +1637,11 @@ export const progressService = {
     if (input.actionPlanId) {
       const plan = await prisma.actionPlan.findFirst({
         select: { id: true },
-        where: { id: input.actionPlanId, observationId },
+        where: {
+          ...buildActionPlanScopeWhere(access),
+          id: input.actionPlanId,
+          observationId,
+        },
       });
       if (!plan)
         throw new AppError(
@@ -1268,6 +1672,7 @@ export const progressService = {
       include: { authorUser: { select: userSelect } },
       orderBy: { createdAt: "desc" },
       where: {
+        ...buildCommentParentWhere(access),
         deletedAt: null,
         observationId,
         observation: buildObservationScopeWhere(access),
@@ -1285,6 +1690,7 @@ export const progressService = {
   ) {
     const record = await prisma.observationComment.findFirst({
       where: {
+        ...buildCommentParentWhere(access),
         deletedAt: null,
         id,
         observation: buildObservationScopeWhere(access),
@@ -1307,6 +1713,7 @@ export const progressService = {
   async deleteComment(id: string, access: AuthorizationSummary) {
     const record = await prisma.observationComment.findFirst({
       where: {
+        ...buildCommentParentWhere(access),
         deletedAt: null,
         id,
         observation: buildObservationScopeWhere(access),

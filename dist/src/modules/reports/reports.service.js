@@ -2,7 +2,7 @@
 import { buildActionPlanScopeWhere, buildEvidenceScopeWhere, buildExtensionRequestScopeWhere, buildObservationAreaScopeWhere, } from "../../services/authorization-service.js";
 import { prisma } from "../../utils/prisma.js";
 import { buildObservationAttentionWhere, observationCompletenessService, } from "../observations/observation-completeness.service.js";
-import { buildObservationScopeWhere, getActionPlanDeadlineStatus, getBusinessDateKey, getDateOnlyKey, getEffectiveActionPlanDueDate, getOfficialActionPlanProgress, isApprovedDeadlineExtension, OFFICIAL_ACTION_PLAN_STATUSES, getDaysBetween, getObservationStatusGroup, getRiskGroupLabel, hasGlobalBusinessAccess, isObservationClosed, isObservationDueSoon, isObservationOverdue, REPORT_DEFAULT_DUE_SOON_DAYS, } from "./reporting-definitions.js";
+import { buildObservationScopeWhere, getActionPlanDeadlineStatus, getBusinessDateKey, getDateOnlyKey, getEffectiveActionPlanDueDate, getOfficialActionPlanProgress, reportDeadlineStatusOptions, isApprovedDeadlineExtension, OFFICIAL_ACTION_PLAN_STATUSES, getDaysBetween, getObservationStatusGroup, getRiskGroupLabel, hasGlobalBusinessAccess, isObservationClosed, isObservationDueSoon, isObservationOverdue, REPORT_DEFAULT_DUE_SOON_DAYS, } from "./reporting-definitions.js";
 import { AppError } from "../../utils/app-error.js";
 const reportsPrisma = prisma;
 export const getReportFilterCapabilities = (access) => {
@@ -124,9 +124,11 @@ const buildObservationWhere = (filters, access) => {
     ];
     const periodFilter = dateRange(filters.dateFrom, filters.dateTo);
     if (periodFilter) {
-        conditions.push({
-            [filters.periodField]: periodFilter,
-        });
+        conditions.push(filters.periodField === "reportDate"
+            ? { auditReport: { reportDate: periodFilter } }
+            : {
+                [filters.periodField ?? "createdAt"]: periodFilter,
+            });
     }
     if (filters.areaId)
         conditions.push({ areaAssignments: { some: { areaId: filters.areaId } } });
@@ -136,7 +138,9 @@ const buildObservationWhere = (filters, access) => {
         conditions.push({ status: { isFinal: false } });
     if (filters.riskLevelId)
         conditions.push({ riskLevelId: filters.riskLevelId });
-    if (filters.statusId)
+    if (filters.observationStatusIds?.length)
+        conditions.push({ statusId: { in: filters.observationStatusIds } });
+    else if (filters.statusId)
         conditions.push({ statusId: filters.statusId });
     if (filters.responsibleUserId)
         conditions.push({
@@ -416,12 +420,16 @@ export const buildActionPlanWhere = (filters, access, now = new Date(), timeZone
     }
     if (filters.riskLevelId)
         conditions.push({ observation: { riskLevelId: filters.riskLevelId } });
-    if (filters.statusId)
+    if (filters.observationStatusIds?.length)
+        conditions.push({
+            observation: { statusId: { in: filters.observationStatusIds } },
+        });
+    else if (filters.statusId)
         conditions.push({ observation: { statusId: filters.statusId } });
     if (filters.progressStatus)
         conditions.push({ status: filters.progressStatus });
     if (filters.activeOnly)
-        conditions.push({ status: { not: "CONCLUDED" } });
+        conditions.push({ observation: { status: { isFinal: false } } });
     if (filters.progressMin !== undefined)
         conditions.push({ progressPercent: { gte: filters.progressMin } });
     if (filters.progressMax !== undefined)
@@ -471,9 +479,16 @@ export const buildActionPlanWhere = (filters, access, now = new Date(), timeZone
             ],
         });
     }
-    const deadlineStatus = filters.deadlineStatus ??
-        (filters.overdue === true ? "VENCIDO" : undefined);
-    if (deadlineStatus === "VENCIDO") {
+    const deadlineStatuses = filters.deadlineStatuses?.length
+        ? new Set(filters.deadlineStatuses)
+        : filters.deadlineStatus
+            ? new Set([filters.deadlineStatus])
+            : filters.overdue === true
+                ? new Set(["VENCIDO"])
+                : filters.overdue === false
+                    ? new Set(["VIGENTE"])
+                    : undefined;
+    if (deadlineStatuses?.has("VENCIDO") && !deadlineStatuses.has("VIGENTE")) {
         conditions.push({
             AND: [
                 { status: { not: "CONCLUDED" } },
@@ -481,7 +496,8 @@ export const buildActionPlanWhere = (filters, access, now = new Date(), timeZone
             ],
         });
     }
-    else if (deadlineStatus === "VIGENTE" || filters.overdue === false) {
+    else if (deadlineStatuses?.has("VIGENTE") &&
+        !deadlineStatuses.has("VENCIDO")) {
         conditions.push({
             OR: [
                 { status: "CONCLUDED" },
@@ -609,6 +625,7 @@ const buildOperationalRows = (rows, cutoffDateKey, dueSoonDays) => {
         }
         criticalOrOverdue.set(row.observationId, {
             area: row.area,
+            deadlineStatus: observationOverdue ? "VENCIDO" : "VIGENTE",
             dueDate: row.observationDueDate,
             href: `/observaciones/${encodeURIComponent(row.observationId)}`,
             id: row.observationId,
@@ -617,7 +634,7 @@ const buildOperationalRows = (rows, cutoffDateKey, dueSoonDays) => {
                 colorToken: row.riskLevel.colorToken,
                 name: row.riskLevel.name,
             },
-            status: {
+            observationStatus: {
                 key: row.observation.status.key,
                 name: row.observation.status.name,
             },
@@ -636,16 +653,17 @@ const buildOperationalRows = (rows, cutoffDateKey, dueSoonDays) => {
         .slice(0, 8)
         .map((row) => ({
         actionPlanId: row.actionPlanId,
+        deadlineStatus: row.deadlineStatus,
         effectiveDueDate: row.effectiveDueDate,
         executorName: row.executor?.name ?? "Sin asignar",
         href: row.href,
         observationCode: row.observation.code,
+        observationStatus: row.observation.status.name,
         progress: {
             code: row.officialProgress.code,
             label: row.officialProgress.label,
             percent: row.officialProgress.percent,
         },
-        status: row.observation.status.name,
         title: row.title,
     }));
     return {
@@ -669,6 +687,19 @@ const getActionPlanDashboard = async (filters, access) => {
     const totalObservations = observations.size;
     const closedObservations = [...observations.values()].filter((status) => status.isFinal).length;
     const pendingObservations = totalObservations - closedObservations;
+    const observationStatusDistribution = [...observations.values()]
+        .reduce((groups, status) => {
+        const current = groups.get(status.key) ?? {
+            key: status.key,
+            label: status.name,
+            value: 0,
+        };
+        current.value += 1;
+        groups.set(status.key, current);
+        return groups;
+    }, new Map())
+        .values();
+    const statusDistribution = [...observationStatusDistribution].sort((left, right) => right.value - left.value || left.label.localeCompare(right.label, "es"));
     const dueSoon = rows.filter((row) => {
         if (row.officialProgress.key === "CONCLUDED" ||
             row.deadlineStatus === "VENCIDO")
@@ -694,10 +725,11 @@ const getActionPlanDashboard = async (filters, access) => {
             value: rows.filter((row) => row.officialProgress.key === key).length,
         };
     });
-    const deadlineDistribution = [
-        { key: "VIGENTE", label: "Vigentes", value: vigentes },
-        { key: "VENCIDO", label: "Vencidos", value: vencidos },
-    ];
+    const deadlineDistribution = reportDeadlineStatusOptions.map(({ key, label }) => ({
+        key,
+        label,
+        value: key === "VENCIDO" ? vencidos : vigentes,
+    }));
     const reprogrammedDistribution = [
         { key: "SI", label: "Sí", value: reprogramados },
         { key: "NO", label: "No", value: rows.length - reprogramados },
@@ -781,7 +813,7 @@ const getActionPlanDashboard = async (filters, access) => {
             progressDistribution,
             reprogrammedDistribution,
             riskDistribution,
-            statusDistribution: progressDistribution,
+            statusDistribution,
             topOverdueAreas,
             topResponsibleWorkload,
             trend,
@@ -853,8 +885,8 @@ const toActionPlanFlatRow = (row) => ({
         : `${row.reportedProgressPercent}%`,
     "Dueño del proceso": row.processOwner?.name ?? "Sin asignar",
     Ejecutor: row.executor?.name ?? "Sin asignar",
-    "Estado de avance": row.officialProgress.label,
-    "Estado de plazo": row.deadlineStatus === "VENCIDO" ? "Vencido" : "Vigente",
+    "Estado del plan de acción": row.officialProgress.label,
+    "Estado según plazo": row.deadlineStatus === "VENCIDO" ? "Vencido" : "Vigente",
     "Fecha actual": row.effectiveDueDate,
     "Fecha original": row.originalDueDate,
     Informe: row.observation.code.split(" / ")[0],
@@ -875,12 +907,12 @@ const getActionPlanReportRows = (query, dashboard) => {
         "Dueño del proceso",
         "Ejecutor",
         "Estado de observación",
-        "Estado de avance",
+        "Estado del plan de acción",
         "Avance oficial",
         "Avance reportado",
         "Fecha original",
         "Fecha actual",
-        "Estado de plazo",
+        "Estado según plazo",
         "Reprogramado",
     ];
     if (query.type === "AREA_COMPLIANCE") {
@@ -972,7 +1004,7 @@ const getReportOptions = async (access) => {
         }),
         reportsPrisma.observationStatus.findMany({
             orderBy: { sortOrder: "asc" },
-            select: { id: true, key: true, name: true },
+            select: { id: true, isFinal: true, key: true, name: true },
             where: { active: true, deletedAt: null },
         }),
     ]);
@@ -1042,6 +1074,7 @@ const getReportOptions = async (access) => {
         executors: unique(rows.flatMap((row) => (row.executor ? [row.executor] : []))),
         processOwners: unique(rows.flatMap((row) => (row.processOwner ? [row.processOwner] : []))),
         filterCapabilities: getReportFilterCapabilities(access),
+        deadlineStatuses: reportDeadlineStatusOptions,
         observationStatuses,
         progressStatuses: OFFICIAL_ACTION_PLAN_STATUSES.map((key) => ({
             ...getOfficialActionPlanProgress(key),
@@ -1164,59 +1197,70 @@ const getMonthRange = (dateFrom, dateTo, cutoffDate) => {
     }
     return months.slice(-12);
 };
-const buildFilterLabelMap = (filters, dashboard) => ({
-    "Fecha de corte": formatReportDateKey(filters.cutoffDate ?? dashboard.cutoffDate),
-    Área: filters.areaId
-        ? (dashboard.rows.find((row) => row.area.id === filters.areaId)?.area
-            .name ?? "Área seleccionada")
-        : "Todas",
-    "Dueño del proceso": filters.processOwnerId?.length
-        ? [
-            ...new Set(dashboard.rows
-                .filter((row) => row.processOwner &&
-                filters.processOwnerId?.includes(row.processOwner.id))
-                .map((row) => row.processOwner.name)),
-        ].join(", ") || "Dueño seleccionado"
-        : "Todos",
-    Ejecutor: filters.executorId?.length || filters.responsibleUserId
-        ? "Ejecutor seleccionado"
-        : "Todos",
-    "Estado de observación": filters.statusId ? "Estado seleccionado" : "Todos",
-    "Estado de avance": filters.progressStatus
-        ? {
-            CONCLUDED: "Concluido",
-            NOT_STARTED: "No iniciado",
-            STARTED: "Iniciado",
-            WITH_PROGRESS: "Con avance",
-        }[filters.progressStatus]
-        : "Todos",
-    "Estado de plazo": filters.deadlineStatus
-        ? filters.deadlineStatus === "VENCIDO"
-            ? "Vencido"
-            : "Vigente"
-        : "Todos",
-    Evidencia: filters.hasEvidence === undefined
-        ? "Todas"
-        : filters.hasEvidence
-            ? "Con evidencia"
-            : "Sin evidencia",
-    Período: filters.dateFrom || filters.dateTo
-        ? `${filters.dateFrom ?? "Inicio"} – ${filters.dateTo ?? "Hoy"}`
-        : "Período actual",
-    Riesgo: filters.riskLevelId ? "Nivel seleccionado" : "Todos",
-    "Responsable de área": filters.areaResponsibleId?.length
-        ? "Responsable seleccionado"
-        : "Todos",
-    Reprogramado: filters.reprogrammed === undefined
-        ? "Todos"
-        : filters.reprogrammed
-            ? "Sí"
-            : "No",
-    Informe: filters.auditReportId?.length ? "Informe seleccionado" : "Todos",
-    Búsqueda: filters.search || "Todas",
-});
-// Legacy observation-grain builder retained for audit-only compatibility.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const buildFilterLabelMap = (filters, dashboard) => {
+    const rows = Array.isArray(dashboard.rows) ? dashboard.rows : [];
+    const cutoffDate = filters.cutoffDate ?? dashboard.cutoffDate;
+    return {
+        "Fecha de corte": cutoffDate ? formatReportDateKey(cutoffDate) : "Actual",
+        Área: filters.areaId
+            ? (rows.find((row) => row.area.id === filters.areaId)?.area.name ??
+                "Área seleccionada")
+            : "Todas",
+        "Dueño del proceso": filters.processOwnerId?.length
+            ? [
+                ...new Set(rows
+                    .filter((row) => row.processOwner &&
+                    filters.processOwnerId?.includes(row.processOwner.id))
+                    .map((row) => row.processOwner.name)),
+            ].join(", ") || "Dueño seleccionado"
+            : "Todos",
+        Ejecutor: filters.executorId?.length || filters.responsibleUserId
+            ? "Ejecutor seleccionado"
+            : "Todos",
+        "Estado de observación": filters.observationStatusIds?.length
+            ? `${filters.observationStatusIds.length} estados seleccionados`
+            : filters.statusId
+                ? "Estado seleccionado"
+                : "Todos",
+        "Estado del plan de acción": filters.progressStatus
+            ? {
+                CONCLUDED: "Concluido",
+                NOT_STARTED: "No iniciado",
+                STARTED: "Iniciado",
+                WITH_PROGRESS: "Con avance",
+            }[filters.progressStatus]
+            : "Todos",
+        "Estado según plazo": filters.deadlineStatuses?.length
+            ? filters.deadlineStatuses
+                .map((status) => (status === "VENCIDO" ? "Vencido" : "Vigente"))
+                .join(", ")
+            : filters.deadlineStatus
+                ? filters.deadlineStatus === "VENCIDO"
+                    ? "Vencido"
+                    : "Vigente"
+                : "Todos",
+        Evidencia: filters.hasEvidence === undefined
+            ? "Todas"
+            : filters.hasEvidence
+                ? "Con evidencia"
+                : "Sin evidencia",
+        Período: filters.dateFrom || filters.dateTo
+            ? `${filters.dateFrom ?? "Inicio"} – ${filters.dateTo ?? "Hoy"}`
+            : "Período actual",
+        Riesgo: filters.riskLevelId ? "Nivel seleccionado" : "Todos",
+        "Responsable de área": filters.areaResponsibleId?.length
+            ? "Responsable seleccionado"
+            : "Todos",
+        Reprogramado: filters.reprogrammed === undefined
+            ? "Todos"
+            : filters.reprogrammed
+                ? "Sí"
+                : "No",
+        Informe: filters.auditReportId?.length ? "Informe seleccionado" : "Todos",
+        Búsqueda: filters.search || "Todas",
+    };
+};
+// Observation-grain builder used by the dedicated report generator.
 const getDashboard = async (filters, access) => {
     const dueSoonDays = filters.dueSoonDays || (await getConfiguredDueSoonDays());
     const normalizedFilters = { ...filters, dueSoonDays };
@@ -1454,8 +1498,7 @@ const toObservationFlatRow = (row) => ({
     Responsable: row.responsibleUser?.name ?? "Sin asignar",
     Riesgo: row.riskLevel.name,
 });
-// Legacy observation-grain export builder retained for audit-only compatibility.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+// Observation-grain rows used by the dedicated report generator.
 const getReportRows = async (query, access, dashboard) => {
     const observationWhere = buildObservationWhere(query, access);
     switch (query.type) {
@@ -1465,6 +1508,11 @@ const getReportRows = async (query, access, dashboard) => {
                 select: {
                     completedAt: true,
                     currentDueDate: true,
+                    deadlineExtensionRequests: {
+                        orderBy: { updatedAt: "desc" },
+                        select: { proposedDueDate: true, status: true },
+                        where: { deletedAt: null },
+                    },
                     observation: { select: observationIdentitySelect },
                     progressPercent: true,
                     responsibleUser: { select: userSummarySelect },
@@ -1487,14 +1535,17 @@ const getReportRows = async (query, access, dashboard) => {
                     "Avance",
                     "Estado",
                 ],
-                rows: actionPlans.map((actionPlan) => ({
-                    Avance: `${actionPlan.progressPercent}%`,
-                    "Plan de acción": actionPlan.description,
-                    "Fecha límite": actionPlan.currentDueDate.toISOString(),
-                    Estado: actionPlan.status,
-                    Observación: `${observationDisplayCode(actionPlan.observation)} · ${actionPlan.observation.title}`,
-                    Responsable: actionPlan.responsibleUser?.name ?? "Sin asignar",
-                })),
+                rows: actionPlans.map((actionPlan) => {
+                    const effectiveDueDate = getEffectiveActionPlanDueDate(actionPlan);
+                    return {
+                        Avance: `${actionPlan.progressPercent}%`,
+                        "Plan de acción": actionPlan.description,
+                        "Fecha límite": effectiveDueDate.toISOString(),
+                        Estado: actionPlan.status,
+                        Observación: `${observationDisplayCode(actionPlan.observation)} · ${actionPlan.observation.title}`,
+                        Responsable: actionPlan.responsibleUser?.name ?? "Sin asignar",
+                    };
+                }),
                 total: actionPlans.length,
             };
         }
@@ -1543,11 +1594,19 @@ const getReportRows = async (query, access, dashboard) => {
                 select: {
                     actionPlan: {
                         select: {
+                            currentDueDate: true,
+                            deadlineExtensionRequests: {
+                                orderBy: { updatedAt: "desc" },
+                                select: { proposedDueDate: true, status: true },
+                                where: { deletedAt: null },
+                            },
                             observation: { select: observationIdentitySelect },
                             title: true,
                         },
                     },
-                    observation: { select: observationIdentitySelect },
+                    observation: {
+                        select: { ...observationIdentitySelect, currentDueDate: true },
+                    },
                     observationArea: { select: { area: { select: areaSummarySelect } } },
                     previousDueDate: true,
                     proposedDueDate: true,
@@ -1909,8 +1968,15 @@ const getAuditStructuredRows = async (query, access) => {
                         observation: {
                             select: {
                                 ...observationIdentitySelect,
+                                currentDueDate: true,
                                 riskLevel: { select: { name: true } },
                             },
+                        },
+                        currentDueDate: true,
+                        deadlineExtensionRequests: {
+                            orderBy: { updatedAt: "desc" },
+                            select: { proposedDueDate: true, status: true },
+                            where: { deletedAt: null },
                         },
                         title: true,
                     },
@@ -1918,6 +1984,7 @@ const getAuditStructuredRows = async (query, access) => {
                 observation: {
                     select: {
                         ...observationIdentitySelect,
+                        currentDueDate: true,
                         riskLevel: { select: { name: true } },
                     },
                 },
@@ -1966,16 +2033,19 @@ const getAuditStructuredRows = async (query, access) => {
                 const extensionDays = Math.max(0, Math.round((request.proposedDueDate.getTime() -
                     request.previousDueDate.getTime()) /
                     (1000 * 60 * 60 * 24)));
+                const effectiveDueDate = request.actionPlan
+                    ? getEffectiveActionPlanDueDate(request.actionPlan)
+                    : (request.observation?.currentDueDate ?? request.proposedDueDate);
                 return query.template === "DEADLINES"
                     ? {
                         Área: request.observationArea?.area.name ?? "Varias áreas",
                         "Días de ampliación": extensionDays,
-                        "Días vencidos": request.proposedDueDate.getTime() < Date.now()
-                            ? Math.round((Date.now() - request.proposedDueDate.getTime()) /
+                        "Días vencidos": effectiveDueDate.getTime() < Date.now()
+                            ? Math.round((Date.now() - effectiveDueDate.getTime()) /
                                 (1000 * 60 * 60 * 24))
                             : 0,
                         Estado: request.status,
-                        "Fecha actual": request.proposedDueDate.toISOString(),
+                        "Fecha actual": effectiveDueDate.toISOString(),
                         "Fecha original": request.previousDueDate.toISOString(),
                         Observación: observation
                             ? observationDisplayCode(observation)
@@ -2152,11 +2222,15 @@ export const reportsService = {
         return getActionPlanRows(query, access);
     },
     async listObservations(query, access) {
-        return getActionPlanRows(query, access);
+        return getObservationRows(query, access);
     },
     async getPreview(query, access) {
-        const dashboard = await getActionPlanDashboard(query, access);
-        const report = getActionPlanReportRows(query, dashboard);
+        const dashboard = query.type === "ACTION_PLANS"
+            ? await getActionPlanDashboard(query, access)
+            : await getDashboard(query, access);
+        const report = query.type === "ACTION_PLANS"
+            ? getActionPlanReportRows(query, dashboard)
+            : await getReportRows(query, access, dashboard);
         return {
             charts: dashboard.charts,
             columns: report.columns,

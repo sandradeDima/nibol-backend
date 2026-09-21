@@ -164,8 +164,8 @@ const buildDashboardSvg = (input) => {
     })
         .join("")}
     ${svgChart("Riesgo", input.charts?.riskDistribution ?? [], 42, 280, 544, 235)}
-    ${svgChart("Estado de plazo", input.charts?.deadlineDistribution ?? [], 614, 280, 544, 235)}
-    ${svgChart("Estado de avance", input.charts?.progressDistribution ?? [], 42, 542, 544, 235)}
+    ${svgChart("Estado según plazo", input.charts?.deadlineDistribution ?? [], 614, 280, 544, 235)}
+    ${svgChart("Estado del plan de acción", input.charts?.progressDistribution ?? [], 42, 542, 544, 235)}
     ${svgChart("Distribución por área", input.charts?.areaDistribution ?? [], 614, 542, 544, 235)}
   </svg>`;
 };
@@ -375,8 +375,8 @@ const makePdf = (input) => {
         first.push(pdfLabel(x + 16, 699, label, 8, false, "#64748B"), pdfLabel(x + 16, 671, String(value), 22, true, "#102A43"));
     });
     pdfBarList(first, "Riesgo", charts?.riskDistribution ?? [], 34, 467, 253, 155);
-    pdfBarList(first, "Estado de plazo", charts?.deadlineDistribution ?? [], 308, 467, 253, 155);
-    pdfBarList(first, "Estado de avance", charts?.progressDistribution ?? [], 34, 279, 253, 155);
+    pdfBarList(first, "Estado según plazo", charts?.deadlineDistribution ?? [], 308, 467, 253, 155);
+    pdfBarList(first, "Estado del plan de acción", charts?.progressDistribution ?? [], 34, 279, 253, 155);
     pdfBarList(first, "Distribución por área", charts?.areaDistribution ?? [], 308, 279, 253, 155);
     first.push(pdfLabel(34, 237, "Lectura del corte", 12, true, "#102A43"));
     const insight = summary?.predominantRisk
