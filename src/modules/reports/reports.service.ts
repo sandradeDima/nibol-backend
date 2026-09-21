@@ -234,6 +234,10 @@ const buildObservationWhere = (
     conditions.push({ areaAssignments: { some: { areaId: filters.areaId } } });
   if (filters.auditReportId?.length)
     conditions.push({ auditReportId: { in: filters.auditReportId } });
+  if (filters.globalStatus)
+    conditions.push({
+      status: { isFinal: filters.globalStatus === "CLOSED" },
+    });
   if (filters.activeOnly) conditions.push({ status: { isFinal: false } });
   if (filters.riskLevelId)
     conditions.push({ riskLevelId: filters.riskLevelId });
@@ -566,6 +570,10 @@ export const buildActionPlanWhere = (
   }
   if (filters.riskLevelId)
     conditions.push({ observation: { riskLevelId: filters.riskLevelId } });
+  if (filters.globalStatus)
+    conditions.push({
+      observation: { status: { isFinal: filters.globalStatus === "CLOSED" } },
+    });
   if (filters.observationStatusIds?.length)
     conditions.push({
       observation: { statusId: { in: filters.observationStatusIds } },
@@ -1677,6 +1685,12 @@ const buildFilterLabelMap = (
       : filters.statusId
         ? "Estado seleccionado"
         : "Todos",
+    "Estado global":
+      filters.globalStatus === "PENDING"
+        ? "Pendiente"
+        : filters.globalStatus === "CLOSED"
+          ? "Cerrada"
+          : "Todos",
     "Estado del plan de acción": filters.progressStatus
       ? {
           CONCLUDED: "Concluido",

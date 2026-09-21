@@ -47,6 +47,7 @@ const reportQueryInput = (request: Request) => ({
   dueSoon: getQueryValue(request.query["filter.dueSoon"]),
   dueSoonDays: getQueryValue(request.query["filter.dueSoonDays"]),
   executorId: getQueryValue(request.query["filter.executorId"]),
+  globalStatus: getQueryValue(request.query["filter.globalStatus"]),
   hasEvidence: getQueryValue(request.query["filter.hasEvidence"]),
   hasExtension: getQueryValue(request.query["filter.hasExtension"]),
   hasPlan: getQueryValue(request.query["filter.hasPlan"]),

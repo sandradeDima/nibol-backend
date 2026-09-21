@@ -61,6 +61,7 @@ export const reportFiltersSchema = z.object({
   dueSoon: booleanFilter,
   dueSoonDays: z.coerce.number().int().min(1).max(90).default(7),
   executorId: csvArray(z.uuid()),
+  globalStatus: z.enum(["PENDING", "CLOSED"]).optional(),
   hasEvidence: booleanFilter,
   hasExtension: booleanFilter,
   hasPlan: booleanFilter,

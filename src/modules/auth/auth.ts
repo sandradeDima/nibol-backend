@@ -59,6 +59,26 @@ const getRequestEmail = (body: unknown): string | null => {
     : null;
 };
 
+const microsoftProvider =
+  env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET
+    ? {
+        clientId: env.MICROSOFT_CLIENT_ID,
+        clientSecret: env.MICROSOFT_CLIENT_SECRET,
+        disableDefaultScope: true,
+        disableProfilePhoto: true,
+        disableSignUp: true,
+        mapProfileToUser: (profile: {
+          email?: string;
+          preferred_username: string;
+        }) => ({
+          email: profile.email ?? profile.preferred_username,
+        }),
+        redirectURI: `${env.FRONTEND_URL}/api/auth/callback/microsoft`,
+        scope: ["openid", "profile", "email"],
+        tenantId: env.MICROSOFT_TENANT_ID,
+      }
+    : undefined;
+
 export const auth = betterAuth({
   basePath: "/api/auth",
   baseURL: env.BETTER_AUTH_URL,
@@ -66,6 +86,13 @@ export const auth = betterAuth({
     provider: "mysql",
     transaction: true,
   }),
+  account: {
+    accountLinking: {
+      enabled: true,
+      trustedProviders: ["microsoft"],
+    },
+    encryptOAuthTokens: true,
+  },
   databaseHooks: {
     account: {
       create: {
@@ -85,6 +112,24 @@ export const auth = betterAuth({
     },
     session: {
       create: {
+        before: async (session) => {
+          const user = await prisma.user.findUnique({
+            select: {
+              deletedAt: true,
+              isActive: true,
+            },
+            where: {
+              id: session.userId,
+            },
+          });
+
+          if (!user?.isActive || user.deletedAt) {
+            throw APIError.from("FORBIDDEN", {
+              code: "ACCOUNT_INACTIVE",
+              message: "This account is inactive.",
+            });
+          }
+        },
         after: async (session) => {
           await prisma.user.update({
             data: {
@@ -234,6 +279,11 @@ export const auth = betterAuth({
     }),
   },
   secret: env.BETTER_AUTH_SECRET,
+  socialProviders: microsoftProvider
+    ? {
+        microsoft: microsoftProvider,
+      }
+    : undefined,
   trustedOrigins: [env.FRONTEND_URL],
   user: {
     fields: {

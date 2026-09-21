@@ -217,6 +217,34 @@ test("solo pendientes filtra por estado de observación y no por estado del plan
   assert.doesNotMatch(serialized, /"status":\{"not":"CONCLUDED"\}/);
 });
 
+test("estado global separa observaciones pendientes y cerradas", () => {
+  const pending = JSON.stringify(
+    buildActionPlanWhere(
+      { globalStatus: "PENDING" } as never,
+      scopedExecutor,
+      now,
+      "UTC",
+    ),
+  );
+  const closed = JSON.stringify(
+    buildActionPlanWhere(
+      { globalStatus: "CLOSED" } as never,
+      scopedExecutor,
+      now,
+      "UTC",
+    ),
+  );
+
+  assert.match(pending, /"isFinal":false/);
+  assert.doesNotMatch(pending, /"isFinal":true/);
+  assert.match(closed, /"isFinal":true/);
+  assert.doesNotMatch(closed, /"isFinal":false/);
+  assert.equal(
+    reportFiltersSchema.parse({ globalStatus: "CLOSED" }).globalStatus,
+    "CLOSED",
+  );
+});
+
 test("combina estados de observación y plazo con OR dentro de cada dimensión", () => {
   const serialized = JSON.stringify(
     buildActionPlanWhere(

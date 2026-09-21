@@ -26,6 +26,9 @@ const envSchema = z.object({
     .default(86_400_000),
   FRONTEND_URL: z.string().url().default("http://localhost:3000"),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
+  MICROSOFT_CLIENT_ID: z.string().min(1).optional(),
+  MICROSOFT_CLIENT_SECRET: z.string().min(1).optional(),
+  MICROSOFT_TENANT_ID: z.string().min(1).default("common"),
   NODE_ENV: z
     .enum(["development", "test", "production"])
     .default("development"),
@@ -56,6 +59,18 @@ const envSchema = z.object({
 
 const parsedEnv = envSchema
   .superRefine((value, context) => {
+    if (
+      Boolean(value.MICROSOFT_CLIENT_ID) !==
+      Boolean(value.MICROSOFT_CLIENT_SECRET)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET must be configured together.",
+        path: ["MICROSOFT_CLIENT_ID"],
+      });
+    }
+
     if (value.NODE_ENV !== "production") return;
 
     if (
