@@ -110,7 +110,9 @@ export const assertReportFilterAccess = (
     [Boolean(filters.executorId?.length), capabilities.executor, "Ejecutor"],
     [
       Boolean(filters.processOwnerId?.length),
-      capabilities.processOwner,
+      capabilities.processOwner ||
+        (access.roleCode === "PROCESS_OWNER" &&
+          filters.processOwnerId?.every((id) => id === access.userId) === true),
       "Dueño del proceso",
     ],
   ];

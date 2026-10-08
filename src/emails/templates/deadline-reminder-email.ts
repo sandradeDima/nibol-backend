@@ -4,127 +4,148 @@ import type {
   EmailTemplateDefinition,
 } from "../types/email-types.js";
 import {
-  emailSemanticBadgeStyle,
+  emailRiskColor,
   escapeHtml,
   joinTextBlocks,
   resolveEmailAppName,
 } from "../utils.js";
 
-const MAX_VISIBLE_PLANS = 8;
+type ReminderPlan = DeadlineReminderEmailVariables["plans"][number];
 
-const deadlineBadgeStyle = (
-  bucket: DeadlineReminderEmailVariables["plans"][number]["bucket"],
-): string =>
-  bucket === "OVERDUE"
-    ? "background:#fee2e2;color:#991b1b"
-    : "background:#fef3c7;color:#92400e";
-
-const groupPlansByArea = (
-  plans: readonly DeadlineReminderEmailVariables["plans"][number][],
-): Array<{
-  area: string;
-  plans: DeadlineReminderEmailVariables["plans"][number][];
-}> => {
-  const groups = new Map<
-    string,
-    DeadlineReminderEmailVariables["plans"][number][]
-  >();
-
+const groupPlansByArea = (plans: readonly ReminderPlan[]) => {
+  const groups = new Map<string, ReminderPlan[]>();
   for (const plan of plans) {
     const area = plan.area.trim() || "Sin área asignada";
-    const group = groups.get(area);
-    if (group) {
-      group.push(plan);
-    } else {
-      groups.set(area, [plan]);
-    }
+    groups.set(area, [...(groups.get(area) ?? []), plan]);
   }
-
-  return [...groups].map(([area, groupedPlans]) => ({
-    area,
-    plans: groupedPlans,
-  }));
+  return [...groups].map(([area, areaPlans]) => {
+    const observations = new Map<string, ReminderPlan[]>();
+    for (const plan of areaPlans) {
+      observations.set(plan.observationId, [
+        ...(observations.get(plan.observationId) ?? []),
+        plan,
+      ]);
+    }
+    const statusCounts = [0, 0, 0, 0];
+    const riskCounts = [0, 0, 0, 0];
+    for (const observationPlans of observations.values()) {
+      const progress = Math.min(
+        ...observationPlans.map((plan) => plan.officialProgressPercent),
+      );
+      statusCounts[
+        progress >= 100 ? 3 : progress >= 60 ? 2 : progress > 0 ? 1 : 0
+      ]! += 1;
+      const riskPlan = observationPlans[0]!;
+      const color = emailRiskColor(riskPlan.risk, riskPlan.riskColorToken);
+      riskCounts[
+        color === "#027A48"
+          ? 0
+          : color === "#DC6803"
+            ? 1
+            : color === "#D92D20"
+              ? 2
+              : 3
+      ]! += 1;
+    }
+    return { area, count: observations.size, riskCounts, statusCounts };
+  });
 };
 
-const renderPlan = (
-  plan: DeadlineReminderEmailVariables["plans"][number],
-): string => `
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #d8e2ee;border-collapse:separate;margin:0 0 12px;">
-    <tr>
-      <td style="padding:14px 16px 8px;vertical-align:top;">
-        <div style="color:#07142d;font-size:13px;font-weight:800;">${escapeHtml(plan.report)} · ${escapeHtml(plan.observation)}</div>
-        <div style="color:#1b2940;font-size:16px;font-weight:750;line-height:1.35;margin-top:5px;">${escapeHtml(plan.plan)}</div>
-        <div style="color:#617086;font-size:12px;line-height:1.55;margin-top:5px;">${escapeHtml(plan.description)}</div>
-      </td>
-      <td align="right" style="padding:14px 16px 8px;vertical-align:top;white-space:nowrap;">
-        <span style="${emailSemanticBadgeStyle(plan.risk, plan.riskColorToken)};border-radius:999px;display:inline-block;font-size:11px;font-weight:700;padding:4px 8px;">${escapeHtml(plan.risk)}</span>
-      </td>
-    </tr>
-    <tr>
-      <td colspan="2" style="padding:4px 16px 14px;">
-        <div style="color:#516075;font-size:12px;line-height:1.7;">
-          <strong>Área:</strong> ${escapeHtml(plan.area)}<br>
-          ${plan.executor ? `<strong>Ejecutor:</strong> ${escapeHtml(plan.executor)}<br>` : ""}
-          <strong>Fecha de compromiso actual:</strong> ${escapeHtml(plan.effectiveDueDate)}<br>
-          <strong>Estado de plazo:</strong> <span style="${deadlineBadgeStyle(plan.bucket)};border-radius:999px;display:inline-block;font-weight:700;padding:2px 7px;">${escapeHtml(plan.bucket === "DUE_TODAY" ? "Vence hoy" : plan.deadlineStatus)}</span><br>
-          <strong>Estado de avance:</strong> ${escapeHtml(plan.officialProgress)} · ${plan.officialProgressPercent}%<br>
-          <strong>Reprogramado:</strong> <span style="${plan.reprogrammed ? "background:#dbeafe;color:#1d4ed8" : "background:#e7edf5;color:#334155"};border-radius:999px;display:inline-block;font-weight:700;padding:2px 7px;">${plan.reprogrammed ? "Sí" : "No"}</span>
-        </div>
-      </td>
-    </tr>
-  </table>
-`;
+const renderChart = (
+  title: string,
+  rows: Array<{ label: string; count: number; color: string }>,
+): string => {
+  const maximum = Math.max(1, ...rows.map((row) => row.count));
+  return `
+    <div style="font-size:10px;font-weight:700;margin:0 0 12px;text-align:center;">${title}</div>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
+      ${rows
+        .map(
+          ({ label, count, color }) => `<tr>
+        <td style="color:#555;font-size:11px;padding:5px 8px 5px 0;text-align:right;white-space:nowrap;width:104px;">${label}</td>
+        <td style="border-left:1px solid #d4d4d4;padding:5px 0 5px 6px;">
+          <div style="background:${color};color:#07142d;font-size:11px;font-weight:700;line-height:18px;min-width:22px;text-align:center;width:${Math.max(22, Math.round((count / maximum) * 120))}px;">${count}</div>
+        </td>
+      </tr>`,
+        )
+        .join("")}
+    </table>`;
+};
 
 export const deadlineReminderEmailTemplate: EmailTemplateDefinition<"deadlineReminder"> =
   {
     name: "deadlineReminder",
     render: ({ brand, variables }) => {
       const appName = resolveEmailAppName(variables.appName ?? brand.appName);
-      const visiblePlans = variables.plans.slice(0, MAX_VISIBLE_PLANS);
-      const omittedPlans = Math.max(
-        0,
-        variables.plans.length - visiblePlans.length,
-      );
-      const areaGroups = groupPlansByArea(visiblePlans);
-      const areaSections = areaGroups
+      const areas = groupPlansByArea(variables.plans);
+      const areaSections = areas
         .map(
-          ({ area, plans }) => `
-            <h2 style="color:#07142d;font-size:17px;margin:26px 0 10px;">Área: ${escapeHtml(area)} <span style="color:#617086;font-size:13px;font-weight:600;">(${plans.length})</span></h2>
-            ${plans.map(renderPlan).join("")}
-          `,
+          ({ area, count, riskCounts, statusCounts }) => `
+      <div style="background:#c91000;color:#fff;font-size:14px;font-weight:700;margin:24px 0 0;padding:5px 8px;">${escapeHtml(area.toUpperCase())} &nbsp; ${count} Observacion${count === 1 ? "" : "es"}</div>
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;border:1px solid #e0e0e0;margin:0 0 16px;table-layout:fixed;"><tr>
+        <td width="50%" style="border-right:1px solid #d4d4d4;padding:12px 6px;vertical-align:top;">${renderChart(
+          "ESTATUS AVANCE PLAN DE REMEDIACIÓN",
+          [
+            {
+              label: "No iniciado (NI)",
+              count: statusCounts[0]!,
+              color: "#eff000",
+            },
+            {
+              label: "Iniciado (I)",
+              count: statusCounts[1]!,
+              color: "#38b6e9",
+            },
+            {
+              label: "Con avance (CA)",
+              count: statusCounts[2]!,
+              color: "#ffba00",
+            },
+            {
+              label: "Concluido (CO)",
+              count: statusCounts[3]!,
+              color: "#1db65f",
+            },
+          ],
+        )}</td>
+        <td width="50%" style="padding:12px 6px;vertical-align:top;">${renderChart(
+          "CALIFICACIÓN DEL RIESGO",
+          [
+            { label: "Bajo", count: riskCounts[0]!, color: "#1db65f" },
+            { label: "Medio", count: riskCounts[1]!, color: "#eff000" },
+            { label: "Alto", count: riskCounts[2]!, color: "#f21d0c" },
+            ...(riskCounts[3]
+              ? [{ label: "Otro", count: riskCounts[3]!, color: "#94a3b8" }]
+              : []),
+          ],
+        )}</td>
+      </tr></table>`,
         )
         .join("");
       const contentHtml = `
-        <p style="margin:0 0 16px;">Buenas tardes, ${escapeHtml(variables.userName)}:</p>
-        <p style="margin:0 0 18px;">Al corte del <strong>${escapeHtml(variables.cutoffDate)}</strong>, se identificaron los siguientes planes de acción que requieren seguimiento.</p>
-        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f3f6fa;border:1px solid #d8e2ee;border-collapse:collapse;margin:0 0 20px;"><tr><td style="border-top:3px solid #d71920;color:#1b2940;padding:14px 16px;"><strong>Resumen:</strong> ${variables.overdue} vencido${variables.overdue === 1 ? "" : "s"}, ${variables.dueToday} con vencimiento hoy y ${variables.upcoming} próximo${variables.upcoming === 1 ? "" : "s"} a vencer. Reprogramados: ${variables.reprogrammed}.</td></tr></table>
-        ${areaSections}
-        ${omittedPlans > 0 ? `<p style="color:#617086;font-size:12px;margin:8px 0 0;">Se muestran ${visiblePlans.length} pendientes prioritarios. Hay ${omittedPlans} adicional${omittedPlans === 1 ? "" : "es"} disponible${omittedPlans === 1 ? "" : "s"} en NIBOL.</p>` : ""}
-        <p style="margin:24px 0;"><a href="${escapeHtml(variables.platformLink)}" style="background:#07142d;border-radius:8px;color:#ffffff;display:inline-block;font-weight:700;padding:13px 18px;text-decoration:none;">Ver pendientes en NIBOL</a></p>
-        <p style="color:#617086;font-size:12px;line-height:1.6;margin:0;">Este recordatorio ${escapeHtml(variables.roleCadence)} usa la fecha de compromiso efectiva, incluyendo reprogramaciones aprobadas. Mensaje generado por ${escapeHtml(appName)}.</p>`;
+      <div style="background:#c91000;color:#fff;font-size:14px;font-weight:700;line-height:1.3;margin:0 0 24px;padding:7px 10px;text-align:center;">Responsable de área / Dueño de proceso / Ejecutor</div>
+      <p style="margin:0 0 20px;">Buenas tardes estimados:</p>
+      <p style="margin:0 0 20px;">A la fecha, las siguientes observaciones permanecen pendientes de cierre:</p>
+      ${areaSections}
+      <p style="margin:24px 0;"><a href="${escapeHtml(variables.platformLink)}" style="background:#07142d;border-radius:8px;color:#ffffff;display:inline-block;font-weight:700;padding:13px 18px;text-decoration:none;">Ver pendientes en NIBOL</a></p>
+      <p style="color:#617086;font-size:12px;line-height:1.6;margin:0;">Este recordatorio ${escapeHtml(variables.roleCadence)} se genera con corte calendario y utiliza la fecha de compromiso efectiva. Este mensaje fue generado por ${escapeHtml(appName)}.</p>`;
       return {
         html: renderBaseEmailLayout({
           brand,
           contentHtml,
-          previewText: `${variables.subject} · ${variables.plans.length} pendientes`,
+          previewText: variables.subject,
         }),
         subject: variables.subject,
         text: joinTextBlocks(
-          `Buenas tardes, ${variables.userName}:`,
-          `Al corte del ${variables.cutoffDate}, se identificaron los siguientes planes de acción que requieren seguimiento.`,
-          `Resumen: ${variables.overdue} vencidos · ${variables.dueToday} vencen hoy · ${variables.upcoming} próximos · ${variables.reprogrammed} reprogramados.`,
-          ...areaGroups.flatMap(({ area, plans }) => [
-            `Área: ${area} (${plans.length})`,
-            ...plans.map(
-              (plan) =>
-                `${plan.report} · ${plan.observation} · ${plan.plan} · Área: ${plan.area} · Fecha: ${plan.effectiveDueDate} · Estado: ${plan.deadlineStatus} · Avance: ${plan.officialProgress} ${plan.officialProgressPercent}% · Reprogramado: ${plan.reprogrammed ? "Sí" : "No"}`,
-            ),
-          ]),
-          ...(omittedPlans > 0
-            ? [`${omittedPlans} pendientes adicionales disponibles en NIBOL.`]
-            : []),
+          "Responsable de área / Dueño de proceso / Ejecutor",
+          "Buenas tardes estimados:",
+          "A la fecha, las siguientes observaciones permanecen pendientes de cierre:",
+          ...areas.map(
+            ({ area, count, riskCounts, statusCounts }) =>
+              `${area.toUpperCase()} · ${count} Observacion${count === 1 ? "" : "es"}\nEstatus avance plan de remediación: No iniciado ${statusCounts[0]}, Iniciado ${statusCounts[1]}, Con avance ${statusCounts[2]}, Concluido ${statusCounts[3]}\nCalificación del riesgo: Bajo ${riskCounts[0]}, Medio ${riskCounts[1]}, Alto ${riskCounts[2]}${riskCounts[3] ? `, Otro ${riskCounts[3]}` : ""}`,
+          ),
           `Ver pendientes en NIBOL: ${variables.platformLink}`,
-          `Recordatorio ${variables.roleCadence} generado por ${appName}.`,
+          `Este recordatorio ${variables.roleCadence} se genera con corte calendario y utiliza la fecha de compromiso efectiva. Este mensaje fue generado por ${appName}.`,
         ),
       };
     },
@@ -142,6 +163,7 @@ export const deadlineReminderEmailTemplate: EmailTemplateDefinition<"deadlineRem
           effectiveDueDate: "10/09/2026",
           executor: "Ejecutor Demo",
           observation: "OBS-003 — Control de accesos",
+          observationId: "sample-obs-003",
           officialProgress: "Con avance",
           officialProgressPercent: 60,
           plan: "Actualizar matriz de accesos",
@@ -158,6 +180,7 @@ export const deadlineReminderEmailTemplate: EmailTemplateDefinition<"deadlineRem
           effectiveDueDate: "15/09/2026",
           executor: "Ejecutor Demo",
           observation: "OBS-004 — Conciliación documental",
+          observationId: "sample-obs-004",
           officialProgress: "Iniciado",
           officialProgressPercent: 20,
           plan: "Completar pruebas de control",

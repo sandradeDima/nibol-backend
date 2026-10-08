@@ -85,6 +85,7 @@ export type DeadlineReminderEmailVariables = {
     officialProgress: string;
     officialProgressPercent: number;
     observation: string;
+    observationId: string;
     plan: string;
     reprogrammed: boolean;
     report: string;

@@ -673,6 +673,7 @@ const deliverReminderEmailDelivery = async (
           effectiveDueDate: plan.effectiveDueDate,
           ...(plan.executor ? { executor: plan.executor } : {}),
           observation: plan.observation,
+          observationId: plan.observationId,
           officialProgress: plan.officialProgress,
           officialProgressPercent: plan.officialProgressPercent,
           plan: plan.plan,

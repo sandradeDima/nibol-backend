@@ -52,12 +52,14 @@ test("resuelve el registro exacto de cada evento notificable", () => {
   );
 });
 
-test("el digest muestra el total, agrupa por área y conserva el top 8", () => {
+test("el recordatorio agrupa observaciones únicas por área y muestra los dos gráficos", () => {
   const sample = deadlineReminderEmailTemplate.sampleVariables;
   const plans = Array.from({ length: 10 }, (_, index) => ({
     ...sample.plans[0]!,
     area: index % 2 === 0 ? "Finanzas" : "Operaciones",
     observation: `OBS-${index}`,
+    observationId: index === 8 ? "obs-0" : `obs-${index}`,
+    officialProgressPercent: index === 8 ? 20 : 60,
     plan: `Plan ${index}`,
     risk: index % 3 === 0 ? "Alto" : index % 3 === 1 ? "Medio" : "Bajo",
     riskColorToken:
@@ -75,12 +77,16 @@ test("el digest muestra el total, agrupa por área y conserva el top 8", () => {
     variables: { ...sample, plans },
   });
 
-  assert.match(rendered.html, /Se muestran 8 pendientes prioritarios/);
-  assert.match(rendered.html, /Área: Finanzas/);
-  assert.match(rendered.html, /Área: Operaciones/);
-  assert.match(rendered.html, /Fecha de compromiso actual/);
-  assert.match(rendered.html, /OBS-7/);
-  assert.doesNotMatch(rendered.html, /OBS-8/);
+  assert.match(rendered.html, /FINANZAS &nbsp; 4 Observaciones/);
+  assert.match(rendered.html, /OPERACIONES &nbsp; 5 Observaciones/);
+  assert.match(rendered.html, /ESTATUS AVANCE PLAN DE REMEDIACIÓN/);
+  assert.match(rendered.html, /CALIFICACIÓN DEL RIESGO/);
+  assert.match(rendered.html, /Concluido \(CO\)/);
+  assert.match(rendered.text, /FINANZAS · 4 Observaciones/);
+  assert.match(rendered.text, /No iniciado 0, Iniciado 1, Con avance 3, Concluido 0/);
+  assert.match(rendered.text, /Calificación del riesgo: Bajo 1, Medio 1, Alto 2/);
+  assert.match(rendered.text, /OPERACIONES · 5 Observaciones/);
+  assert.doesNotMatch(rendered.html, /Al corte del/);
   assert.match(rendered.html, /Ver pendientes en NIBOL/);
   assert.match(rendered.subject, /^NIBOL ·/);
 });
