@@ -90,7 +90,7 @@ const defaultWorkbook = path.join(
   project,
   "docs",
   "Detalle de observaciones históricas - BD Observaciones - informes - riesgos asociados.xlsx",
-);
+).normalize("NFC");
 const normalize = (value: string) =>
   value.trim().replace(/\s+/g, " ").toLocaleLowerCase("es");
 const riskKey = (value: string) =>

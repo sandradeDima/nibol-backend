@@ -459,6 +459,11 @@ test("unavailable DB and invalid workbook abort safely", async () => {
 
 const originalWorkbook = parseArgs([]).workbook;
 test(
+  "default workbook path matches the Git filename on Linux",
+  { skip: Boolean(process.env.HISTORICAL_IMPORT_WORKBOOK) },
+  () => assert.equal(originalWorkbook, originalWorkbook.normalize("NFC")),
+);
+test(
   "full workbook plans every historical observation from an empty database",
   () => {
     const output = report();
