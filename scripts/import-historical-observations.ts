@@ -47,6 +47,10 @@ type Issue = {
 type Decision =
   | "CREATE"
   | "CREATED"
+  | "UPDATE"
+  | "UPDATED"
+  | "DELETE"
+  | "DELETED"
   | "REUSED"
   | "BLOCKED"
   | "CONFLICT"
@@ -86,11 +90,13 @@ type ImportReport = {
 const here = path.dirname(fileURLToPath(import.meta.url));
 const project = path.resolve(here, "..");
 const output = path.join(project, "docs/historical-import");
-const defaultWorkbook = path.join(
-  project,
-  "docs",
-  "Detalle de observaciones históricas - BD Observaciones - informes - riesgos asociados.xlsx",
-).normalize("NFC");
+const defaultWorkbook = path
+  .join(
+    project,
+    "docs",
+    "Detalle de observaciones históricas - BD Observaciones - informes - riesgos asociados.xlsx",
+  )
+  .normalize("NFC");
 const normalize = (value: string) =>
   value.trim().replace(/\s+/g, " ").toLocaleLowerCase("es");
 const riskKey = (value: string) =>
@@ -173,11 +179,12 @@ const reportFiles = (report: ImportReport) => {
         (item.decision === "CREATE" || item.decision === "CREATED") &&
         (item.metadata as { status?: string } | undefined)?.status === status,
     ).length ?? 0;
-  const preservationRecords = report.records.ObservationComment?.filter(
-    (item) =>
-      (item.metadata as { status?: string } | undefined)?.status ===
-      "HISTORICAL_REPROGRAMMING_SOURCE_PRESERVED",
-  ) ?? [];
+  const preservationRecords =
+    report.records.ObservationComment?.filter(
+      (item) =>
+        (item.metadata as { status?: string } | undefined)?.status ===
+        "HISTORICAL_REPROGRAMMING_SOURCE_PRESERVED",
+    ) ?? [];
   const preservationComments = preservationRecords.length;
   const preservationCommitted = preservationRecords.filter((item) =>
     ["CREATED", "REUSED"].includes(item.decision),
@@ -214,6 +221,7 @@ const reportFiles = (report: ImportReport) => {
     },
     risks: {
       existing: countDecision("Risk", "REUSED"),
+      wouldReactivate: countDecision("Risk", "UPDATE"),
       wouldCreateFromCatalog: riskCreates("CATALOG"),
       wouldCreateHistoricalUnmatched: riskCreates("HISTORICAL_UNMATCHED"),
       wouldCreateDefaultUnspecified: riskCreates("DEFAULT_UNSPECIFIED"),
@@ -221,11 +229,14 @@ const reportFiles = (report: ImportReport) => {
     reports: {
       existing: countDecision("AuditReport", "REUSED"),
       wouldCreate: countDecision("AuditReport", "CREATE"),
+      wouldUpdate: countDecision("AuditReport", "UPDATE"),
       conflicts: countDecision("AuditReport", "CONFLICT"),
     },
     observations: {
       existing: countDecision("Observation", "REUSED"),
       wouldCreate: countDecision("Observation", "CREATE"),
+      wouldReplace: countDecision("Observation", "UPDATE"),
+      wouldDelete: countDecision("Observation", "DELETE"),
       importedWithDefaults: report.sourceCounts?.defaultedObservations ?? 0,
       importedWithConflicts:
         report.sourceCounts?.importedWithSourceConflicts ?? 0,
@@ -371,7 +382,9 @@ export const prepareSource = (
     emailKey(value(row, "Correo")),
   );
   if (emails.some((email) => !email) || new Set(emails).size !== emails.length)
-    throw new Error("Workbook Users sheet has missing or duplicate normalized emails");
+    throw new Error(
+      "Workbook Users sheet has missing or duplicate normalized emails",
+    );
   const areaNames = new Set(
     (book.Usuarios ?? []).map((row) => normalize(value(row, "Área"))),
   );
@@ -899,6 +912,22 @@ const record = (
   );
   if (metadata !== undefined) report.records[kind]!.at(-1)!.metadata = metadata;
 };
+const changeDecision = (
+  report: ImportReport,
+  kind: string,
+  identity: string,
+  decision: Decision,
+) => {
+  const entry = report.records[kind]?.find(
+    (item) => item.identity === identity,
+  );
+  if (!entry || entry.decision === decision) return;
+  report.counts[kind]![entry.decision] =
+    (report.counts[kind]![entry.decision] ?? 1) - 1;
+  report.counts[kind]![decision] = (report.counts[kind]![decision] ?? 0) + 1;
+  entry.decision = decision;
+  if (decision !== "REUSED") delete entry.id;
+};
 const sourceChoice = (rows: Row[], column: string, replacement?: string) => {
   const entries = rows
     .map((row) => ({ row: row._row, value: value(row, column) }))
@@ -1180,19 +1209,15 @@ export const buildPlan = (
       const item = {
         identity: user.email,
         id: existing?.id ?? stableId("user-role", user.email),
-        decision: existing
-          ? existing.roleId === role.id
-            ? ("REUSED" as Decision)
-            : ("CONFLICT" as Decision)
-          : ("CREATE" as Decision),
+        decision: existing ? ("REUSED" as Decision) : ("CREATE" as Decision),
         name: role.name,
         userId: user.id,
         roleId: role.id,
       };
       userRolePlans.push(item);
       record(report, "UserRole", item, { roleCode: role.code });
-      if (item.decision === "CONFLICT")
-        issue(report, "USER_ROLE_CONFLICT", user.email, [], {
+      if (existing && existing.roleId !== role.id)
+        issue(report, "EXISTING_USER_ROLE_PRESERVED", user.email, [], {
           existingRoleId: existing?.roleId,
           sourceRole: role.code,
         });
@@ -1203,7 +1228,7 @@ export const buildPlan = (
     namesToPlan: string[],
     existing: T[],
     invalid: (entry: T) => boolean,
-    keyOf = normalize,
+    keyOf = riskKey,
   ) => {
     const result = new Map<string, Master>();
     for (const name of namesToPlan) {
@@ -1267,13 +1292,15 @@ export const buildPlan = (
     ...detailRisks,
     ...(missingRiskNeeded ? [defaultRisk] : []),
   ];
-  const risks = planCatalog(
-    "Risk",
-    riskNames,
-    db.risks,
-    (entry) => !entry.isActive,
-    riskKey,
-  );
+  const risks = planCatalog("Risk", riskNames, db.risks, () => false, riskKey);
+  for (const risk of risks.values())
+    if (db.risks.some((entry) => entry.id === risk.id && !entry.isActive)) {
+      changeDecision(report, "Risk", risk.identity, "UPDATE");
+      risk.decision = "UPDATE";
+      issue(report, "INACTIVE_RISK_REACTIVATED", risk.name, [], {
+        id: risk.id,
+      });
+    }
   for (const [key, variants] of rowsBy(riskNames, riskKey)) {
     const names = unique(variants.map(normalize));
     if (names.length > 1)
@@ -1363,19 +1390,19 @@ export const buildPlan = (
   >();
   for (const [number, rows] of source.reports) {
     const row = rows[0]!;
-    const classPlan = classes.get(normalize(value(row, "Clase")));
+    const classPlan = classes.get(riskKey(value(row, "Clase")));
     const found = db.reports.find((entry) => entry.reportNumber === number);
     const title = value(row, "Título de informe");
     const reportDate = value(row, "Fecha");
     const decision: Decision =
-      found &&
-      (found.deletedAt ||
-        found.title !== title ||
-        iso(found.reportDate) !== reportDate ||
-        found.reportClassId !== classPlan?.id)
-        ? "CONFLICT"
-        : classPlan?.decision === "CONFLICT" || actor.decision === "CONFLICT"
-          ? "BLOCKED"
+      classPlan?.decision === "CONFLICT" || actor.decision === "CONFLICT"
+        ? "BLOCKED"
+        : found &&
+            (found.deletedAt ||
+              found.title !== title ||
+              iso(found.reportDate) !== reportDate ||
+              found.reportClassId !== classPlan?.id)
+          ? "UPDATE"
           : found
             ? "REUSED"
             : "CREATE";
@@ -1395,10 +1422,10 @@ export const buildPlan = (
       reportDate,
       reportClass: value(row, "Clase"),
     });
-    if (decision === "CONFLICT")
+    if (decision === "UPDATE")
       issue(
         report,
-        "REPORT_METADATA_CONFLICT",
+        "REPORT_METADATA_OVERWRITTEN",
         number,
         rows.map((entry) => entry._row),
         {
@@ -1483,9 +1510,7 @@ export const buildPlan = (
         { original: fullTitle, truncated: fields.title },
       );
     }
-    const dictionary = dictionaries.get(
-      normalize(fields.mainObservation ?? ""),
-    );
+    const dictionary = dictionaries.get(riskKey(fields.mainObservation ?? ""));
     const riskLevel = [...levelPlans.values()].find(
       (entry) =>
         normalize(entry.name) === normalize(fields.riskLevel ?? "") ||
@@ -1556,6 +1581,7 @@ export const buildPlan = (
     )
       decision = "BLOCKED";
     if (
+      decision !== "BLOCKED" &&
       found &&
       (found.deletedAt ||
         found.title !== fields.title ||
@@ -1567,10 +1593,10 @@ export const buildPlan = (
         iso(found.originalDueDate) !== originalDue ||
         iso(found.currentDueDate) !== currentDue)
     ) {
-      decision = "CONFLICT";
+      decision = "UPDATE";
       issue(
         report,
-        "EXISTING_OBSERVATION_CONFLICT",
+        "EXISTING_OBSERVATION_OVERWRITTEN",
         code,
         rows.map((row) => row._row),
         { databaseId: found.id },
@@ -1616,10 +1642,10 @@ export const buildPlan = (
     const areaPlans: PlannedArea[] = [];
     const rowToPlan = new Map<number, string>();
     for (const areaRows of rowsBy(rows, (row) =>
-      normalize(value(row, "Área")),
+      riskKey(value(row, "Área")),
     ).values()) {
       const areaName = value(areaRows[0]!, "Área");
-      const area = areas.get(normalize(areaName));
+      const area = areas.get(riskKey(areaName));
       const override = overrides.areaAssignments?.[`${code}|${areaName}`];
       const ownerChoice = latestChoice(areaRows, "Dueño de proceso");
       const responsibleChoice = latestChoice(areaRows, "Responsable de área");
@@ -1658,7 +1684,6 @@ export const buildPlan = (
       let areaDecision: Decision = assignment ? "REUSED" : "CREATE";
       if (
         decision === "BLOCKED" ||
-        decision === "CONFLICT" ||
         !area ||
         !owner ||
         !responsible ||
@@ -1668,14 +1693,15 @@ export const buildPlan = (
       )
         areaDecision = "BLOCKED";
       if (
+        areaDecision !== "BLOCKED" &&
         assignment &&
         (assignment.processOwnerUserId !== owner?.id ||
           assignment.areaResponsibleUserId !== responsible?.id)
       ) {
-        areaDecision = "CONFLICT";
+        areaDecision = "UPDATE";
         issue(
           report,
-          "EXISTING_AREA_ASSIGNMENT_CONFLICT",
+          "EXISTING_AREA_ASSIGNMENT_OVERWRITTEN",
           `${code}|${areaName}`,
           areaRows.map((row) => row._row),
           { databaseId: assignment.id },
@@ -1732,7 +1758,6 @@ export const buildPlan = (
         let planDecision: Decision = match ? "REUSED" : "CREATE";
         if (
           areaDecision === "BLOCKED" ||
-          areaDecision === "CONFLICT" ||
           !executor ||
           executor.decision === "CONFLICT" ||
           !validDate(due) ||
@@ -1740,14 +1765,15 @@ export const buildPlan = (
         )
           planDecision = "BLOCKED";
         if (
+          planDecision !== "BLOCKED" &&
           match &&
           (match.status !== statusValue ||
             iso(match.currentDueDate) !== reprogrammed)
         ) {
-          planDecision = "CONFLICT";
+          planDecision = "UPDATE";
           issue(
             report,
-            "EXISTING_ACTION_PLAN_CONFLICT",
+            "EXISTING_ACTION_PLAN_OVERWRITTEN",
             `${code}|row:${row._row}`,
             [row._row],
             { databaseId: match.id },
@@ -1811,21 +1837,21 @@ export const buildPlan = (
           .flatMap((area) => area.plans)
           .find((plan) => plan.id === actionPlanId);
         const commentDecision: Decision =
-          foundComment &&
-          (foundComment.deletedAt ||
-            foundComment.body !== body ||
-            foundComment.observationId !== observationId ||
-            foundComment.authorUserId !== actor.id ||
-            foundComment.actionPlanId !== (actionPlanId ?? null))
+          foundComment && foundComment.observationId !== observationId
             ? "CONFLICT"
-            : foundComment
-              ? "REUSED"
-              : decision === "BLOCKED" ||
-                  decision === "CONFLICT" ||
-                  linkedPlan?.decision === "BLOCKED" ||
-                  linkedPlan?.decision === "CONFLICT"
-                ? "BLOCKED"
-                : "CREATE";
+            : foundComment &&
+                (foundComment.deletedAt ||
+                  foundComment.body !== body ||
+                  foundComment.authorUserId !== actor.id ||
+                  foundComment.actionPlanId !== (actionPlanId ?? null))
+              ? "UPDATE"
+              : foundComment
+                ? "REUSED"
+                : decision === "BLOCKED" ||
+                    linkedPlan?.decision === "BLOCKED" ||
+                    linkedPlan?.decision === "CONFLICT"
+                  ? "BLOCKED"
+                  : "CREATE";
         const item: PlannedComment = {
           identity: `${code}|row:${row._row}|${column}`,
           id,
@@ -1865,18 +1891,20 @@ export const buildPlan = (
         "No se dispone de metadata suficiente para reconstruir el flujo de aprobación original.",
       ].join(" ");
       const foundComment = db.comments.find((entry) => entry.id === id);
-      const commentDecision: Decision = foundComment &&
-        (foundComment.deletedAt ||
-          foundComment.body !== body ||
-          foundComment.observationId !== observationId ||
-          foundComment.authorUserId !== actor.id ||
-          foundComment.actionPlanId !== null)
-        ? "CONFLICT"
-        : foundComment
-          ? "REUSED"
-          : decision === "BLOCKED" || decision === "CONFLICT"
-            ? "BLOCKED"
-            : "CREATE";
+      const commentDecision: Decision =
+        foundComment && foundComment.observationId !== observationId
+          ? "CONFLICT"
+          : foundComment &&
+              (foundComment.deletedAt ||
+                foundComment.body !== body ||
+                foundComment.authorUserId !== actor.id ||
+                foundComment.actionPlanId !== null)
+            ? "UPDATE"
+            : foundComment
+              ? "REUSED"
+              : decision === "BLOCKED"
+                ? "BLOCKED"
+                : "CREATE";
       const item: PlannedComment = {
         identity: `${code}|row:${row._row}|reprogramming-source`,
         id,
@@ -1892,11 +1920,63 @@ export const buildPlan = (
         authorIsTechnical: true,
         sourceRow: row._row,
       });
-      issue(report, "HISTORICAL_REPROGRAMMING_SOURCE_PRESERVED", code, [row._row], {
-        commentId: id,
-        decision: commentDecision,
-        approvalWorkflowEvent: false,
+      issue(
+        report,
+        "HISTORICAL_REPROGRAMMING_SOURCE_PRESERVED",
+        code,
+        [row._row],
+        {
+          commentId: id,
+          decision: commentDecision,
+          approvalWorkflowEvent: false,
+        },
+      );
+    }
+    const plans = areaPlans.flatMap((area) => area.plans);
+    const existingComments = db.comments.filter(
+      (comment) => comment.observationId === observationId,
+    );
+    const replacedChildren = found && {
+      risks: found.risks.filter(
+        (entry) => !riskLinks.some((link) => link.riskId === entry.riskId),
+      ).length,
+      areas: found.areaAssignments.filter(
+        (entry) => !areaPlans.some((area) => area.areaId === entry.areaId),
+      ).length,
+      plans: found.actionPlans.filter(
+        (entry) => !plans.some((plan) => plan.id === entry.id),
+      ).length,
+      comments: existingComments.filter(
+        (entry) => !comments.some((comment) => comment.id === entry.id),
+      ).length,
+    };
+    if (comments.some((comment) => comment.decision === "CONFLICT"))
+      decision = "BLOCKED";
+    if (
+      found &&
+      decision !== "BLOCKED" &&
+      (decision === "UPDATE" ||
+        [...riskLinks, ...areaPlans, ...plans, ...comments].some(
+          (entry) => entry.decision !== "REUSED",
+        ) ||
+        Object.values(replacedChildren!).some(Boolean))
+    ) {
+      decision = "UPDATE";
+      issue(report, "EXISTING_OBSERVATION_REPLACED", code, [], {
+        databaseId: found.id,
+        removedChildren: replacedChildren,
       });
+      for (const [kind, entries] of [
+        ["ObservationArea", areaPlans],
+        ["ActionPlan", plans],
+        ["ObservationComment", comments],
+      ] as const)
+        for (const entry of entries)
+          if (entry.decision !== "BLOCKED" && entry.decision !== "CONFLICT") {
+            changeDecision(report, kind, entry.identity, "CREATE");
+            entry.decision = "CREATE";
+          }
+      for (const link of riskLinks) link.decision = "CREATE";
     }
     const item: PlannedObservation = {
       identity: code,
@@ -1930,11 +2010,36 @@ export const buildPlan = (
       historicalObservationNumber: identity.observationNumber,
     });
     for (const link of riskLinks) {
-      if (decision === "BLOCKED" || decision === "CONFLICT")
-        link.decision = "BLOCKED";
+      if (decision === "BLOCKED") link.decision = "BLOCKED";
       record(report, "ObservationRisk", link);
     }
   }
+  const sourceNumbers = new Map<string, Set<number>>();
+  for (const item of observationPlans) {
+    if (!sourceNumbers.has(item.reportId))
+      sourceNumbers.set(item.reportId, new Set());
+    sourceNumbers.get(item.reportId)!.add(item.number);
+  }
+  const extraObservations = db.observations.flatMap((entry) => {
+    const reportPlan = [...reports.values()].find(
+      (item) => item.id === entry.auditReportId,
+    );
+    if (
+      !reportPlan ||
+      sourceNumbers.get(reportPlan.id)?.has(entry.observationNumber)
+    )
+      return [];
+    const item = {
+      identity: `${reportPlan.identity}-${String(entry.observationNumber).padStart(2, "0")}`,
+      id: entry.id,
+      decision: "DELETE" as Decision,
+    };
+    record(report, "Observation", item);
+    issue(report, "EXTRA_OBSERVATION_REMOVED", item.identity, [], {
+      databaseId: entry.id,
+    });
+    return [item];
+  });
   Object.assign((report.sourceCounts ??= {}), {
     reprogrammingDirectDueDate: directReprogramming,
     reprogrammingSourceOnly: sourceOnlyReprogramming,
@@ -1960,6 +2065,7 @@ export const buildPlan = (
     statuses: [...statusPlans.values()],
     reports: [...reports.values()],
     observations: observationPlans,
+    extraObservations,
   };
 };
 
@@ -2087,12 +2193,24 @@ export const writePlan = async (plan: Plan, report: ImportReport) => {
       saved("RiskLevel", item.identity, row.id);
     }
   for (const item of plan.risks)
-    if (item.decision === "CREATE") {
-      const row = await prisma.risk.upsert({
-        where: { name: item.name },
-        create: { id: item.id, name: item.name },
-        update: {},
-      });
+    if (item.decision === "CREATE" || item.decision === "UPDATE") {
+      const row =
+        item.decision === "UPDATE"
+          ? await prisma.risk.update({
+              where: { id: item.id },
+              data: { isActive: true },
+            })
+          : await prisma.risk.upsert({
+              where: { name: item.name },
+              create: { id: item.id, name: item.name },
+              update: {},
+            });
+      if (row.id !== item.id) {
+        for (const observation of plan.observations)
+          for (const link of observation.riskLinks)
+            if (link.riskId === item.id) link.riskId = row.id;
+        item.id = row.id;
+      }
       saved("Risk", item.identity, row.id);
     }
   for (const item of plan.statuses)
@@ -2114,7 +2232,7 @@ export const writePlan = async (plan: Plan, report: ImportReport) => {
       saved("ObservationStatus", item.identity, row.id);
     }
   for (const item of plan.reports)
-    if (item.decision === "CREATE") {
+    if (item.decision === "CREATE" || item.decision === "UPDATE") {
       const row = await prisma.auditReport.upsert({
         where: { reportNumber: item.identity },
         create: {
@@ -2125,16 +2243,32 @@ export const writePlan = async (plan: Plan, report: ImportReport) => {
           reportClassId: item.classId,
           createdByUserId: item.creatorId,
         },
-        update: {},
+        update: {
+          title: item.title,
+          reportDate: date(item.reportDate),
+          reportClassId: item.classId,
+          deletedAt: null,
+        },
       });
       saved("AuditReport", item.identity, row.id);
     }
+  for (const item of plan.extraObservations) {
+    await prisma.$transaction(async (tx) => {
+      await tx.actionPlan.deleteMany({ where: { observationId: item.id } });
+      await tx.observation.delete({ where: { id: item.id } });
+    });
+    saved("Observation", item.identity, item.id);
+  }
   for (const item of plan.observations) {
     if (item.decision === "BLOCKED" || item.decision === "CONFLICT") continue;
     const committed = await prisma.$transaction(async (tx) => {
       const ids: { kind: string; identity: string; id: string }[] = [];
+      if (item.decision === "UPDATE") {
+        await tx.actionPlan.deleteMany({ where: { observationId: item.id } });
+        await tx.observation.delete({ where: { id: item.id } });
+      }
       const observation =
-        item.decision === "CREATE"
+        item.decision === "CREATE" || item.decision === "UPDATE"
           ? await tx.observation.create({
               data: {
                 id: item.id,
@@ -2291,8 +2425,15 @@ export const writeIfAuthorized = async (
 const finalizeExecution = (report: ImportReport) => {
   for (const [kind, records] of Object.entries(report.records)) {
     for (const entry of records)
-      if (entry.decision === "CREATE") {
-        entry.decision = entry.id ? "CREATED" : "SKIPPED";
+      if (["CREATE", "UPDATE", "DELETE"].includes(entry.decision)) {
+        const completed = {
+          CREATE: "CREATED",
+          UPDATE: "UPDATED",
+          DELETE: "DELETED",
+        } as const;
+        entry.decision = entry.id
+          ? completed[entry.decision as keyof typeof completed]
+          : "SKIPPED";
         if (!entry.id && report.error)
           entry.reason = `Not committed: ${report.error}`;
       }
@@ -2324,13 +2465,7 @@ export const run = async (args = process.argv.slice(2)) => {
     } catch (error) {
       reportSourceExceptions(source, report);
       report.error = String(error);
-      issue(
-        report,
-        "DATABASE_UNAVAILABLE",
-        "database",
-        [],
-        report.error,
-      );
+      issue(report, "DATABASE_UNAVAILABLE", "database", [], report.error);
       reportFiles(report);
       console.error(report.error);
       return 2;

@@ -140,7 +140,9 @@ test("risk names differing only by accents share the database risk", () => {
   assert.equal(result.risks.length, 3);
   assert.equal(result.observations[0]?.riskLinks.length, 1);
   assert.equal(
-    output.exceptions.filter((x) => x.code === "RISK_SOURCE_VARIANTS_COLLAPSED_BY_DB_COLLATION").length,
+    output.exceptions.filter(
+      (x) => x.code === "RISK_SOURCE_VARIANTS_COLLAPSED_BY_DB_COLLATION",
+    ).length,
     1,
   );
 });
@@ -312,7 +314,9 @@ test("source-only reprogramming becomes a technical historical comment", () => {
   assert.match(observation.comments[0]!.body, /Vencido/);
   assert.equal(output.counts.ObservationComment?.CREATE, 1);
   assert.equal(
-    output.exceptions.filter((x) => x.code === "HISTORICAL_REPROGRAMMING_SOURCE_PRESERVED").length,
+    output.exceptions.filter(
+      (x) => x.code === "HISTORICAL_REPROGRAMMING_SOURCE_PRESERVED",
+    ).length,
     1,
   );
 });
@@ -440,6 +444,49 @@ test("replanning imported rows reuses deterministic identities", () => {
     ),
     0,
   );
+  db.areas[0]!.name = "Nórth";
+  db.classes[0]!.name = "Ánnual";
+  db.dictionaries[0]!.name = "Príncipal";
+  const accentedCatalog = report();
+  buildPlan(source, db, {}, accentedCatalog);
+  assert.equal(accentedCatalog.counts.Area?.CREATE ?? 0, 0);
+  assert.equal(accentedCatalog.counts.AuditReportClass?.CREATE ?? 0, 0);
+  assert.equal(accentedCatalog.counts.ObservationDictionary?.CREATE ?? 0, 0);
+  db.observations[0]!.risks = [];
+  const changedChildren = report();
+  buildPlan(source, db, {}, changedChildren);
+  assert.equal(changedChildren.counts.Observation?.UPDATE, 1);
+  db.reports[0]!.title = "Staging report";
+  db.observations[0]!.title = "Staging observation";
+  db.observations.push({
+    ...db.observations[0]!,
+    id: "extra-observation",
+    observationNumber: 99,
+  });
+  db.observations.push({
+    ...db.observations[0]!,
+    id: "unrelated-observation",
+    auditReportId: "unrelated-report",
+  });
+  db.userRoles[0]!.roleId = "other-role";
+  db.risks[0]!.isActive = false;
+  const overwriteReport = report();
+  const overwrite = buildPlan(source, db, {}, overwriteReport);
+  assert.equal(overwriteReport.counts.AuditReport?.UPDATE, 1);
+  assert.equal(overwriteReport.counts.Observation?.UPDATE, 1);
+  assert.equal(overwriteReport.counts.Observation?.DELETE, 1);
+  assert.equal(overwriteReport.counts.UserRole?.CONFLICT ?? 0, 0);
+  assert.equal(overwriteReport.counts.Risk?.CONFLICT ?? 0, 0);
+  assert.equal(overwriteReport.counts.Risk?.UPDATE, 1);
+  assert.equal(overwrite.extraObservations[0]?.id, "extra-observation");
+  assert.equal(overwrite.extraObservations.length, 1);
+  assert.equal(overwrite.observations[0]?.riskLinks[0]?.decision, "CREATE");
+  assert.equal(
+    Object.values(overwriteReport.counts).some(
+      (decisions) => (decisions.BLOCKED ?? 0) + (decisions.CONFLICT ?? 0) > 0,
+    ),
+    false,
+  );
 });
 test("unavailable DB and invalid workbook abort safely", async () => {
   await assert.rejects(
@@ -463,50 +510,46 @@ test(
   { skip: Boolean(process.env.HISTORICAL_IMPORT_WORKBOOK) },
   () => assert.equal(originalWorkbook, originalWorkbook.normalize("NFC")),
 );
-test(
-  "full workbook plans every historical observation from an empty database",
-  () => {
-    const output = report();
-    const source = prepareSource(readWorkbook(originalWorkbook), output);
-    const p = buildPlan(source, empty(), {}, output);
-    assert.equal(output.sourceCounts?.detailRows, 364);
-    assert.equal(output.sourceCounts?.riskOccurrences, 893);
-    assert.equal(p.users.filter((u) => !u.technical).length, 36);
-    assert.equal(p.roles.length, 5);
-    assert.equal(output.counts.UserRole?.CREATE, 36);
-    assert.equal(p.areas.length, 9);
-    assert.equal(p.classes.length, 3);
-    assert.equal(p.dictionaries.length, 75);
-    assert.equal(p.risks.length, 216);
-    assert.equal(p.reports.length, 33);
-    assert.equal(p.observations.length, 242);
-    assert.equal(
-      p.observations.filter((o) => o.decision === "CREATE").length,
-      242,
-    );
-    assert.equal(output.counts.ObservationRisk?.CREATE, 590);
-    assert.equal(output.counts.ActionPlan?.CREATE, 363);
-    assert.equal(output.counts.ObservationComment?.CREATE, 419);
-    assert.equal(
-      Object.values(output.records)
-        .flat()
-        .filter((item) => ["BLOCKED", "CONFLICT"].includes(item.decision))
-        .length,
-      0,
-    );
-    assert.equal(output.sourceCounts?.reprogrammingDirectDueDate, 15);
-    assert.equal(output.sourceCounts?.reprogrammingSourceOnly, 3);
-    assert.equal(
-      output.exceptions.filter(
-        (x) => x.code === "AREA_ASSIGNMENT_CONFLICT_RESOLVED",
-      ).length,
-      5,
-    );
-    assert.equal(
-      output.exceptions.filter(
-        (x) => x.code === "OBSERVATION_FIELD_CONFLICT_RESOLVED",
-      ).length,
-      6,
-    );
-  },
-);
+test("full workbook plans every historical observation from an empty database", () => {
+  const output = report();
+  const source = prepareSource(readWorkbook(originalWorkbook), output);
+  const p = buildPlan(source, empty(), {}, output);
+  assert.equal(output.sourceCounts?.detailRows, 364);
+  assert.equal(output.sourceCounts?.riskOccurrences, 893);
+  assert.equal(p.users.filter((u) => !u.technical).length, 36);
+  assert.equal(p.roles.length, 5);
+  assert.equal(output.counts.UserRole?.CREATE, 36);
+  assert.equal(p.areas.length, 9);
+  assert.equal(p.classes.length, 3);
+  assert.equal(p.dictionaries.length, 75);
+  assert.equal(p.risks.length, 216);
+  assert.equal(p.reports.length, 33);
+  assert.equal(p.observations.length, 242);
+  assert.equal(
+    p.observations.filter((o) => o.decision === "CREATE").length,
+    242,
+  );
+  assert.equal(output.counts.ObservationRisk?.CREATE, 590);
+  assert.equal(output.counts.ActionPlan?.CREATE, 363);
+  assert.equal(output.counts.ObservationComment?.CREATE, 419);
+  assert.equal(
+    Object.values(output.records)
+      .flat()
+      .filter((item) => ["BLOCKED", "CONFLICT"].includes(item.decision)).length,
+    0,
+  );
+  assert.equal(output.sourceCounts?.reprogrammingDirectDueDate, 15);
+  assert.equal(output.sourceCounts?.reprogrammingSourceOnly, 3);
+  assert.equal(
+    output.exceptions.filter(
+      (x) => x.code === "AREA_ASSIGNMENT_CONFLICT_RESOLVED",
+    ).length,
+    5,
+  );
+  assert.equal(
+    output.exceptions.filter(
+      (x) => x.code === "OBSERVATION_FIELD_CONFLICT_RESOLVED",
+    ).length,
+    6,
+  );
+});
