@@ -23,6 +23,10 @@ import {
   type RoleCode,
 } from "../src/permissions/definitions.js";
 import { DEADLINE_REMINDER_PARAMETER_DEFAULTS } from "../src/jobs/deadline-monitor/deadline-reminder.constants.js";
+import {
+  CANONICAL_OBSERVATION_STATUSES,
+  CANONICAL_RISK_LEVELS,
+} from "./canonical-historical-catalogs.js";
 
 const seedEnvSchema = z.object({
   DATABASE_URL: z.string().min(1),
@@ -141,32 +145,9 @@ const roles: SeedRole[] = ROLE_DEFINITIONS.map((role) => ({
   name: role.name,
 }));
 
-const riskLevels: SeedRiskLevel[] = [
-  {
-    colorToken: "high",
-    maxRemediationDays: 90,
-    description: "Observaciones de alta prioridad con impacto material.",
-    key: "ALTO",
-    name: "Alto",
-    severityOrder: 1,
-  },
-  {
-    colorToken: "medium",
-    maxRemediationDays: 120,
-    description: "Observaciones relevantes con seguimiento programado.",
-    key: "MEDIO",
-    name: "Medio",
-    severityOrder: 2,
-  },
-  {
-    colorToken: "low",
-    maxRemediationDays: 180,
-    description: "Observaciones de menor criticidad y ejecución gradual.",
-    key: "BAJO",
-    name: "Bajo",
-    severityOrder: 3,
-  },
-];
+const riskLevels: SeedRiskLevel[] = CANONICAL_RISK_LEVELS.map((entry) => ({
+  ...entry,
+}));
 
 const extensionClassifications: SeedExtensionClassification[] = [
   {
@@ -189,44 +170,8 @@ const extensionClassifications: SeedExtensionClassification[] = [
   },
 ];
 
-const observationStatuses: SeedObservationStatus[] = [
-  {
-    countsAsOverdue: false,
-    description: "Estado inicial para observaciones recién registradas.",
-    isFinal: false,
-    isInitial: true,
-    key: "NO_INICIADO",
-    name: "No iniciado",
-    sortOrder: 10,
-  },
-  {
-    countsAsOverdue: false,
-    description: "La observación está siendo atendida por el área responsable.",
-    isFinal: false,
-    isInitial: false,
-    key: "INICIADO",
-    name: "Iniciado",
-    sortOrder: 20,
-  },
-  {
-    countsAsOverdue: false,
-    description: "Uno o más planes de acción tienen avance aprobado.",
-    isFinal: false,
-    isInitial: false,
-    key: "CON_AVANCE",
-    name: "Con avance",
-    sortOrder: 30,
-  },
-  {
-    countsAsOverdue: false,
-    description: "La observación fue cerrada y validada.",
-    isFinal: true,
-    isInitial: false,
-    key: "CONCLUIDO",
-    name: "Concluido",
-    sortOrder: 40,
-  },
-];
+const observationStatuses: SeedObservationStatus[] =
+  CANONICAL_OBSERVATION_STATUSES.map((entry) => ({ ...entry }));
 
 const areas: SeedArea[] = [
   {

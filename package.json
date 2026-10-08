@@ -21,7 +21,9 @@
     "db:seed:roles": "node --import tsx prisma/seed-role-users.ts",
     "backfill:entity-activity": "node --import tsx scripts/backfill-entity-activity.ts",
     "db:reset": "prisma migrate reset",
-    "create:module": "node --import tsx scripts/create-module.ts"
+    "create:module": "node --import tsx scripts/create-module.ts",
+    "import:historical-observations": "node --import tsx scripts/import-historical-observations.ts",
+    "test:historical-observations": "node --import tsx --test scripts/import-historical-observations.test.ts"
   },
   "keywords": [],
   "author": "",

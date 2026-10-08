@@ -286,6 +286,14 @@ export const auth = betterAuth({
     : undefined,
   trustedOrigins: [env.FRONTEND_URL],
   user: {
+    additionalFields: {
+      jobTitle: {
+        fieldName: "jobTitle",
+        input: false,
+        required: false,
+        type: "string",
+      },
+    },
     fields: {
       image: "avatar",
     },

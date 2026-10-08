@@ -260,6 +260,8 @@ test("los permisos sensibles quedan separados por rol", () => {
   );
   assert.ok(ROLE_PERMISSION_NAMES.EXECUTOR.includes("evidence.create"));
   assert.ok(ROLE_PERMISSION_NAMES.EXECUTOR.includes("evidence.delete"));
+  assert.ok(ROLE_PERMISSION_NAMES.EXECUTOR.includes("action_plans.create"));
+  assert.ok(!ROLE_PERMISSION_NAMES.EXECUTOR.includes("action_plans.edit"));
   assert.ok(
     ROLE_PERMISSION_NAMES.EXECUTOR.includes("action_plans.submit_to_audit"),
   );

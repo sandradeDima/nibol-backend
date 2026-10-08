@@ -221,7 +221,7 @@ const buildDashboardSvg = (input: ReportExportInput): string => {
     <rect width="1200" height="860" fill="#FFFFFF"/>
     <rect width="1200" height="92" fill="#102A43"/><rect y="88" width="1200" height="4" fill="#C62828"/>
     <text x="42" y="42" font-family="Aptos,Arial" font-size="25" font-weight="700" fill="#FFFFFF">${svgText(input.reportName)}</text>
-    <text x="42" y="69" font-family="Aptos,Arial" font-size="13" fill="#D7E0EA">Dashboard de reportería · ${svgText(input.generatedAt)}</text>
+    <text x="42" y="69" font-family="Aptos,Arial" font-size="13" fill="#D7E0EA">Tablero - Avance de planes · ${svgText(input.generatedAt)}</text>
     <text x="1158" y="54" text-anchor="end" font-family="Aptos,Arial" font-size="12" fill="#D7E0EA">NIBOL</text>
     <text x="42" y="127" font-family="Aptos,Arial" font-size="12" fill="#64748B">Filtros: ${svgText(filterText.slice(0, 150))}</text>
     ${[
@@ -404,7 +404,7 @@ export const buildExcelWorkbook = (input: ReportExportInput): Buffer => {
         name: "xl/worksheets/_rels/sheet1.xml.rels",
       },
       {
-        data: '<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><xdr:oneCellAnchor><xdr:from><xdr:col>2</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>2</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:ext cx="10500000" cy="7000000"/><xdr:pic><xdr:nvPicPr><xdr:cNvPr id="1" name="Dashboard de reportería"/><xdr:cNvPicPr/></xdr:nvPicPr><xdr:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic><xdr:clientData/></xdr:oneCellAnchor></xdr:wsDr>',
+        data: '<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><xdr:oneCellAnchor><xdr:from><xdr:col>2</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>2</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:ext cx="10500000" cy="7000000"/><xdr:pic><xdr:nvPicPr><xdr:cNvPr id="1" name="Tablero - Avance de planes"/><xdr:cNvPicPr/></xdr:nvPicPr><xdr:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></xdr:blipFill><xdr:spPr><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic><xdr:clientData/></xdr:oneCellAnchor></xdr:wsDr>',
         name: "xl/drawings/drawing1.xml",
       },
       {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildRoleDashboardQuickActions,
   buildRoleDashboardHierarchy,
   getRoleDashboardStatus,
 } from "./dashboard.service.js";
@@ -31,6 +32,23 @@ test("role dashboard status reflects mixed observation states", () => {
     key: "MIXED",
     name: "Mixto",
   });
+});
+
+test("executor quick actions stay focused on plan deadlines", () => {
+  const actions = buildRoleDashboardQuickActions(
+    { roleCode: "EXECUTOR", userId: "executor-1" } as never,
+    { search: "" },
+    7,
+  );
+
+  assert.deepEqual(
+    actions.map((action) => action.label),
+    [
+      "Planes de acción vencidos",
+      "Planes próximos a vencer",
+      "Solicitar ampliación",
+    ],
+  );
 });
 
 test("role dashboard keeps responsible and executor hierarchy role-specific", () => {

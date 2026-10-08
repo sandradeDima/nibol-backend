@@ -1016,9 +1016,10 @@ const priority = (
   href: string,
 ): RoleDashboardPriority => ({ code, count, href, label });
 
-const quickActions = (
+export const buildRoleDashboardQuickActions = (
   access: AuthorizationSummary,
   query: RoleDashboardQuery,
+  dueSoonDays: number,
 ): RoleDashboardQuickAction[] => {
   if (access.roleCode !== "EXECUTOR") return [];
   const planParams = new URLSearchParams({
@@ -1026,36 +1027,30 @@ const quickActions = (
   });
   if (query.areaId) planParams.set("filter.areaId", query.areaId);
   const planHref = `/planes-accion?${planParams.toString()}`;
+  const overdueParams = new URLSearchParams(planParams);
+  overdueParams.set("filter.deadlineStatus", "VENCIDO");
+  const upcomingParams = new URLSearchParams(planParams);
+  upcomingParams.set("filter.deadlineStatus", "VIGENTE");
+  const dueSoon = new Date(Date.now() + dueSoonDays * DAY);
+  upcomingParams.set("filter.dueDateTo", dueSoon.toISOString());
   return [
     {
-      code: "SEND_PROGRESS",
-      description: "Registra y envía un nuevo avance.",
-      href: planHref,
-      label: "Enviar avance",
+      code: "OVERDUE_PLANS",
+      description: "Revisa los planes fuera de plazo.",
+      href: `/planes-accion?${overdueParams.toString()}`,
+      label: "Planes de acción vencidos",
     },
     {
-      code: "UPLOAD_EVIDENCE",
-      description: "Adjunta respaldo a un plan de acción.",
-      href: planHref,
-      label: "Cargar evidencia",
-    },
-    {
-      code: "UPDATE_PLAN",
-      description: "Actualiza fechas, descripción o progreso.",
-      href: planHref,
-      label: "Actualizar plan",
+      code: "UPCOMING_PLANS",
+      description: "Atiende los planes con vencimiento próximo.",
+      href: `/planes-accion?${upcomingParams.toString()}`,
+      label: "Planes próximos a vencer",
     },
     {
       code: "REQUEST_EXTENSION",
       description: "Solicita una ampliación de plazo.",
       href: planHref,
       label: "Solicitar ampliación",
-    },
-    {
-      code: "VIEW_TIMELINE",
-      description: "Consulta fechas y próximos hitos.",
-      href: "/cronograma",
-      label: "Ver cronograma",
     },
   ];
 };
@@ -1070,6 +1065,7 @@ export const dashboardService = {
 
     const roleCode = access.roleCode as RoleDashboardRole;
     const roleQuery = { ...query, search: query.search ?? "" };
+    const dueSoonDays = await reminderDays();
     if (
       (roleCode !== "PROCESS_OWNER" &&
         roleQuery.areaResponsibleUserId?.length) ||
@@ -1236,7 +1232,11 @@ export const dashboardService = {
         roleObservationRow(observation, now),
       ),
       priorities,
-      quickActions: quickActions(access, roleQuery),
+      quickActions: buildRoleDashboardQuickActions(
+        access,
+        roleQuery,
+        dueSoonDays,
+      ),
       roleCode,
       selectedAreaId: roleQuery.areaId ?? null,
       selectedExecutorId: roleQuery.executorId?.[0] ?? null,

@@ -5,6 +5,7 @@ type BaseEmailLayoutInput = {
   brand: EmailBrandingSettings;
   contentHtml: string;
   previewText?: string;
+  variant?: "auditDigest" | "default";
 };
 
 const renderLogoMarkup = (brand: EmailBrandingSettings): string => {
@@ -29,7 +30,42 @@ export const renderBaseEmailLayout = ({
   brand,
   contentHtml,
   previewText,
+  variant = "default",
 }: BaseEmailLayoutInput): string => {
+  if (variant === "auditDigest") {
+    return `
+      <!doctype html>
+      <html lang="es">
+        <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+          <title>${escapeHtml(brand.appName)}</title>
+        </head>
+        <body style="background:#ffffff;color:#13233b;font-family:Arial,Helvetica,sans-serif;margin:0;padding:0;">
+          <div style="display:none;max-height:0;max-width:0;opacity:0;overflow:hidden;">
+            ${escapeHtml(previewText ?? `Notificacion de ${brand.appName}`)}
+          </div>
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
+            <tr>
+              <td align="center">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#ffffff;border-collapse:collapse;max-width:800px;">
+                  <tr>
+                    <td style="background:#19466f;font-size:0;line-height:0;padding:0;width:12px;">&nbsp;</td>
+                    <td style="padding:14px 28px 32px 16px;">
+                      <div style="color:#13233b;font-size:13px;line-height:1.45;">
+                        ${contentHtml}
+                      </div>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </body>
+      </html>
+    `;
+  }
+
   return `
     <!doctype html>
     <html lang="es">

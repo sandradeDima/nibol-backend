@@ -300,11 +300,9 @@ export type RoleDashboardPriority = {
 
 export type RoleDashboardQuickAction = {
   code:
-    | "SEND_PROGRESS"
-    | "UPLOAD_EVIDENCE"
-    | "UPDATE_PLAN"
+    | "OVERDUE_PLANS"
     | "REQUEST_EXTENSION"
-    | "VIEW_TIMELINE";
+    | "UPCOMING_PLANS";
   description: string;
   href: string;
   label: string;
