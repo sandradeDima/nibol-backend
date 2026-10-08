@@ -362,7 +362,7 @@ export const recalculateObservationFromActionPlans = async (
 ) => {
   const [observation, actionPlans] = await Promise.all([
     tx.observation.findUnique({
-      select: { status: { select: { isFinal: true } } },
+      select: { id: true },
       where: { id: observationId },
     }),
     tx.actionPlan.findMany({
@@ -373,18 +373,16 @@ export const recalculateObservationFromActionPlans = async (
   if (!observation) return;
   const progressPercent =
     observationAggregationService.calculateProgress(actionPlans);
-  const key = observationAggregationService.calculateStatus(
-    actionPlans,
-    observation.status.isFinal,
-  );
+  const key = observationAggregationService.calculateStatus(actionPlans);
   const status = await tx.observationStatus.findFirst({
     select: { id: true },
     where: { active: true, deletedAt: null, key },
   });
+  if (!status) throw new AppError(`No está configurado el estado ${key}.`, 500);
   await tx.observation.update({
     data: {
       progressPercent,
-      ...(status ? { statusId: status.id } : {}),
+      statusId: status.id,
     },
     where: { id: observationId },
   });

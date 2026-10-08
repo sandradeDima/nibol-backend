@@ -884,6 +884,7 @@ export const usersService = {
         createdAt: true,
         email: true,
         id: true,
+        jobTitle: true,
         lastLoginAt: true,
         name: true,
         userRoles: {
@@ -921,6 +922,7 @@ export const usersService = {
       createdAt: user.createdAt.toISOString(),
       email: user.email,
       id: user.id,
+      jobTitle: user.jobTitle,
       lastLoginAt: user.lastLoginAt?.toISOString() ?? null,
       name: user.name,
       roles: user.userRoles.map(({ role }) => role.name),

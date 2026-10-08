@@ -233,21 +233,6 @@ export const buildObservationActionItems = (
     });
   }
 
-  const allConcluded =
-    context.actionPlans.length > 0 &&
-    context.actionPlans.every((plan) => plan.status === "CONCLUDED");
-  if (allConcluded && context.pendingReviewCount === 0) {
-    items.push({
-      actionLabel: "Solicitar cierre",
-      actionType: "REQUEST_CLOSURE",
-      actionUrl: `${observationUrl}#cierre-observacion`,
-      code: "READY_TO_CLOSE",
-      label: "La observación está lista para revisión de cierre",
-      permission: "observations.close",
-      severity: "INFO",
-    });
-  }
-
   const rank = { CRITICAL: 3, INFO: 1, WARNING: 2 } as const;
   return items
     .map((item) => actionable(item, access))

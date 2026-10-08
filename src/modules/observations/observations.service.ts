@@ -299,13 +299,6 @@ type ObservationRecord = Prisma.ObservationGetPayload<{
   include: ReturnType<typeof buildObservationInclude>;
 }>;
 
-const businessStatusLabel = {
-  CONCLUIDO: "Concluido",
-  CON_AVANCE: "Con avance",
-  INICIADO: "Iniciado",
-  NO_INICIADO: "No iniciado",
-} as const;
-
 const getWorkflowTaskCounts = async (records: ObservationRecord[]) => {
   const evaluationIds = records.flatMap((record) =>
     record.actionPlans.flatMap((plan) =>
@@ -356,13 +349,6 @@ const formatObservation = (
   record: ObservationRecord,
   taskCount: WorkflowTaskCount = { completed: 0, total: 0 },
 ): ObservationDetail => {
-  const progressPercent = observationAggregationService.calculateProgress(
-    record.actionPlans,
-  );
-  const businessStatus = observationAggregationService.calculateStatus(
-    record.actionPlans,
-    record.status.isFinal,
-  );
   const now = new Date();
   const isOverdue = isObservationOverdue(
     record.currentDueDate,
@@ -405,16 +391,11 @@ const formatObservation = (
     observationNumber: record.observationNumber,
     originalDueDate: record.originalDueDate.toISOString(),
     process: record.process,
-    progressPercent,
+    progressPercent: record.progressPercent,
     risks: record.risks.map(({ risk }) => risk),
     riskLevel: record.riskLevel,
     source: record.source,
-    status: {
-      id: record.status.id,
-      isFinal: record.status.isFinal,
-      key: businessStatus,
-      name: businessStatusLabel[businessStatus],
-    },
+    status: record.status,
     completedTaskCount: taskCount.completed,
     taskCount: taskCount.total,
     title: record.title,
@@ -1383,6 +1364,7 @@ export const observationsService = {
               {
                 actionPlans: {
                   some: {
+                    deletedAt: null,
                     responsibleUser: {
                       OR: [
                         { name: { contains: query.search } },

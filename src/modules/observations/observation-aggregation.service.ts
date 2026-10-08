@@ -43,7 +43,6 @@ export const observationAggregationService = {
 
   calculateStatus(
     actionPlans: ActionPlanAggregationInput[],
-    closureApproved = false,
   ): ObservationBusinessStatus {
     if (
       actionPlans.length === 0 ||
@@ -51,10 +50,7 @@ export const observationAggregationService = {
     ) {
       return "NO_INICIADO";
     }
-    if (
-      closureApproved &&
-      actionPlans.every((actionPlan) => actionPlan.status === "CONCLUDED")
-    ) {
+    if (actionPlans.every((actionPlan) => actionPlan.status === "CONCLUDED")) {
       return "CONCLUIDO";
     }
     if (
