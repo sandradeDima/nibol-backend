@@ -1,7 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import os from "node:os";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { v5 as uuidv5 } from "uuid";
@@ -85,10 +84,11 @@ type ImportReport = {
 };
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const project = path.resolve(here, "../..");
+const project = path.resolve(here, "..");
 const output = path.join(project, "docs/historical-import");
 const defaultWorkbook = path.join(
   project,
+  "docs",
   "Detalle de observaciones históricas - BD Observaciones - informes - riesgos asociados.xlsx",
 );
 const normalize = (value: string) =>
@@ -262,6 +262,7 @@ const reportFiles = (report: ImportReport) => {
   };
   const stem =
     report.mode === "execute" ? "latest-execution" : "latest-dry-run";
+  mkdirSync(output, { recursive: true });
   writeFileSync(
     path.join(output, `${stem}.json`),
     JSON.stringify(report, null, 2) + "\n",
@@ -331,15 +332,12 @@ export const parseArgs = (args: string[]) => {
       throw new Error(`Missing value for ${name}`);
     return result;
   };
-  const workbookName = path.basename(defaultWorkbook);
   return {
     execute: args.includes("--execute"),
     workbook:
       option("--workbook") ??
       process.env.HISTORICAL_IMPORT_WORKBOOK ??
-      (existsSync(defaultWorkbook)
-        ? defaultWorkbook
-        : path.join(os.homedir(), "Downloads", workbookName)),
+      defaultWorkbook,
     overrides:
       option("--overrides") ??
       path.join(project, "data/historical-import-overrides.json"),

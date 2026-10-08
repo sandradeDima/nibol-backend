@@ -1,7 +1,4 @@
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import { test } from "node:test";
 import {
   buildPlan,
@@ -145,6 +142,26 @@ test("risk names differing only by accents share the database risk", () => {
   assert.equal(
     output.exceptions.filter((x) => x.code === "RISK_SOURCE_VARIANTS_COLLAPSED_BY_DB_COLLATION").length,
     1,
+  );
+});
+test("risk links reuse an existing risk with accent-only spelling differences", () => {
+  const db = empty();
+  db.risks = [
+    {
+      id: "existing-risk",
+      name: "Pérdida económica",
+      isActive: true,
+    },
+  ];
+  const { result } = plan(
+    [detail(3, { "Riesgos asociados": "▪ Perdida economica" })],
+    db,
+  );
+  assert.equal(
+    result.observations[0]?.riskLinks.find((link) =>
+      link.identity.includes("Perdida"),
+    )?.riskId,
+    "existing-risk",
   );
 });
 test("users use roster emails and technical actor is created", () => {
@@ -440,14 +457,9 @@ test("unavailable DB and invalid workbook abort safely", async () => {
   );
 });
 
-const originalWorkbook = path.join(
-  os.homedir(),
-  "Downloads",
-  "Detalle de observaciones históricas - BD Observaciones - informes - riesgos asociados.xlsx",
-);
+const originalWorkbook = parseArgs([]).workbook;
 test(
   "full workbook plans every historical observation from an empty database",
-  { skip: !existsSync(originalWorkbook) },
   () => {
     const output = report();
     const source = prepareSource(readWorkbook(originalWorkbook), output);
