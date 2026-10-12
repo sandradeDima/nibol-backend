@@ -599,6 +599,7 @@ const operationalAttention = (
     });
 
 const roleDashboardRoles = new Set<RoleDashboardRole>([
+  "SYSTEM_ADMIN",
   "AUDITOR",
   "AUDIT_CHIEF",
   "AREA_RESPONSIBLE",
@@ -607,6 +608,7 @@ const roleDashboardRoles = new Set<RoleDashboardRole>([
 ]);
 
 const rolesWithResponsibleHierarchy = new Set<RoleDashboardRole>([
+  "SYSTEM_ADMIN",
   "AUDITOR",
   "AUDIT_CHIEF",
   "PROCESS_OWNER",
@@ -1138,6 +1140,7 @@ export const dashboardService = {
         403,
       );
 
+    const now = new Date();
     const [observations, globalObservations] = await Promise.all([
       prisma.observation.findMany({
         include: roleObservationInclude(access, roleQuery),
@@ -1145,7 +1148,10 @@ export const dashboardService = {
         where: roleObservationWhere(access, roleQuery),
       }),
       prisma.observation.findMany({
-        select: { status: { select: { isFinal: true } } },
+        select: {
+          currentDueDate: true,
+          status: { select: { isFinal: true } },
+        },
         where: roleObservationWhere(access, { search: "" }),
       }),
     ]);
@@ -1158,34 +1164,43 @@ export const dashboardService = {
         assignment.actionPlans.map(({ id }) => id),
       ),
     );
-    const [pendingExtensions, pendingReviews] = await Promise.all([
-      prisma.deadlineExtensionRequest.count({
-        where: {
-          AND: [
-            buildExtensionRequestScopeWhere(access),
-            { status: "SENT_TO_MANAGER" },
-            {
-              OR: [
-                { actionPlanId: { in: actionPlanIds } },
-                { observationAreaId: { in: observationAreaIds } },
-                { observationId: { in: observationIds } },
-              ],
-            },
-          ],
-        },
-      }),
-      prisma.progressEvaluation.count({
-        where: {
-          AND: [
-            buildProgressEvaluationScopeWhere(access),
-            { actionPlanId: { in: actionPlanIds } },
-            { reviewStatus: "SENT_TO_AUDIT" },
-          ],
-        },
-      }),
-    ]);
+    const [pendingExtensions, pendingReviews, priorityOverdueObservations] =
+      await Promise.all([
+        prisma.deadlineExtensionRequest.count({
+          where: {
+            AND: [
+              buildExtensionRequestScopeWhere(access),
+              { status: "SENT_TO_MANAGER" },
+              {
+                OR: [
+                  { actionPlanId: { in: actionPlanIds } },
+                  { observationAreaId: { in: observationAreaIds } },
+                  { observationId: { in: observationIds } },
+                ],
+              },
+            ],
+          },
+        }),
+        prisma.progressEvaluation.count({
+          where: {
+            AND: [
+              buildProgressEvaluationScopeWhere(access),
+              { actionPlanId: { in: actionPlanIds } },
+              { reviewStatus: "SENT_TO_AUDIT" },
+            ],
+          },
+        }),
+        prisma.observation.count({
+          where: {
+            ...roleObservationWhere(access, {
+              ...roleQuery,
+              observationState: "PENDING",
+            }),
+            currentDueDate: { lt: now },
+          },
+        }),
+      ]);
 
-    const now = new Date();
     const pendingObservations = observations.filter(
       (observation) => !observation.status.isFinal,
     );
@@ -1194,6 +1209,10 @@ export const dashboardService = {
     );
     const globalPendingObservations = globalObservations.filter(
       (observation) => !observation.status.isFinal,
+    ).length;
+    const globalOverdueObservations = globalObservations.filter(
+      (observation) =>
+        !observation.status.isFinal && observation.currentDueDate < now,
     ).length;
     const overdueObservations = pendingObservations.filter(
       (observation) => observation.currentDueDate < now,
@@ -1205,7 +1224,7 @@ export const dashboardService = {
             priority(
               "OVERDUE",
               "Vencidas",
-              overdueObservations,
+              priorityOverdueObservations,
               observationsHref(roleQuery, {
                 "filter.deadlineStatus": "VENCIDO",
                 "filter.observationState": "PENDING",
@@ -1232,6 +1251,7 @@ export const dashboardService = {
       globalSummary: {
         concludedObservations:
           globalObservations.length - globalPendingObservations,
+        overdueObservations: globalOverdueObservations,
         pendingObservations: globalPendingObservations,
         totalObservations: globalObservations.length,
       },

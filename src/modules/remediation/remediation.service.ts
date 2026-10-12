@@ -295,12 +295,6 @@ const validateAssignment = async (
       "El ejecutor seleccionado no existe o está inactivo.",
       400,
     );
-  const executorRole = await prisma.userRole.findFirst({
-    select: { userId: true },
-    where: { userId: responsibleUserId, role: { code: "EXECUTOR" } },
-  });
-  if (!executorRole)
-    throw new AppError("El usuario seleccionado no es un ejecutor.", 400);
 };
 
 const remediationPlanInclude = {
@@ -419,7 +413,6 @@ export const remediationService = {
               deletedAt: null,
               id: input.ownerUserId,
               isActive: true,
-              userRoles: { some: { role: { code: "EXECUTOR" } } },
             },
           })
         : Promise.resolve(null),
@@ -512,7 +505,6 @@ export const remediationService = {
           deletedAt: null,
           id: input.ownerUserId,
           isActive: true,
-          userRoles: { some: { role: { code: "EXECUTOR" } } },
         },
       });
       if (!owner)
@@ -885,9 +877,6 @@ export const remediationService = {
       deletedAt: null,
       isActive: true,
       ...(access.dataScope === "ASSIGNED" ? { id: access.userId } : {}),
-      userRoles: {
-        some: { role: { code: "EXECUTOR", deletedAt: null } },
-      },
     };
     const executorCandidates =
       query.observationId || query.observationAreaId

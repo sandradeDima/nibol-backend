@@ -201,10 +201,10 @@ export const buildObservationActionItems = (
     items.push({
       actionLabel: "Subir evidencia",
       actionType: "ADD_FINDING_EVIDENCE",
-      actionUrl: `${observationUrl}?tab=detail#documentos-observacion`,
+      actionUrl: `${observationUrl}/editar`,
       code: "FINDING_EVIDENCE_MISSING",
       label: "Falta evidencia del hallazgo",
-      permission: "evidence.create",
+      permission: "observations.edit",
       severity: "WARNING",
     });
   }

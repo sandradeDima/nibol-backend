@@ -243,6 +243,7 @@ export type DashboardMySummary = {
 };
 
 export type RoleDashboardRole =
+  | "SYSTEM_ADMIN"
   | "AUDITOR"
   | "AUDIT_CHIEF"
   | "PROCESS_OWNER"
@@ -319,6 +320,7 @@ export type RoleDashboardData = {
   generatedAt: string;
   globalSummary: {
     concludedObservations: number;
+    overdueObservations: number;
     pendingObservations: number;
     totalObservations: number;
   };
