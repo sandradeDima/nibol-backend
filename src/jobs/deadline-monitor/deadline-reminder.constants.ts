@@ -2,6 +2,12 @@ export const DEADLINE_REMINDER_JOB_NAME = "deadline-reminder";
 export const DEADLINE_REMINDER_LOCK_NAME = "deadline-reminder";
 export const DEADLINE_REMINDER_EVENT_TYPE = "DEADLINE_REMINDER_DIGEST";
 
+export const DEADLINE_REMINDER_ALERT_DEFAULTS = {
+  include_reminder_overdue: true,
+  include_reminder_due_today: true,
+  include_reminder_upcoming: true,
+} as const;
+
 export const DEADLINE_REMINDER_ROLES = [
   "AREA_RESPONSIBLE",
   "EXECUTOR",
@@ -96,12 +102,16 @@ export const DEADLINE_REMINDER_PARAMETER_DEFAULTS = Object.fromEntries(
   }),
 ) as Record<
   string,
-  { description: string; name: string; value: string; valueType: "boolean" | "number" }
+  {
+    description: string;
+    name: string;
+    value: string;
+    valueType: "boolean" | "number";
+  }
 >;
 
-export const isDeadlineReminderParameterKey = (
-  key: string,
-): boolean => key in DEADLINE_REMINDER_PARAMETER_DEFAULTS;
+export const isDeadlineReminderParameterKey = (key: string): boolean =>
+  key in DEADLINE_REMINDER_PARAMETER_DEFAULTS;
 
 export const getDeadlineReminderParameterKey = (
   role: DeadlineReminderRole,

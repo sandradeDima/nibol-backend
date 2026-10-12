@@ -32,6 +32,7 @@ import {
 } from "../../utils/notification-links.js";
 import { logger } from "../../utils/logger.js";
 import {
+  DEADLINE_REMINDER_ALERT_DEFAULTS,
   DEADLINE_REMINDER_EVENT_TYPE,
   DEADLINE_REMINDER_JOB_NAME,
   DEADLINE_REMINDER_LOCK_NAME,
@@ -121,6 +122,14 @@ type ReminderFailure = {
   entityId: string;
   entityType: string;
   message: string;
+};
+
+type ReminderAlertSettings = {
+  includeOverdue: boolean;
+  includeDueToday: boolean;
+  includeUpcoming: boolean;
+  notifyByEmail: boolean;
+  notifyInApp: boolean;
 };
 
 export type DeadlineReminderRunSummary = {
@@ -308,20 +317,35 @@ const readPolicies = async (): Promise<StoredPolicy[]> => {
   });
 };
 
-const readChannels = async (): Promise<{
-  notifyByEmail: boolean;
-  notifyInApp: boolean;
-}> => {
+const readAlertSettings = async (): Promise<ReminderAlertSettings> => {
   const records = await prisma.systemParameter.findMany({
     select: { key: true, value: true },
     where: {
       active: true,
       deletedAt: null,
-      key: { in: ["notify_by_email", "notify_in_app"] },
+      key: {
+        in: [
+          "notify_by_email",
+          "notify_in_app",
+          ...Object.keys(DEADLINE_REMINDER_ALERT_DEFAULTS),
+        ],
+      },
     },
   });
   const values = new Map(records.map((record) => [record.key, record.value]));
   return {
+    includeOverdue: parseBoolean(
+      values.get("include_reminder_overdue"),
+      DEADLINE_REMINDER_ALERT_DEFAULTS.include_reminder_overdue,
+    ),
+    includeDueToday: parseBoolean(
+      values.get("include_reminder_due_today"),
+      DEADLINE_REMINDER_ALERT_DEFAULTS.include_reminder_due_today,
+    ),
+    includeUpcoming: parseBoolean(
+      values.get("include_reminder_upcoming"),
+      DEADLINE_REMINDER_ALERT_DEFAULTS.include_reminder_upcoming,
+    ),
     notifyByEmail: parseBoolean(values.get("notify_by_email"), true),
     notifyInApp: parseBoolean(values.get("notify_in_app"), true),
   };
@@ -381,11 +405,28 @@ const findActionPlans = async (
   });
 };
 
+const isReminderBucketEnabled = (
+  bucket: DigestPlan["bucket"],
+  settings: Pick<
+    ReminderAlertSettings,
+    "includeOverdue" | "includeDueToday" | "includeUpcoming"
+  >,
+): boolean =>
+  bucket === "OVERDUE"
+    ? settings.includeOverdue
+    : bucket === "DUE_TODAY"
+      ? settings.includeDueToday
+      : settings.includeUpcoming;
+
 const toDigestPlan = (
   plan: any,
   cutoffDateKey: string,
   policy: StoredPolicy,
   showExecutor: boolean,
+  alertSettings: Pick<
+    ReminderAlertSettings,
+    "includeOverdue" | "includeDueToday" | "includeUpcoming"
+  >,
 ): DigestPlan | null => {
   const effectiveDueDate = getEffectiveActionPlanDueDate(plan);
   const effectiveDueDateKey = getDateOnlyKey(effectiveDueDate);
@@ -394,7 +435,7 @@ const toDigestPlan = (
     effectiveDueDateKey,
     upcomingWindowDays: policy.upcomingWindowDays,
   });
-  if (!bucket) return null;
+  if (!bucket || !isReminderBucketEnabled(bucket, alertSettings)) return null;
   const officialProgress = getOfficialActionPlanProgress(plan.status);
   const observationCode = `${plan.observation.auditReport.reportNumber} / OBS-${String(plan.observation.observationNumber).padStart(3, "0")}`;
   const approvedExtension = plan.deadlineExtensionRequests?.find(
@@ -449,6 +490,10 @@ const sortDigestPlans = (plans: DigestPlan[]): DigestPlan[] =>
   );
 
 const buildDigests = async (input: {
+  alertSettings: Pick<
+    ReminderAlertSettings,
+    "includeOverdue" | "includeDueToday" | "includeUpcoming"
+  >;
   cutoffDateKey: string;
   policies: StoredPolicy[];
 }): Promise<RecipientDigest[]> => {
@@ -485,6 +530,7 @@ const buildDigests = async (input: {
           input.cutoffDateKey,
           policy,
           showExecutor,
+          input.alertSettings,
         );
         if (!digestPlan) continue;
         const key = recipient.email.trim().toLowerCase() || recipient.id;
@@ -615,6 +661,7 @@ const notificationMessage = (digest: RecipientDigest): string => {
 
 const deliverReminderEmailDelivery = async (
   deliveryId: string,
+  alertSettings: ReminderAlertSettings,
 ): Promise<{
   attempted: boolean;
   status: NotificationDeliveryStatus;
@@ -644,6 +691,20 @@ const deliverReminderEmailDelivery = async (
     });
     return { attempted: false, status: NotificationDeliveryStatus.SKIPPED };
   }
+  const payload = delivery.payloadJson as unknown as ReminderPayload;
+  const plans = payload.plans.filter((plan) =>
+    isReminderBucketEnabled(plan.bucket, alertSettings),
+  );
+  if (plans.length === 0) {
+    await prisma.notificationDelivery.update({
+      data: {
+        errorMessage: "Omitida por la configuración actual de alertas.",
+        status: NotificationDeliveryStatus.SKIPPED,
+      },
+      where: { id: deliveryId },
+    });
+    return { attempted: false, status: NotificationDeliveryStatus.SKIPPED };
+  }
   if (!(await notificationService.claimEmailDelivery(deliveryId))) {
     const current = await prisma.notificationDelivery.findUnique({
       select: { status: true },
@@ -654,17 +715,25 @@ const deliverReminderEmailDelivery = async (
       status: current?.status ?? NotificationDeliveryStatus.SKIPPED,
     };
   }
-  const payload = delivery.payloadJson as unknown as ReminderPayload;
+  const filteredPayload = {
+    ...payload,
+    dueToday: plans.filter((plan) => plan.bucket === "DUE_TODAY").length,
+    overdue: plans.filter((plan) => plan.bucket === "OVERDUE").length,
+    plans,
+    reprogrammed: plans.filter((plan) => plan.reprogrammed).length,
+    subject: `NIBOL · ${plans.length} pendientes requieren atención`,
+    upcoming: plans.filter((plan) => plan.bucket === "UPCOMING").length,
+  };
   try {
     const result = await emailService.sendTemplate({
       template: "deadlineReminder",
       to: delivery.recipientEmail,
       variables: {
-        ...payload,
+        ...filteredPayload,
         appName: "NIBOL Bolivia",
         userName: payload.recipientName,
         platformLink: buildFrontendUrl(payload.platformLink),
-        plans: payload.plans.map((plan) => ({
+        plans: plans.map((plan) => ({
           area: plan.area,
           bucket: plan.bucket,
           deadlineStatus:
@@ -706,7 +775,9 @@ const deliverReminderEmailDelivery = async (
   }
 };
 
-const deliverPendingReminderEmails = async (): Promise<
+const deliverPendingReminderEmails = async (
+  alertSettings: ReminderAlertSettings,
+): Promise<
   Array<{
     attempted: boolean;
     status: NotificationDeliveryStatus;
@@ -736,7 +807,9 @@ const deliverPendingReminderEmails = async (): Promise<
   });
   const outcomes = [];
   for (const delivery of deliveries) {
-    outcomes.push(await deliverReminderEmailDelivery(delivery.id));
+    outcomes.push(
+      await deliverReminderEmailDelivery(delivery.id, alertSettings),
+    );
   }
   return outcomes;
 };
@@ -847,7 +920,7 @@ const createExecution = async (input: {
 };
 
 const notifyDigest = async (input: {
-  channels: { notifyByEmail: boolean; notifyInApp: boolean };
+  channels: ReminderAlertSettings;
   cutoffDateKey: string;
   digest: RecipientDigest;
   executionId: string;
@@ -899,7 +972,10 @@ const notifyDigest = async (input: {
       recipientEmail: input.digest.recipient.email,
       recipientUserId: input.digest.recipient.id,
     });
-    const result = await deliverReminderEmailDelivery(emailDelivery.id);
+    const result = await deliverReminderEmailDelivery(
+      emailDelivery.id,
+      input.channels,
+    );
     if (result.status === NotificationDeliveryStatus.SENT && result.attempted)
       input.summary.emailsSent += 1;
     if (result.status === NotificationDeliveryStatus.FAILED) {
@@ -917,7 +993,7 @@ const notifyDigest = async (input: {
 
 const executePeriod = async (input: {
   cadenceKey: string;
-  channels: { notifyByEmail: boolean; notifyInApp: boolean };
+  channels: ReminderAlertSettings;
   cutoffDateKey: string;
   dedupeKey?: string;
   periodKey: string;
@@ -950,6 +1026,7 @@ const executePeriod = async (input: {
   }
   try {
     const digests = await buildDigests({
+      alertSettings: input.channels,
       cutoffDateKey: input.cutoffDateKey,
       policies: input.policies,
     });
@@ -1159,14 +1236,16 @@ export const deadlineReminderService = {
     now?: Date;
     role: DeadlineReminderRole;
   }) {
-    const [policies, timeZone] = await Promise.all([
+    const [policies, channels, timeZone] = await Promise.all([
       readPolicies(),
+      readAlertSettings(),
       readBusinessTimeZone(),
     ]);
     const policy = policies.find((item) => item.role === input.role)!;
     const cutoffDateKey =
       input.cutoffDateKey ?? getBusinessDateKey(input.now, timeZone);
     const digests = await buildDigests({
+      alertSettings: channels,
       cutoffDateKey,
       policies: [policy],
     });
@@ -1183,6 +1262,10 @@ export const deadlineReminderService = {
       { dueToday: 0, overdue: 0, plans: 0, reprogrammed: 0, upcoming: 0 },
     );
     return {
+      channels: {
+        notifyByEmail: channels.notifyByEmail,
+        notifyInApp: channels.notifyInApp,
+      },
       cutoffDate: cutoffDateKey,
       policy,
       recipients: digests,
@@ -1227,10 +1310,12 @@ export const deadlineReminderService = {
     try {
       const [policies, channels, timeZone] = await Promise.all([
         readPolicies(),
-        readChannels(),
+        readAlertSettings(),
         readBusinessTimeZone(),
       ]);
-      const retryResults = await deliverPendingReminderEmails();
+      const retryResults = channels.notifyByEmail
+        ? await deliverPendingReminderEmails(channels)
+        : [];
       baseSummary.emailsSent += retryResults.filter(
         (result) =>
           result.status === NotificationDeliveryStatus.SENT && result.attempted,

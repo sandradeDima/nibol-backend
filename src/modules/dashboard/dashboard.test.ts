@@ -83,3 +83,30 @@ test("role dashboard keeps responsible and executor hierarchy role-specific", ()
   assert.equal(areaResponsibleArea.responsibles, undefined);
   assert.equal(areaResponsibleArea.executors?.[0]?.id, "executor-1");
 });
+
+test("pending hierarchy excludes concluded observations at every level", () => {
+  const records = Array.from({ length: 72 }, (_, index) => ({
+    areaAssignments: [
+      {
+        actionPlans: [
+          { responsibleUser: { id: "executor-1", name: "Ejecutor 1" } },
+        ],
+        area: { id: "area-1", name: "Área 1" },
+        areaResponsible: { id: "responsible-1", name: "Responsable 1" },
+      },
+    ],
+    id: `observation-${index}`,
+    status: { isFinal: index >= 52 },
+  }));
+
+  const [area] = buildRoleDashboardHierarchy(
+    records.slice(0, 52) as never,
+    "PROCESS_OWNER",
+  );
+  assert.equal(area?.total, 52);
+  assert.equal(area?.status.key, "PENDING");
+  assert.equal(area?.responsibles?.[0]?.total, 52);
+  assert.equal(area?.responsibles?.[0]?.status.key, "PENDING");
+  assert.equal(area?.responsibles?.[0]?.executors[0]?.total, 52);
+  assert.equal(area?.responsibles?.[0]?.executors[0]?.status.key, "PENDING");
+});

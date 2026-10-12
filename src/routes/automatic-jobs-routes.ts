@@ -4,6 +4,8 @@ import { Router, type RequestHandler } from "express";
 import { z } from "zod";
 
 import { asyncHandler } from "../middleware/async-handler.js";
+import { emailService } from "../emails/EmailService.js";
+import { emailTemplateDefinitions } from "../emails/templates/index.js";
 import { authorizationService } from "../services/authorization-service.js";
 import { auditLogService } from "../services/audit-log-service.js";
 import { prisma } from "../utils/prisma.js";
@@ -12,10 +14,33 @@ import { env } from "../utils/env.js";
 import { sendPaginated, sendSuccess } from "../utils/response.js";
 import { deadlineReminderService } from "../jobs/deadline-monitor/deadline-reminder.service.js";
 import {
+  DEADLINE_REMINDER_ALERT_DEFAULTS,
   DEADLINE_REMINDER_ROLES,
 } from "../jobs/deadline-monitor/deadline-reminder.constants.js";
 import { DEADLINE_MONITOR_PARAMETER_DEFAULTS } from "../jobs/deadline-monitor/deadline-monitor.constants.js";
 import { workflowTimerService } from "../modules/workflows/workflow-timer.service.js";
+
+const AUTOMATIC_NOTIFICATION_RULE_DEFAULTS = {
+  ...DEADLINE_MONITOR_PARAMETER_DEFAULTS,
+  ...DEADLINE_REMINDER_ALERT_DEFAULTS,
+};
+const REMINDER_ALERT_RULE_METADATA: Record<
+  string,
+  { description: string; name: string }
+> = {
+  include_reminder_due_today: {
+    description: "Incluye planes que vencen en la fecha de corte.",
+    name: "Recordatorios · Vencimientos del día",
+  },
+  include_reminder_overdue: {
+    description: "Incluye planes cuya fecha límite ya venció.",
+    name: "Recordatorios · Planes vencidos",
+  },
+  include_reminder_upcoming: {
+    description: "Incluye planes dentro de la ventana próxima por rol.",
+    name: "Recordatorios · Próximos vencimientos",
+  },
+};
 
 const paginationSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -348,7 +373,7 @@ automaticJobsRouter.get(
   "/automatic-jobs/rules",
   requireSystemOperator,
   asyncHandler(async (_request, response) => {
-    const keys = Object.keys(DEADLINE_MONITOR_PARAMETER_DEFAULTS);
+    const keys = Object.keys(AUTOMATIC_NOTIFICATION_RULE_DEFAULTS);
     const records = await prisma.systemParameter.findMany({
       orderBy: { key: "asc" },
       select: {
@@ -363,7 +388,7 @@ automaticJobsRouter.get(
         value: true,
         valueType: true,
       },
-      where: { key: { in: keys } },
+      where: { deletedAt: null, key: { in: keys } },
     });
     const byKey = new Map(records.map((record) => [record.key, record]));
     sendSuccess(
@@ -371,35 +396,53 @@ automaticJobsRouter.get(
       keys.map((key) => ({
         ...(byKey.get(key) ?? {
           active: true,
-          description: null,
+          description: REMINDER_ALERT_RULE_METADATA[key]?.description ?? null,
           editable: true,
           group: "notificaciones_automaticas",
           id: null,
           key,
-          name: key.replaceAll("_", " "),
+          name:
+            REMINDER_ALERT_RULE_METADATA[key]?.name ?? key.replaceAll("_", " "),
           updatedAt: null,
           valueType:
-            typeof DEADLINE_MONITOR_PARAMETER_DEFAULTS[
-              key as keyof typeof DEADLINE_MONITOR_PARAMETER_DEFAULTS
+            typeof AUTOMATIC_NOTIFICATION_RULE_DEFAULTS[
+              key as keyof typeof AUTOMATIC_NOTIFICATION_RULE_DEFAULTS
             ] === "number"
               ? "number"
               : "boolean",
         }),
+        ...(REMINDER_ALERT_RULE_METADATA[key] ?? {}),
         defaultValue: String(
-          DEADLINE_MONITOR_PARAMETER_DEFAULTS[
-            key as keyof typeof DEADLINE_MONITOR_PARAMETER_DEFAULTS
+          AUTOMATIC_NOTIFICATION_RULE_DEFAULTS[
+            key as keyof typeof AUTOMATIC_NOTIFICATION_RULE_DEFAULTS
           ],
         ),
         value:
           byKey.get(key)?.value ??
           String(
-            DEADLINE_MONITOR_PARAMETER_DEFAULTS[
-              key as keyof typeof DEADLINE_MONITOR_PARAMETER_DEFAULTS
+            AUTOMATIC_NOTIFICATION_RULE_DEFAULTS[
+              key as keyof typeof AUTOMATIC_NOTIFICATION_RULE_DEFAULTS
             ],
           ),
         updatedAt: byKey.get(key)?.updatedAt?.toISOString() ?? null,
       })),
     );
+  }),
+);
+
+automaticJobsRouter.get(
+  "/automatic-jobs/deadline-reminders/email-preview",
+  requireSystemOperator,
+  asyncHandler(async (_request, response) => {
+    const rendered = await emailService.renderTemplate(
+      "deadlineReminder",
+      emailTemplateDefinitions.deadlineReminder.sampleVariables,
+    );
+    sendSuccess(response, {
+      html: rendered.html,
+      subject: rendered.subject,
+      template: "deadlineReminder",
+    });
   }),
 );
 
@@ -409,7 +452,7 @@ automaticJobsRouter.patch(
   asyncHandler(async (request, response) => {
     const key =
       typeof request.params.key === "string" ? request.params.key : "";
-    if (!(key in DEADLINE_MONITOR_PARAMETER_DEFAULTS)) {
+    if (!(key in AUTOMATIC_NOTIFICATION_RULE_DEFAULTS)) {
       throw new AppError("Unknown automatic notification rule.", 404);
     }
     const payload = ruleUpdateSchema.parse(request.body);
@@ -419,22 +462,25 @@ automaticJobsRouter.patch(
     });
     const current = previous
       ? await prisma.systemParameter.update({
-          data: { value: payload.value, active: true },
+          data: { deletedAt: null, value: payload.value, active: true },
           where: { id: previous.id },
         })
       : await prisma.systemParameter.create({
           data: {
             active: true,
             description:
+              REMINDER_ALERT_RULE_METADATA[key]?.description ??
               "Regla de notificaciones automáticas del monitor de vencimientos.",
             editable: true,
             group: "notificaciones_automaticas",
             key,
-            name: key.replaceAll("_", " "),
+            name:
+              REMINDER_ALERT_RULE_METADATA[key]?.name ??
+              key.replaceAll("_", " "),
             value: payload.value,
             valueType:
-              typeof DEADLINE_MONITOR_PARAMETER_DEFAULTS[
-                key as keyof typeof DEADLINE_MONITOR_PARAMETER_DEFAULTS
+              typeof AUTOMATIC_NOTIFICATION_RULE_DEFAULTS[
+                key as keyof typeof AUTOMATIC_NOTIFICATION_RULE_DEFAULTS
               ] === "number"
                 ? "number"
                 : "boolean",
