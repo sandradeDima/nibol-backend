@@ -62,8 +62,13 @@ const excelCell = (value: unknown, reference: string, style = 0): string => {
   return `<c r="${reference}" s="${style}" t="inlineStr"><is><t xml:space="preserve">${escapeXml(text)}</t></is></c>`;
 };
 
-const excelRow = (values: unknown[], rowNumber: number, styles?: number[]) =>
-  `<row r="${rowNumber}">${values
+const excelRow = (
+  values: unknown[],
+  rowNumber: number,
+  styles?: number[],
+  height?: number,
+) =>
+  `<row r="${rowNumber}"${height ? ` ht="${height}" customHeight="1"` : ""}>${values
     .map((value, column) =>
       excelCell(
         value,
@@ -78,8 +83,10 @@ const worksheet = (
   options: {
     autoFilter?: string;
     drawing?: boolean;
+    freezeColumns?: number;
     freezeRows?: number;
     mergeCells?: string[];
+    rowHeights?: number[];
     rowStyles?: (row: unknown[], index: number) => number[] | undefined;
     widths?: number[];
   } = {},
@@ -91,11 +98,16 @@ const worksheet = (
     )
     .join("");
   return `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+    <sheetViews><sheetView workbookViewId="0">${options.freezeRows || options.freezeColumns ? `<pane ${options.freezeColumns ? `xSplit="${options.freezeColumns}" ` : ""}${options.freezeRows ? `ySplit="${options.freezeRows}" ` : ""}topLeftCell="${columnName(options.freezeColumns ?? 0)}${(options.freezeRows ?? 0) + 1}" activePane="${options.freezeColumns && options.freezeRows ? "bottomRight" : options.freezeColumns ? "topRight" : "bottomLeft"}" state="frozen"/>` : ""}</sheetView></sheetViews>
     ${cols ? `<cols>${cols}</cols>` : ""}
-    <sheetViews><sheetView workbookViewId="0">${options.freezeRows ? `<pane ySplit="${options.freezeRows}" topLeftCell="A${options.freezeRows + 1}" activePane="bottomLeft" state="frozen"/>` : ""}</sheetView></sheetViews>
     <sheetData>${rows
       .map((row, index) =>
-        excelRow(row, index + 1, options.rowStyles?.(row, index)),
+        excelRow(
+          row,
+          index + 1,
+          options.rowStyles?.(row, index),
+          options.rowHeights?.[index],
+        ),
       )
       .join("")}</sheetData>
     ${options.mergeCells?.length ? `<mergeCells count="${options.mergeCells.length}">${options.mergeCells.map((ref) => `<mergeCell ref="${ref}"/>`).join("")}</mergeCells>` : ""}
@@ -415,6 +427,103 @@ export const buildExcelWorkbook = (input: ReportExportInput): Buffer => {
     );
   }
   return zip(entries);
+};
+
+export const observationDetailHeaders = [
+  "Informe de Auditoría",
+  "Título de informe",
+  "Fecha de informe",
+  "Número de observación",
+  "Observación principal",
+  "Título de observación",
+  "Observación detallada",
+  "Recomendación",
+  "Riesgos asociados",
+  "Nivel de riesgo",
+  "Fecha compromiso (vencimiento)",
+  "Área",
+  "Dueño de proceso",
+  "Responsable de área",
+  "Plan de acción",
+  "Ejecutor (reporte)",
+  "Fecha compromiso (plan de acción)",
+  "N° reprogramacion",
+  "Fecha reprogramación",
+  "Comentario 1",
+  "Comentario 2",
+  "Estado según avance",
+  "Estado según plazo",
+  "Estado general OT",
+] as const;
+
+export const buildObservationDetailWorkbook = (input: {
+  filters: Record<string, unknown>;
+  generatedAt: string;
+  reportName: string;
+  rows: unknown[][];
+}): Buffer => {
+  const groups = Array.from(
+    { length: observationDetailHeaders.length },
+    () => "",
+  );
+  for (const [index, label] of [
+    [0, "Informe"],
+    [3, "Observación"],
+    [14, "Plan de acción"],
+    [17, "Reprogramación"],
+    [19, "Comentario plan de acción"],
+    [21, "Estados"],
+  ] as const)
+    groups[index] = label;
+  const details = [groups, [...observationDetailHeaders], ...input.rows];
+  const filters = [
+    [input.reportName, ""],
+    ["Generado", input.generatedAt],
+    ...Object.entries(input.filters).map(([key, value]) => [
+      key,
+      stringifyCell(value),
+    ]),
+  ];
+  return zip([
+    { data: contentTypes(false), name: "[Content_Types].xml" },
+    {
+      data: '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
+      name: "_rels/.rels",
+    },
+    {
+      data: workbookXml
+        .replace('name="RESUMEN"', 'name="OBSERVACIONES"')
+        .replace('name="DATOS"', 'name="FILTROS"'),
+      name: "xl/workbook.xml",
+    },
+    { data: workbookRels, name: "xl/_rels/workbook.xml.rels" },
+    { data: stylesXml, name: "xl/styles.xml" },
+    {
+      data: worksheet(details, {
+        autoFilter: `A2:X${details.length}`,
+        freezeColumns: 3,
+        freezeRows: 2,
+        mergeCells: ["A1:C1", "D1:N1", "O1:Q1", "R1:S1", "T1:U1", "V1:X1"],
+        rowHeights: [24, 52],
+        rowStyles: (_row, index) =>
+          Array(24).fill(index === 0 ? 1 : index === 1 ? 2 : 5),
+        widths: observationDetailHeaders.map((header, index) =>
+          [4, 5, 6, 7, 8, 14, 19, 20].includes(index)
+            ? 42
+            : Math.min(35, Math.max(18, header.length + 3)),
+        ),
+      }),
+      name: "xl/worksheets/sheet1.xml",
+    },
+    {
+      data: worksheet(filters, {
+        mergeCells: ["A1:B1"],
+        rowStyles: (_row, index) => [index === 0 ? 1 : 3, index === 0 ? 1 : 3],
+        widths: [32, 70],
+      }),
+      name: "xl/worksheets/sheet2.xml",
+    },
+  ]);
 };
 
 const pdfText = (value: string): string =>

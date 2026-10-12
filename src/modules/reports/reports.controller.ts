@@ -5,6 +5,7 @@ import { AppError } from "../../utils/app-error.js";
 import { sendPaginated, sendSuccess } from "../../utils/response.js";
 import {
   buildExcelWorkbook,
+  buildObservationDetailWorkbook,
   buildReportPdf,
   buildSimplePdf,
 } from "./reports.exports.js";
@@ -201,6 +202,23 @@ export const reportsController = {
         }),
         "application/pdf",
         "reporte-nibol.pdf",
+      );
+      return;
+    }
+
+    if (query.type === "OBSERVATIONS") {
+      sendFile(
+        response,
+        buildObservationDetailWorkbook({
+          filters,
+          generatedAt: report.generatedAt,
+          reportName: report.reportName,
+          rows: report.rows.map((row) =>
+            report.columns.map((column) => row[column]),
+          ),
+        }),
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "observaciones-detalle.xlsx",
       );
       return;
     }

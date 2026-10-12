@@ -52,6 +52,7 @@ import type {
   ReportPreviewQuery,
   ReportQuery,
 } from "./reports.validators.js";
+import { observationDetailHeaders } from "./reports.exports.js";
 
 const reportsPrisma = prisma as typeof prisma & {
   area: any;
@@ -2045,18 +2046,207 @@ const getDashboard = async (
   };
 };
 
-const toObservationFlatRow = (
-  row: ReportObservationRow,
-): Record<string, unknown> => ({
-  Área: row.area.name,
-  Avance: `${row.progressPercent}%`,
-  Código: row.code,
-  Estado: row.effectiveStatus.name,
-  Fecha: row.dueDate,
-  Observación: row.title,
-  Responsable: row.responsibleUser?.name ?? "Sin asignar",
-  Riesgo: row.riskLevel.name,
-});
+export const mapObservationDetailRows = (
+  observations: any[],
+  query: ReportPreviewQuery,
+  now: Date,
+  timeZone: string,
+): Array<Record<string, unknown>> =>
+  observations.flatMap((observation: any) => {
+    const base = {
+      "Informe de Auditoría": observation.auditReport.reportNumber,
+      "Título de informe": observation.auditReport.title,
+      "Fecha de informe": observation.auditReport.reportDate.toISOString(),
+      "Número de observación": `${observation.auditReport.reportNumber}-${String(observation.observationNumber).padStart(2, "0")}`,
+      "Observación principal": observation.mainObservation.name,
+      "Título de observación": observation.title,
+      "Observación detallada": observation.description,
+      Recomendación: observation.auditRecommendation,
+      "Riesgos asociados": observation.risks
+        .map((item: any) => `▪ ${item.risk.name}`)
+        .join("\n"),
+      "Nivel de riesgo": observation.riskLevel.name,
+      "Fecha compromiso (vencimiento)":
+        observation.currentDueDate.toISOString(),
+      "Estado general OT": observation.status.name,
+    };
+    const plans = observation.actionPlans.filter((plan: any) => {
+      const area = plan.observationArea;
+      const deadline = getActionPlanDeadlineStatus(plan, now, timeZone);
+      return (
+        (!query.areaId || area.area.id === query.areaId) &&
+        (!query.areaResponsibleId?.length ||
+          query.areaResponsibleId.includes(area.areaResponsible.id)) &&
+        (!query.processOwnerId?.length ||
+          query.processOwnerId.includes(area.processOwner.id)) &&
+        (!query.executorId?.length ||
+          query.executorId.includes(plan.responsibleUser.id)) &&
+        (!query.responsibleUserId ||
+          [
+            plan.responsibleUser.id,
+            area.areaResponsible.id,
+            area.processOwner.id,
+          ].includes(query.responsibleUserId)) &&
+        (!query.progressStatus || plan.status === query.progressStatus) &&
+        (!query.deadlineStatus || deadline === query.deadlineStatus) &&
+        (!query.deadlineStatuses?.length ||
+          query.deadlineStatuses.includes(deadline)) &&
+        (query.reprogrammed === undefined ||
+          plan.deadlineExtensionRequests.some(isApprovedDeadlineExtension) ===
+            query.reprogrammed)
+      );
+    });
+    const planRows = plans.map((plan: any) => {
+      const extension = plan.deadlineExtensionRequests.find(
+        isApprovedDeadlineExtension,
+      );
+      const area = plan.observationArea;
+      const progress = getOfficialActionPlanProgress(plan.status);
+      return {
+        ...base,
+        Área: area.area.name,
+        "Dueño de proceso": area.processOwner.name,
+        "Responsable de área": area.areaResponsible.name,
+        "Plan de acción": plan.description,
+        "Ejecutor (reporte)": plan.responsibleUser.name,
+        "Fecha compromiso (plan de acción)":
+          getEffectiveActionPlanDueDate(plan).toISOString(),
+        "N° reprogramacion": extension ? 1 : "",
+        "Fecha reprogramación": extension?.proposedDueDate.toISOString() ?? "",
+        "Comentario 1": plan.comments[0]?.body ?? "",
+        "Comentario 2": plan.comments[1]?.body ?? "",
+        "Estado según avance": `${progress.label} (${progress.code})`,
+        "Estado según plazo":
+          getActionPlanDeadlineStatus(plan, now, timeZone) === "VENCIDO"
+            ? "Vencido"
+            : "Vigente",
+      };
+    });
+    if (planRows.length) return planRows;
+    if (
+      query.progressStatus ||
+      query.deadlineStatus ||
+      query.deadlineStatuses?.length ||
+      query.reprogrammed !== undefined ||
+      query.executorId?.length
+    )
+      return [];
+    const areaRows = observation.areaAssignments
+      .filter(
+        (area: any) =>
+          (!query.areaId || area.area.id === query.areaId) &&
+          (!query.areaResponsibleId?.length ||
+            query.areaResponsibleId.includes(area.areaResponsible.id)) &&
+          (!query.processOwnerId?.length ||
+            query.processOwnerId.includes(area.processOwner.id)) &&
+          (!query.responsibleUserId ||
+            [area.areaResponsible.id, area.processOwner.id].includes(
+              query.responsibleUserId,
+            )),
+      )
+      .map((area: any) => ({
+        ...base,
+        Área: area.area.name,
+        "Dueño de proceso": area.processOwner.name,
+        "Responsable de área": area.areaResponsible.name,
+      }));
+    return areaRows.length ||
+      query.areaId ||
+      query.areaResponsibleId?.length ||
+      query.processOwnerId?.length ||
+      query.responsibleUserId
+      ? areaRows
+      : [base];
+  });
+
+const getObservationDetailRows = async (
+  query: ReportPreviewQuery,
+  access: AuthorizationSummary,
+): Promise<{
+  columns: string[];
+  rows: Array<Record<string, unknown>>;
+  total: number;
+}> => {
+  const where = buildObservationWhere(query, access);
+  const total = await reportsPrisma.observation.count({ where });
+  // shortcut: cap interactive detail at 5,000 observations; paginate when larger exports are required.
+  if (total > 5000)
+    throw new AppError(
+      "El reporte supera 5.000 observaciones. Aplique filtros para reducirlo.",
+      413,
+    );
+  const observations = await reportsPrisma.observation.findMany({
+    orderBy: [
+      { auditReport: { reportNumber: "asc" } },
+      { observationNumber: "asc" },
+    ],
+    select: {
+      actionPlans: {
+        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+        select: {
+          comments: {
+            orderBy: { createdAt: "asc" },
+            select: { body: true },
+            where: {
+              deletedAt: null,
+              ...(hasGlobalBusinessAccess(access)
+                ? {}
+                : { visibility: { in: ["AREA_VISIBLE", "SYSTEM"] } }),
+            },
+          },
+          currentDueDate: true,
+          deadlineExtensionRequests: {
+            orderBy: { updatedAt: "desc" },
+            select: { proposedDueDate: true, status: true },
+            where: { deletedAt: null },
+          },
+          description: true,
+          observationArea: {
+            select: {
+              area: { select: areaSummarySelect },
+              areaResponsible: { select: userSummarySelect },
+              processOwner: { select: userSummarySelect },
+            },
+          },
+          responsibleUser: { select: userSummarySelect },
+          status: true,
+        },
+        where: buildActionPlanScopeWhere(access),
+      },
+      areaAssignments: {
+        orderBy: { area: { name: "asc" } },
+        select: {
+          area: { select: areaSummarySelect },
+          areaResponsible: { select: userSummarySelect },
+          processOwner: { select: userSummarySelect },
+        },
+        where: buildObservationAreaScopeWhere(access),
+      },
+      auditRecommendation: true,
+      auditReport: {
+        select: { reportDate: true, reportNumber: true, title: true },
+      },
+      currentDueDate: true,
+      description: true,
+      mainObservation: { select: { name: true } },
+      observationNumber: true,
+      riskLevel: { select: { name: true } },
+      risks: {
+        orderBy: { risk: { name: "asc" } },
+        select: { risk: { select: { name: true } } },
+      },
+      status: { select: { name: true } },
+      title: true,
+    },
+    where,
+  });
+  const timeZone = await getReportingTimeZone();
+  const now = query.cutoffDate
+    ? getCutoffAsOfDate(query.cutoffDate, timeZone)
+    : new Date();
+  const rows = mapObservationDetailRows(observations, query, now, timeZone);
+  return { columns: [...observationDetailHeaders], rows, total: rows.length };
+};
 
 // Observation-grain rows used by the dedicated report generator.
 const getReportRows = async (
@@ -2295,21 +2485,7 @@ const getReportRows = async (
       };
     case "OBSERVATIONS":
     default: {
-      const result = await getObservationRows(query, access, { limit: 5000 });
-      return {
-        columns: [
-          "Código",
-          "Observación",
-          "Área",
-          "Responsable",
-          "Riesgo",
-          "Estado",
-          "Fecha",
-          "Avance",
-        ],
-        rows: result.data.map(toObservationFlatRow),
-        total: result.total,
-      };
+      return getObservationDetailRows(query, access);
     }
   }
 };
@@ -2854,6 +3030,7 @@ export const reportsService = {
     query: ReportPreviewQuery,
     access: AuthorizationSummary,
   ): Promise<ReportPreviewData> {
+    assertReportFilterAccess(query, access);
     const dashboard =
       query.type === "ACTION_PLANS"
         ? await getActionPlanDashboard(query, access)

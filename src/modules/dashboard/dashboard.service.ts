@@ -599,8 +599,16 @@ const operationalAttention = (
     });
 
 const roleDashboardRoles = new Set<RoleDashboardRole>([
+  "AUDITOR",
+  "AUDIT_CHIEF",
   "AREA_RESPONSIBLE",
   "EXECUTOR",
+  "PROCESS_OWNER",
+]);
+
+const rolesWithResponsibleHierarchy = new Set<RoleDashboardRole>([
+  "AUDITOR",
+  "AUDIT_CHIEF",
   "PROCESS_OWNER",
 ]);
 
@@ -622,7 +630,8 @@ const roleObservationAreaWhere = (
 ): Prisma.ObservationAreaWhereInput => ({
   ...buildObservationAreaScopeWhere(access),
   ...(query.areaId ? { areaId: query.areaId } : {}),
-  ...(access.roleCode === "PROCESS_OWNER" && query.areaResponsibleUserId?.length
+  ...(rolesWithResponsibleHierarchy.has(access.roleCode as RoleDashboardRole) &&
+  query.areaResponsibleUserId?.length
     ? { areaResponsibleUserId: { in: query.areaResponsibleUserId } }
     : {}),
   ...(access.roleCode !== "EXECUTOR" && query.executorId?.length
@@ -915,7 +924,7 @@ export const buildRoleDashboardHierarchy = (
       addToRoleAggregate(area.aggregate, record);
       const plans = assignment.actionPlans;
 
-      if (roleCode === "PROCESS_OWNER") {
+      if (rolesWithResponsibleHierarchy.has(roleCode)) {
         const responsible = getRoleChild(
           area,
           assignment.areaResponsible.id,
@@ -966,7 +975,7 @@ export const buildRoleDashboardHierarchy = (
     .sort((left, right) => left.name.localeCompare(right.name, "es"))
     .map((area) => ({
       ...roleAggregateValues(area.aggregate),
-      ...(roleCode === "PROCESS_OWNER"
+      ...(rolesWithResponsibleHierarchy.has(roleCode)
         ? { responsibles: sortedRoleChildren(area).map(toResponsible) }
         : { executors: sortedRoleChildren(area).map(toExecutor) }),
       id: area.id,
@@ -1067,7 +1076,7 @@ export const dashboardService = {
     const roleQuery = { ...query, search: query.search ?? "" };
     const dueSoonDays = await reminderDays();
     if (
-      (roleCode !== "PROCESS_OWNER" &&
+      (!rolesWithResponsibleHierarchy.has(roleCode) &&
         roleQuery.areaResponsibleUserId?.length) ||
       (roleCode === "EXECUTOR" && roleQuery.executorId?.length)
     )
@@ -1095,12 +1104,11 @@ export const dashboardService = {
       (assignment) =>
         !roleQuery.areaId || assignment.area.id === roleQuery.areaId,
     );
-    const responsibles =
-      roleCode === "PROCESS_OWNER"
-        ? uniqueRoleOptions(
-            areaAssignments.map(({ areaResponsible }) => areaResponsible),
-          )
-        : [];
+    const responsibles = rolesWithResponsibleHierarchy.has(roleCode)
+      ? uniqueRoleOptions(
+          areaAssignments.map(({ areaResponsible }) => areaResponsible),
+        )
+      : [];
     if (
       roleQuery.areaResponsibleUserId?.some(
         (selectedId) =>

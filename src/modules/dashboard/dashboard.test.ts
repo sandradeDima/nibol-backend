@@ -76,6 +76,12 @@ test("role dashboard keeps responsible and executor hierarchy role-specific", ()
     "executor-1",
   );
 
+  for (const role of ["AUDITOR", "AUDIT_CHIEF"] as const) {
+    const auditArea = buildRoleDashboardHierarchy([record], role)[0]!;
+    assert.equal(auditArea.responsibles?.[0]?.id, "responsible-1");
+    assert.equal(auditArea.responsibles?.[0]?.executors[0]?.id, "executor-1");
+  }
+
   const areaResponsibleArea = buildRoleDashboardHierarchy(
     [record],
     "AREA_RESPONSIBLE",

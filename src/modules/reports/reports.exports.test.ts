@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { inflateRawSync } from "node:zlib";
 
-import { buildExcelWorkbook, buildReportPdf } from "./reports.exports.js";
+import {
+  buildExcelWorkbook,
+  buildObservationDetailWorkbook,
+  buildReportPdf,
+  observationDetailHeaders,
+} from "./reports.exports.js";
 
 const charts = {
   areaDistribution: [{ key: "area-1", label: "Finanzas", value: 2 }],
@@ -86,4 +92,38 @@ test("genera un XLSX real y un PDF legible con el resumen del corte", () => {
   assert.match(pdf.toString("latin1"), /Fecha de corte/);
   assert.match(pdf.toString("latin1"), /17\/09\/2026/);
   assert.match(pdf.toString("latin1"), /Riesgo/);
+});
+
+test("el detalle conserva los 24 encabezados agrupados y registra los filtros", () => {
+  const values = Array(24).fill("");
+  values[0] = "AI-01-2022";
+  values[14] = "Acción filtrada";
+  const workbook = buildObservationDetailWorkbook({
+    filters: { Área: "Importaciones" },
+    generatedAt: "2026-10-12T12:00:00.000Z",
+    reportName: "Observaciones",
+    rows: [values],
+  });
+  const read = (name: string) => {
+    let offset = 0;
+    while (workbook.readUInt32LE(offset) === 0x04034b50) {
+      const size = workbook.readUInt32LE(offset + 18);
+      const start = offset + 30 + workbook.readUInt16LE(offset + 26);
+      if (workbook.toString("utf8", offset + 30, start) === name)
+        return inflateRawSync(
+          workbook.subarray(start, start + size),
+        ).toString();
+      offset = start + size;
+    }
+    throw new Error(`Missing ${name}`);
+  };
+  const data = read("xl/worksheets/sheet1.xml");
+  assert.match(read("xl/workbook.xml"), /name="OBSERVACIONES"/);
+  assert.match(data, /mergeCell ref="D1:N1"/);
+  assert.match(data, /autoFilter ref="A2:X3"/);
+  assert.match(data, /ySplit="2"/);
+  for (const header of observationDetailHeaders)
+    assert.ok(data.includes(header.replaceAll("&", "&amp;")), header);
+  assert.match(data, /Acción filtrada/);
+  assert.match(read("xl/worksheets/sheet2.xml"), /Importaciones/);
 });
