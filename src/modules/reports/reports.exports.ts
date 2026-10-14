@@ -111,8 +111,8 @@ const worksheet = (
         ),
       )
       .join("")}</sheetData>
-    ${options.mergeCells?.length ? `<mergeCells count="${options.mergeCells.length}">${options.mergeCells.map((ref) => `<mergeCell ref="${ref}"/>`).join("")}</mergeCells>` : ""}
     ${options.autoFilter ? `<autoFilter ref="${options.autoFilter}"/>` : ""}
+    ${options.mergeCells?.length ? `<mergeCells count="${options.mergeCells.length}">${options.mergeCells.map((ref) => `<mergeCell ref="${ref}"/>`).join("")}</mergeCells>` : ""}
   </worksheet>`;
 };
 
