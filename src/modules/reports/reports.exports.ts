@@ -14,6 +14,7 @@ type ReportExportInput = {
 
 const escapeXml = (value: unknown): string =>
   String(value ?? "")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
@@ -375,6 +376,44 @@ export const observationDetailHeaders = [
   "Estado general OT",
 ] as const;
 
+const observationDetailPlanColumns = [
+  11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+];
+
+const observationDetailPlanValue = (
+  rows: unknown[][],
+  column: number,
+): string =>
+  rows
+    .map((row, index) => {
+      const value = row[column];
+      if (value === null || value === undefined || value === "") return "";
+      let text = stringifyCell(value);
+      if ((column === 16 || column === 18) && isIsoDate(text)) {
+        const [year, month, day] = text.slice(0, 10).split("-");
+        text = `${day}/${month}/${year}`;
+      }
+      return `${columnName(index)}. ${text}`;
+    })
+    .filter(Boolean)
+    .join("\n");
+
+const groupObservationDetailRows = (rows: unknown[][]): unknown[][] => {
+  const groups = new Map<string, unknown[][]>();
+  for (const row of rows) {
+    const key = `${stringifyCell(row[0])}\u0000${stringifyCell(row[3])}`;
+    const group = groups.get(key) ?? [];
+    group.push(row);
+    groups.set(key, group);
+  }
+  return Array.from(groups.values(), (group) => {
+    const observation = [...group[0]!];
+    for (const column of observationDetailPlanColumns)
+      observation[column] = observationDetailPlanValue(group, column);
+    return observation;
+  });
+};
+
 const observationDetailStylesXml = `<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <numFmts count="1"><numFmt numFmtId="164" formatCode="dd/mm/yyyy;@"/></numFmts>
   <fonts count="2"><font><sz val="10"/><color rgb="FF000000"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font></fonts>
@@ -433,7 +472,11 @@ export const buildObservationDetailWorkbook = (input: {
     [21, "Estados"],
   ] as const)
     groups[index] = label;
-  const details = [groups, [...observationDetailHeaders], ...input.rows];
+  const details = [
+    groups,
+    [...observationDetailHeaders],
+    ...groupObservationDetailRows(input.rows),
+  ];
   const filters = [
     [input.reportName, ""],
     ["Generado", input.generatedAt],
@@ -450,7 +493,7 @@ export const buildObservationDetailWorkbook = (input: {
     },
     {
       data: workbookXml
-        .replace('name="RESUMEN"', 'name="OBSERVACIONES"')
+        .replace('name="RESUMEN"', 'name="DATA"')
         .replace('name="DATOS"', 'name="FILTROS"'),
       name: "xl/workbook.xml",
     },

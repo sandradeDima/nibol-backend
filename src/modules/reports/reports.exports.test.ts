@@ -138,7 +138,7 @@ test("el detalle conserva los 24 encabezados agrupados y registra los filtros", 
     throw new Error(`Missing ${name}`);
   };
   const data = read("xl/worksheets/sheet1.xml");
-  assert.match(read("xl/workbook.xml"), /name="OBSERVACIONES"/);
+  assert.match(read("xl/workbook.xml"), /name="DATA"/);
   assert.match(data, /mergeCell ref="D1:N1"/);
   assert.match(data, /autoFilter ref="A2:X3"/);
   assert.match(data, /ySplit="2"/);
