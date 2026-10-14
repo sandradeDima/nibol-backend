@@ -85,6 +85,24 @@ test("genera un XLSX real y un PDF legible con el resumen del corte", () => {
   const workbook = buildExcelWorkbook(input);
   assert.equal(workbook.subarray(0, 2).toString("ascii"), "PK");
   assert.ok(workbook.length > 1_000);
+  const readEntry = (name: string) => {
+    let offset = 0;
+    while (workbook.readUInt32LE(offset) === 0x04034b50) {
+      const size = workbook.readUInt32LE(offset + 18);
+      const start = offset + 30 + workbook.readUInt16LE(offset + 26);
+      if (workbook.toString("utf8", offset + 30, start) === name)
+        return inflateRawSync(
+          workbook.subarray(start, start + size),
+        ).toString();
+      offset = start + size;
+    }
+    throw new Error(`Missing ${name}`);
+  };
+  const summarySheet = readEntry("xl/worksheets/sheet1.xml");
+  assert.match(summarySheet, /Estado del plan de acción/);
+  assert.match(summarySheet, /No iniciado/);
+  assert.doesNotMatch(summarySheet, /<drawing/);
+  assert.equal(workbook.includes(Buffer.from("xl/drawings/")), false);
 
   const pdf = buildReportPdf(input);
   assert.match(pdf.toString("latin1"), /^%PDF-1\.4/);
@@ -92,6 +110,7 @@ test("genera un XLSX real y un PDF legible con el resumen del corte", () => {
   assert.match(pdf.toString("latin1"), /Fecha de corte/);
   assert.match(pdf.toString("latin1"), /17\/09\/2026/);
   assert.match(pdf.toString("latin1"), /Riesgo/);
+  assert.match(pdf.toString("latin1"), /0\.843 0\.098 0\.125 rg/);
 });
 
 test("el detalle conserva los 24 encabezados agrupados y registra los filtros", () => {

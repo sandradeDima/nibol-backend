@@ -89,6 +89,30 @@ test("Case C: role duplication for one person produces one group", () => {
   assert.equal(group?.reports[0]?.observations.length, 1);
 });
 
+test("area responsible, process owner, and executor each receive the assignment", () => {
+  const owner = user("owner", "owner@example.com");
+  const responsible = user("responsible", "responsible@example.com");
+  const executor = user("executor", "executor@example.com");
+  const groups = buildObservationAssignmentGroups(
+    [
+      record("observation-1", 1, [
+        {
+          ...assignment("Finanzas", owner, responsible),
+          actionPlans: [{ responsibleUser: executor }],
+        },
+      ]),
+    ],
+    "Alto: 90 días",
+  );
+  assert.deepEqual(
+    groups.map((group) => group.email),
+    ["executor@example.com", "owner@example.com", "responsible@example.com"],
+  );
+  assert.ok(
+    groups.every((group) => group.observationIds[0] === "observation-1"),
+  );
+});
+
 test("Case D: the same person across areas produces one group", () => {
   const owner = user("owner", "owner@example.com");
   const [group] = buildObservationAssignmentGroups(

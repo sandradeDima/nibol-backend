@@ -123,7 +123,7 @@ export const deadlineReminderEmailTemplate: EmailTemplateDefinition<"deadlineRem
         )
         .join("");
       const contentHtml = `
-      <div style="background:#c91000;color:#fff;font-size:14px;font-weight:700;line-height:1.3;margin:0 0 24px;padding:7px 10px;text-align:center;">Responsable de área / Dueño de proceso / Ejecutor</div>
+      <div style="background:#c91000;color:#fff;font-size:14px;font-weight:700;line-height:1.3;margin:0 0 24px;padding:7px 10px;text-align:center;">${escapeHtml(variables.recipientRole)}</div>
       <p style="margin:0 0 20px;">Buenas tardes estimados:</p>
       <p style="margin:0 0 20px;">A la fecha, las siguientes observaciones permanecen pendientes de cierre:</p>
       ${areaSections}
@@ -137,7 +137,7 @@ export const deadlineReminderEmailTemplate: EmailTemplateDefinition<"deadlineRem
         }),
         subject: variables.subject,
         text: joinTextBlocks(
-          "Responsable de área / Dueño de proceso / Ejecutor",
+          variables.recipientRole,
           "Buenas tardes estimados:",
           "A la fecha, las siguientes observaciones permanecen pendientes de cierre:",
           ...areas.map(
@@ -151,6 +151,7 @@ export const deadlineReminderEmailTemplate: EmailTemplateDefinition<"deadlineRem
     },
     sampleVariables: {
       appName: "NIBOL Bolivia",
+      recipientRole: "Responsable de área",
       cutoffDate: "15 de septiembre de 2026",
       dueToday: 1,
       overdue: 1,

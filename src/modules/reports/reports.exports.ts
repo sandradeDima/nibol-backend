@@ -82,7 +82,6 @@ const worksheet = (
   rows: unknown[][],
   options: {
     autoFilter?: string;
-    drawing?: boolean;
     freezeRows?: number;
     mergeCells?: string[];
     rowHeights?: number[];
@@ -113,21 +112,17 @@ const worksheet = (
       .join("")}</sheetData>
     ${options.mergeCells?.length ? `<mergeCells count="${options.mergeCells.length}">${options.mergeCells.map((ref) => `<mergeCell ref="${ref}"/>`).join("")}</mergeCells>` : ""}
     ${options.autoFilter ? `<autoFilter ref="${options.autoFilter}"/>` : ""}
-    ${options.drawing ? '<drawing r:id="rId1"/>' : ""}
   </worksheet>`;
 };
 
-const contentTypes = (
-  withDrawing: boolean,
-): string => `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+const contentTypes =
+  (): string => `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
-  ${withDrawing ? '<Default Extension="svg" ContentType="image/svg+xml"/>' : ""}
   <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
   <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
   <Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
   <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
-  ${withDrawing ? '<Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>' : ""}
 </Types>`;
 
 const workbookXml = `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
@@ -157,8 +152,6 @@ const stylesXml = `<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsh
   </cellXfs>
 </styleSheet>`;
 
-const svgText = (value: unknown): string => escapeXml(stringifyCell(value));
-
 const colorFor = (
   item: { colorToken?: string | null; key: string },
   index: number,
@@ -166,46 +159,16 @@ const colorFor = (
   const token = item.colorToken?.toLowerCase();
   if (token?.startsWith("#")) return token;
   if (["high", "alto", "critical", "critico", "crítico"].includes(token ?? ""))
-    return "#D92D20";
+    return "#D71920";
   if (["medium", "medio", "moderate", "moderado"].includes(token ?? ""))
-    return "#DC6803";
-  if (["low", "bajo"].includes(token ?? "")) return "#027A48";
-  if (["NOT_STARTED", "NI"].includes(item.key)) return "#FACC15";
-  if (["STARTED", "I"].includes(item.key)) return "#0EA5E9";
-  if (["WITH_PROGRESS", "CA"].includes(item.key)) return "#F59E0B";
-  if (["CONCLUDED", "CO"].includes(item.key)) return "#16A34A";
-  if (["VENCIDO", "vencidos", "OVERDUE"].includes(item.key)) return "#D92D20";
-  return ["#0B7285", "#2563EB", "#7C3AED", "#64748B", "#B45309"][index % 5]!;
-};
-
-const svgChart = (
-  title: string,
-  items: ReportDashboardData["charts"]["riskDistribution"],
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-): string => {
-  const visible = items.slice(0, 6);
-  const max = Math.max(...visible.map((item) => item.value), 1);
-  const barWidth = width - 190;
-  return `<g><rect x="${x}" y="${y}" width="${width}" height="${height}" rx="12" fill="#F8FAFC" stroke="#D7E0EA"/>
-    <text x="${x + 22}" y="${y + 32}" font-family="Aptos,Arial" font-size="17" font-weight="700" fill="#102A43">${svgText(title)}</text>
-    ${
-      visible.length
-        ? visible
-            .map((item, index) => {
-              const rowY = y + 64 + index * 38;
-              const label =
-                item.label.length > 24
-                  ? `${item.label.slice(0, 23)}…`
-                  : item.label;
-              return `<text x="${x + 22}" y="${rowY + 13}" font-family="Aptos,Arial" font-size="12" fill="#334155">${svgText(label)}</text><rect x="${x + 178}" y="${rowY}" width="${barWidth}" height="18" rx="9" fill="#E2E8F0"/><rect x="${x + 178}" y="${rowY}" width="${Math.max(5, (item.value / max) * barWidth)}" height="18" rx="9" fill="${colorFor(item, index)}"/><text x="${x + width - 22}" y="${rowY + 14}" text-anchor="end" font-family="Aptos,Arial" font-size="12" font-weight="700" fill="#102A43">${item.value}</text>`;
-            })
-            .join("")
-        : `<text x="${x + 22}" y="${y + 86}" font-family="Aptos,Arial" font-size="13" fill="#64748B">Sin datos para este corte</text>`
-    }
-  </g>`;
+    return "#B45309";
+  if (["low", "bajo"].includes(token ?? "")) return "#0F766E";
+  if (["NOT_STARTED", "NI"].includes(item.key)) return "#6B7280";
+  if (["STARTED", "I"].includes(item.key)) return "#1D4ED8";
+  if (["WITH_PROGRESS", "CA"].includes(item.key)) return "#B45309";
+  if (["CONCLUDED", "CO"].includes(item.key)) return "#0F766E";
+  if (["VENCIDO", "vencidos", "OVERDUE"].includes(item.key)) return "#D71920";
+  return ["#0F766E", "#1D4ED8", "#6D28D9", "#475569", "#B45309"][index % 5]!;
 };
 
 const summaryNumber = (
@@ -215,48 +178,6 @@ const summaryNumber = (
 ): number => {
   const value = summary?.[key];
   return typeof value === "number" ? value : fallback;
-};
-
-const buildDashboardSvg = (input: ReportExportInput): string => {
-  const total = summaryNumber(
-    input.summary,
-    "totalObservations",
-    input.rows.length,
-  );
-  const pending = summaryNumber(
-    input.summary,
-    "pendingObservations",
-    input.rows.length,
-  );
-  const closed = summaryNumber(input.summary, "closedObservations", 0);
-  const filterText = flattenFilters(input.filters);
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="860" viewBox="0 0 1200 860">
-    <rect width="1200" height="860" fill="#FFFFFF"/>
-    <rect width="1200" height="92" fill="#102A43"/><rect y="88" width="1200" height="4" fill="#C62828"/>
-    <text x="42" y="42" font-family="Aptos,Arial" font-size="25" font-weight="700" fill="#FFFFFF">${svgText(input.reportName)}</text>
-    <text x="42" y="69" font-family="Aptos,Arial" font-size="13" fill="#D7E0EA">Tablero - Avance de planes · ${svgText(input.generatedAt)}</text>
-    <text x="1158" y="54" text-anchor="end" font-family="Aptos,Arial" font-size="12" fill="#D7E0EA">NIBOL</text>
-    <text x="42" y="127" font-family="Aptos,Arial" font-size="12" fill="#64748B">Filtros: ${svgText(filterText.slice(0, 150))}</text>
-    ${[
-      ["Total observaciones", total, "#0B7285"],
-      ["Pendientes", pending, "#D97706"],
-      ["Cerradas", closed, "#16A34A"],
-      [
-        "Planes de acción",
-        summaryNumber(input.summary, "total", input.rows.length),
-        "#2563EB",
-      ],
-    ]
-      .map(([label, value, color], index) => {
-        const x = 42 + index * 278;
-        return `<g><rect x="${x}" y="152" width="260" height="96" rx="10" fill="#F8FAFC" stroke="#D7E0EA"/><rect x="${x}" y="152" width="6" height="96" rx="3" fill="${color}"/><text x="${x + 22}" y="181" font-family="Aptos,Arial" font-size="12" fill="#64748B">${svgText(label)}</text><text x="${x + 22}" y="224" font-family="Aptos Display,Arial" font-size="31" font-weight="700" fill="#102A43">${value}</text></g>`;
-      })
-      .join("")}
-    ${svgChart("Riesgo", input.charts?.riskDistribution ?? [], 42, 280, 544, 235)}
-    ${svgChart("Estado según plazo", input.charts?.deadlineDistribution ?? [], 614, 280, 544, 235)}
-    ${svgChart("Estado del plan de acción", input.charts?.progressDistribution ?? [], 42, 542, 544, 235)}
-    ${svgChart("Distribución por área", input.charts?.areaDistribution ?? [], 614, 542, 544, 235)}
-  </svg>`;
 };
 
 const crc32 = (data: Buffer): number => {
@@ -364,6 +285,22 @@ export const buildExcelWorkbook = (input: ReportExportInput): Buffer => {
     ["Filtros aplicados", filterText],
     ["", ""],
     ...summaryRows(input.summary, rows),
+    ...(
+      [
+        ["Riesgo", input.charts?.riskDistribution],
+        ["Estado según plazo", input.charts?.deadlineDistribution],
+        ["Estado del plan de acción", input.charts?.progressDistribution],
+        ["Distribución por área", input.charts?.areaDistribution],
+      ] as const
+    ).flatMap(([title, items]) =>
+      items?.length
+        ? [
+            ["", ""],
+            [title, "Cantidad"],
+            ...items.map((item) => [item.label, item.value]),
+          ]
+        : [],
+    ),
   ];
   const data = [
     columns,
@@ -372,9 +309,8 @@ export const buildExcelWorkbook = (input: ReportExportInput): Buffer => {
   const widths = columns.map((column) =>
     Math.min(34, Math.max(14, column.length + 4)),
   );
-  const svg = input.charts ? buildDashboardSvg(input) : undefined;
   const entries: Array<{ data: string | Buffer; name: string }> = [
-    { data: contentTypes(Boolean(svg)), name: "[Content_Types].xml" },
+    { data: contentTypes(), name: "[Content_Types].xml" },
     {
       data: '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
       name: "_rels/.rels",
@@ -384,7 +320,6 @@ export const buildExcelWorkbook = (input: ReportExportInput): Buffer => {
     { data: stylesXml, name: "xl/styles.xml" },
     {
       data: worksheet(summary, {
-        drawing: Boolean(svg),
         freezeRows: 5,
         mergeCells: ["A1:B1"],
         rowStyles: (_row, index) =>
@@ -410,23 +345,6 @@ export const buildExcelWorkbook = (input: ReportExportInput): Buffer => {
       name: "xl/worksheets/sheet2.xml",
     },
   ];
-  if (svg) {
-    entries.push(
-      {
-        data: '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/></Relationships>',
-        name: "xl/worksheets/_rels/sheet1.xml.rels",
-      },
-      {
-        data: '<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><xdr:oneCellAnchor><xdr:from><xdr:col>2</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>2</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:ext cx="10500000" cy="7000000"/><xdr:pic><xdr:nvPicPr><xdr:cNvPr id="1" name="Tablero - Avance de planes"/><xdr:cNvPicPr/></xdr:nvPicPr><xdr:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></xdr:blipFill><xdr:spPr><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic><xdr:clientData/></xdr:oneCellAnchor></xdr:wsDr>',
-        name: "xl/drawings/drawing1.xml",
-      },
-      {
-        data: '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/report.svg"/></Relationships>',
-        name: "xl/drawings/_rels/drawing1.xml.rels",
-      },
-      { data: svg, name: "xl/media/report.svg" },
-    );
-  }
   return zip(entries);
 };
 
@@ -525,7 +443,7 @@ export const buildObservationDetailWorkbook = (input: {
     ]),
   ];
   return zip([
-    { data: contentTypes(false), name: "[Content_Types].xml" },
+    { data: contentTypes(), name: "[Content_Types].xml" },
     {
       data: '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
       name: "_rels/.rels",

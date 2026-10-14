@@ -83,11 +83,38 @@ test("el recordatorio agrupa observaciones únicas por área y muestra los dos g
   assert.match(rendered.html, /CALIFICACIÓN DEL RIESGO/);
   assert.match(rendered.html, /Concluido \(CO\)/);
   assert.match(rendered.text, /FINANZAS · 4 Observaciones/);
-  assert.match(rendered.text, /No iniciado 0, Iniciado 1, Con avance 3, Concluido 0/);
-  assert.match(rendered.text, /Calificación del riesgo: Bajo 1, Medio 1, Alto 2/);
+  assert.match(
+    rendered.text,
+    /No iniciado 0, Iniciado 1, Con avance 3, Concluido 0/,
+  );
+  assert.match(
+    rendered.text,
+    /Calificación del riesgo: Bajo 1, Medio 1, Alto 2/,
+  );
   assert.match(rendered.text, /OPERACIONES · 5 Observaciones/);
   assert.doesNotMatch(rendered.html, /Al corte del/);
   assert.match(rendered.html, /Ver pendientes en NIBOL/);
+  assert.match(rendered.html, />Responsable de área<\/div>/);
+  assert.doesNotMatch(
+    rendered.html,
+    /Responsable de área \/ Dueño de proceso \/ Ejecutor/,
+  );
+  assert.match(rendered.text, /^Responsable de área/);
+  for (const role of ["Dueño del proceso", "Ejecutor"]) {
+    const roleEmail = deadlineReminderEmailTemplate.render({
+      brand: {
+        appName: "NIBOL Bolivia",
+        logoUrl: null,
+        primaryColor: "#07142d",
+        senderEmail: "no-reply@nibol.test",
+        senderName: "NIBOL",
+        supportEmail: "support@nibol.test",
+      },
+      variables: { ...sample, plans, recipientRole: role },
+    });
+    assert.ok(roleEmail.html.includes(`>${role}</div>`));
+    assert.ok(roleEmail.text.startsWith(role));
+  }
   assert.match(rendered.subject, /^NIBOL ·/);
 });
 
