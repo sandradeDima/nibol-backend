@@ -142,6 +142,78 @@ test("el cierre no exige documento pero conserva el avance obligatorio", async (
   );
 });
 
+test("el cierre por workflow concluye la observación al terminar todos sus planes", async () => {
+  const adapter = getWorkflowEntityAdapter("OBSERVATION_CLOSURE");
+  assert.ok(adapter?.applyCompletion);
+  const plans = [
+    { id: "plan-1", progressPercent: 60, status: "WITH_PROGRESS" },
+    { id: "plan-2", progressPercent: 60, status: "WITH_PROGRESS" },
+  ];
+  const observationUpdates: Array<{
+    progressPercent: number;
+    statusId: string;
+  }> = [];
+  let observationLocked = false;
+  const db = {
+    $queryRaw: async (query: TemplateStringsArray) => {
+      assert.match(query.join("?"), /FOR UPDATE/);
+      if (query[0]?.includes("FROM observations")) {
+        observationLocked = true;
+        return [{ id: "observation-1" }];
+      }
+      assert.ok(observationLocked);
+      return plans;
+    },
+    progressEvaluation: {
+      findUnique: async ({ where }: { where: { id: string } }) => ({
+        actionPlan: { id: where.id, observationId: "observation-1" },
+        evaluatedStatus: "CONCLUDED",
+        reviewStatus: "APPROVED",
+      }),
+    },
+    actionPlan: {
+      update: async ({
+        where,
+        data,
+      }: {
+        where: { id: string };
+        data: { status: string; progressPercent: number };
+      }) => {
+        assert.ok(observationLocked);
+        Object.assign(plans.find((plan) => plan.id === where.id)!, data);
+      },
+    },
+    observation: {
+      findUnique: async () => ({ id: "observation-1" }),
+      update: async ({
+        data,
+      }: {
+        data: { progressPercent: number; statusId: string };
+      }) => {
+        observationUpdates.push(data);
+      },
+    },
+    observationStatus: {
+      findFirst: async ({ where }: { where: { key: string } }) => ({
+        id: where.key,
+      }),
+    },
+  };
+
+  for (const entityId of ["plan-1", "plan-2"])
+    await adapter.applyCompletion({
+      db: db as never,
+      entityId,
+      finalResult: "APPROVED",
+      instanceId: "workflow-1",
+    });
+
+  assert.deepEqual(observationUpdates, [
+    { progressPercent: 80, statusId: "CON_AVANCE" },
+    { progressPercent: 100, statusId: "CONCLUIDO" },
+  ]);
+});
+
 test("el límite de plazo se calcula desde la fecha del informe", () => {
   assert.equal(
     observationDeadlineService

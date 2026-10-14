@@ -10,7 +10,10 @@ import {
 } from "../../services/authorization-service.js";
 import { AppError } from "../../utils/app-error.js";
 import { prisma } from "../../utils/prisma.js";
-import { observationAggregationService } from "../observations/observation-aggregation.service.js";
+import {
+  lockObservationForActionPlanUpdate,
+  recalculateObservationFromActionPlans,
+} from "../observations/observation-aggregation.service.js";
 import { observationDeadlineService } from "../observations/observation-deadline.service.js";
 import { workflowIntegrationService } from "../workflows/workflow-integration.service.js";
 import {
@@ -350,38 +353,6 @@ const findRemediationPlan = async (
   return record;
 };
 
-export const recalculateObservationFromActionPlans = async (
-  tx: Prisma.TransactionClient,
-  observationId: string,
-) => {
-  const [observation, actionPlans] = await Promise.all([
-    tx.observation.findUnique({
-      select: { id: true },
-      where: { id: observationId },
-    }),
-    tx.actionPlan.findMany({
-      select: { progressPercent: true, status: true },
-      where: { deletedAt: null, observationId },
-    }),
-  ]);
-  if (!observation) return;
-  const progressPercent =
-    observationAggregationService.calculateProgress(actionPlans);
-  const key = observationAggregationService.calculateStatus(actionPlans);
-  const status = await tx.observationStatus.findFirst({
-    select: { id: true },
-    where: { active: true, deletedAt: null, key },
-  });
-  if (!status) throw new AppError(`No está configurado el estado ${key}.`, 500);
-  await tx.observation.update({
-    data: {
-      progressPercent,
-      statusId: status.id,
-    },
-    where: { id: observationId },
-  });
-};
-
 export const remediationService = {
   async createRemediationPlan(
     observationId: string,
@@ -656,6 +627,7 @@ export const remediationService = {
       access,
     );
     const created = await prisma.$transaction(async (tx) => {
+      await lockObservationForActionPlanUpdate(tx, observationId);
       const actionPlan = await tx.actionPlan.create({
         data: {
           currentDueDate: input.dueDate,
@@ -725,6 +697,7 @@ export const remediationService = {
         ),
       ];
       await cancelLinkedWorkflowInstances(tx, workflowInstanceIds, deletedAt);
+      await lockObservationForActionPlanUpdate(tx, previous.observation.id);
       const deleted = await tx.actionPlan.updateMany({
         data: { deletedAt, deletedById: access.userId },
         where: { deletedAt: null, id },
@@ -1086,6 +1059,7 @@ export const remediationService = {
         409,
       );
     await prisma.$transaction(async (tx) => {
+      await lockObservationForActionPlanUpdate(tx, previous.observation.id);
       await tx.actionPlan.update({
         data: { completedAt: new Date(), status: "CONCLUDED" },
         where: { id },

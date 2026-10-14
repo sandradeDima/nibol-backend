@@ -26,7 +26,10 @@ import { buildObservationUrl } from "../../utils/observation-links.js";
 import { buildFrontendUrl } from "../../utils/notification-links.js";
 import { prisma } from "../../utils/prisma.js";
 import { uploadsRootDir } from "../../utils/uploads.js";
-import { recalculateObservationFromActionPlans } from "../remediation/remediation.service.js";
+import {
+  lockObservationForActionPlanUpdate,
+  recalculateObservationFromActionPlans,
+} from "../observations/observation-aggregation.service.js";
 import {
   getActionPlanDeadlineStatus,
   getEffectiveActionPlanDueDate,
@@ -619,18 +622,19 @@ const prepareFiles = async (files: UploadFile[]) => {
 const refreshPlanFromLatestApproval = async (
   tx: Prisma.TransactionClient,
   actionPlanId: string,
+  observationId: string,
   officialStatus: "NOT_STARTED" | "STARTED" | "WITH_PROGRESS" | "CONCLUDED",
 ) => {
-  const actionPlan = await tx.actionPlan.update({
+  await lockObservationForActionPlanUpdate(tx, observationId);
+  await tx.actionPlan.update({
     data: {
       completedAt: officialStatus === "CONCLUDED" ? new Date() : null,
       progressPercent: officialProgressByStatus[officialStatus],
       status: officialStatus,
     },
-    select: { observationId: true },
     where: { id: actionPlanId },
   });
-  await recalculateObservationFromActionPlans(tx, actionPlan.observationId);
+  await recalculateObservationFromActionPlans(tx, observationId);
 };
 
 const requireActionPlan = async (id: string, access: AuthorizationSummary) => {
@@ -917,6 +921,7 @@ export const progressService = {
         await refreshPlanFromLatestApproval(
           tx,
           previous.actionPlan.id,
+          previous.actionPlan.observation.id,
           input.officialStatus,
         );
     });

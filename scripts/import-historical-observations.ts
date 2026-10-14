@@ -13,7 +13,11 @@ import {
   ROLE_DEFINITIONS,
   ROLE_PERMISSION_NAMES,
 } from "../src/permissions/definitions.js";
-import { observationAggregationService } from "../src/modules/observations/observation-aggregation.service.js";
+import {
+  observationAggregationService,
+  recalculateObservationFromActionPlans,
+} from "../src/modules/observations/observation-aggregation.service.js";
+import { officialProgressByStatus } from "../src/modules/progress/progress.constants.js";
 import { prisma } from "../src/utils/prisma.js";
 
 type Row = { _row: number; [key: string]: string | number };
@@ -2367,6 +2371,7 @@ export const writePlan = async (plan: Plan, report: ImportReport) => {
                   description: action.description,
                   originalDueDate: date(action.due),
                   currentDueDate: date(action.currentDue),
+                  progressPercent: officialProgressByStatus[action.status],
                   status: action.status,
                 },
               }));
@@ -2399,6 +2404,7 @@ export const writePlan = async (plan: Plan, report: ImportReport) => {
             id: row.id,
           });
         }
+      await recalculateObservationFromActionPlans(tx, observation.id);
       return ids;
     });
     for (const row of committed) saved(row.kind, row.identity, row.id);

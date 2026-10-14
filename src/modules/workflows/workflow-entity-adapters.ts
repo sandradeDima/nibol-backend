@@ -2,6 +2,10 @@ import type { Prisma } from "../../../generated/prisma/client.js";
 
 import { AppError } from "../../utils/app-error.js";
 import { buildObservationUrl } from "../../utils/observation-links.js";
+import {
+  lockObservationForActionPlanUpdate,
+  recalculateObservationFromActionPlans,
+} from "../observations/observation-aggregation.service.js";
 import { FILE_LEVEL_EVIDENCE_REVIEW_CONTEXTS } from "../progress/progress.constants.js";
 import type { WorkflowRuntimeContext } from "./workflow-runtime-context.js";
 import type { WorkflowNodeConfiguration } from "./workflows.validators.js";
@@ -114,17 +118,6 @@ const createContext = (input: {
   riskLevel: input.riskLevel,
   custom: input.custom ?? {},
 });
-
-const getObservationStatusId = async (
-  db: Prisma.TransactionClient,
-  key: string,
-): Promise<string | null> =>
-  (
-    await db.observationStatus.findFirst({
-      select: { id: true },
-      where: { active: true, deletedAt: null, key },
-    })
-  )?.id ?? null;
 
 const deadlineExtensionAdapter: WorkflowEntityAdapter = {
   processType: "DEADLINE_EXTENSION",
@@ -574,6 +567,10 @@ const observationClosureAdapter: WorkflowEntityAdapter = {
     if (!update)
       throw new AppError("No se encontró la solicitud de cierre.", 404);
     if (["APPROVED", "CLOSED"].includes(finalResult)) {
+      await lockObservationForActionPlanUpdate(
+        db,
+        update.actionPlan.observationId,
+      );
       await db.actionPlan.update({
         data: {
           completedAt: new Date(),
@@ -589,21 +586,10 @@ const observationClosureAdapter: WorkflowEntityAdapter = {
         },
         where: { id: update.actionPlan.id },
       });
-      const openPlans = await db.actionPlan.count({
-        where: {
-          deletedAt: null,
-          observationId: update.actionPlan.observationId,
-          status: { not: "CONCLUDED" },
-        },
-      });
-      if (openPlans > 0) return;
-      const closedStatusId = await getObservationStatusId(db, "CONCLUIDO");
-      if (!closedStatusId)
-        throw new AppError("El catálogo no contiene el estado CONCLUIDO.", 500);
-      await db.observation.update({
-        data: { statusId: closedStatusId, progressPercent: 100 },
-        where: { id: update.actionPlan.observationId },
-      });
+      await recalculateObservationFromActionPlans(
+        db,
+        update.actionPlan.observationId,
+      );
       if (update.reviewStatus !== "APPROVED")
         await db.progressEvaluation.update({
           data: { reviewStatus: "APPROVED" },

@@ -1,4 +1,9 @@
-import type { ActionPlanStatus } from "../../../generated/prisma/client.js";
+import type {
+  ActionPlanStatus,
+  Prisma,
+} from "../../../generated/prisma/client.js";
+
+import { AppError } from "../../utils/app-error.js";
 
 export type ActionPlanAggregationInput = {
   progressPercent: number;
@@ -65,4 +70,40 @@ export const observationAggregationService = {
     }
     return "INICIADO";
   },
+};
+
+export const lockObservationForActionPlanUpdate = async (
+  tx: Prisma.TransactionClient,
+  observationId: string,
+) => {
+  await tx.$queryRaw`SELECT id FROM observations WHERE id = ${observationId} FOR UPDATE`;
+};
+
+export const recalculateObservationFromActionPlans = async (
+  tx: Prisma.TransactionClient,
+  observationId: string,
+) => {
+  const observation = await tx.observation.findUnique({
+    select: { id: true },
+    where: { id: observationId },
+  });
+  if (!observation) return;
+  const actionPlans = await tx.$queryRaw<ActionPlanAggregationInput[]>`
+    SELECT progress_percent AS progressPercent, status
+    FROM action_plans
+    WHERE deleted_at IS NULL AND observation_id = ${observationId}
+    FOR UPDATE
+  `;
+  const progressPercent =
+    observationAggregationService.calculateProgress(actionPlans);
+  const key = observationAggregationService.calculateStatus(actionPlans);
+  const status = await tx.observationStatus.findFirst({
+    select: { id: true },
+    where: { active: true, deletedAt: null, key },
+  });
+  if (!status) throw new AppError(`No está configurado el estado ${key}.`, 500);
+  await tx.observation.update({
+    data: { progressPercent, statusId: status.id },
+    where: { id: observationId },
+  });
 };
