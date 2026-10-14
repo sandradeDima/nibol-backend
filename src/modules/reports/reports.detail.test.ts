@@ -60,13 +60,13 @@ test("el detalle muestra solo los planes del área y estado filtrados", () => {
     ),
     [],
   );
-  assert.equal(
+  assert.deepEqual(
     mapObservationDetailRows(
       [{ ...observation, actionPlans: [] }],
-      { areaId: "b" } as never,
+      {} as never,
       new Date("2026-10-12T12:00:00.000Z"),
       "America/La_Paz",
-    )[0]?.["Área"],
-    "Ventas",
+    ),
+    [],
   );
 });

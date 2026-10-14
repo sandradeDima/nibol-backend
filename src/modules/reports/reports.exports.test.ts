@@ -97,6 +97,7 @@ test("genera un XLSX real y un PDF legible con el resumen del corte", () => {
 test("el detalle conserva los 24 encabezados agrupados y registra los filtros", () => {
   const values = Array(24).fill("");
   values[0] = "AI-01-2022";
+  values[2] = "2026-10-12T00:00:00.000Z";
   values[14] = "Acción filtrada";
   const workbook = buildObservationDetailWorkbook({
     filters: { Área: "Importaciones" },
@@ -122,6 +123,17 @@ test("el detalle conserva los 24 encabezados agrupados y registra los filtros", 
   assert.match(data, /mergeCell ref="D1:N1"/);
   assert.match(data, /autoFilter ref="A2:X3"/);
   assert.match(data, /ySplit="2"/);
+  assert.match(data, /zoomScale="70"/);
+  assert.match(data, /<col min="6" max="6" width="63\.6640625"/);
+  assert.match(data, /<c r="A1" s="1"/);
+  assert.match(data, /<c r="D1" s="2"/);
+  assert.match(data, /<c r="O1" s="3"/);
+  assert.match(data, /<c r="V1" s="5"/);
+  assert.match(data, /<c r="C3" s="4"><v>/);
+  assert.match(data, /<c r="O3" s="6"/);
+  const styles = read("xl/styles.xml");
+  for (const color of ["FF2F5597", "FFC00000", "FF7030A0", "FF44546A"])
+    assert.ok(styles.includes(color), color);
   for (const header of observationDetailHeaders)
     assert.ok(data.includes(header.replaceAll("&", "&amp;")), header);
   assert.match(data, /Acción filtrada/);

@@ -2096,7 +2096,7 @@ export const mapObservationDetailRows = (
             query.reprogrammed)
       );
     });
-    const planRows = plans.map((plan: any) => {
+    return plans.map((plan: any) => {
       const extension = plan.deadlineExtensionRequests.find(
         isApprovedDeadlineExtension,
       );
@@ -2122,41 +2122,6 @@ export const mapObservationDetailRows = (
             : "Vigente",
       };
     });
-    if (planRows.length) return planRows;
-    if (
-      query.progressStatus ||
-      query.deadlineStatus ||
-      query.deadlineStatuses?.length ||
-      query.reprogrammed !== undefined ||
-      query.executorId?.length
-    )
-      return [];
-    const areaRows = observation.areaAssignments
-      .filter(
-        (area: any) =>
-          (!query.areaId || area.area.id === query.areaId) &&
-          (!query.areaResponsibleId?.length ||
-            query.areaResponsibleId.includes(area.areaResponsible.id)) &&
-          (!query.processOwnerId?.length ||
-            query.processOwnerId.includes(area.processOwner.id)) &&
-          (!query.responsibleUserId ||
-            [area.areaResponsible.id, area.processOwner.id].includes(
-              query.responsibleUserId,
-            )),
-      )
-      .map((area: any) => ({
-        ...base,
-        Área: area.area.name,
-        "Dueño de proceso": area.processOwner.name,
-        "Responsable de área": area.areaResponsible.name,
-      }));
-    return areaRows.length ||
-      query.areaId ||
-      query.areaResponsibleId?.length ||
-      query.processOwnerId?.length ||
-      query.responsibleUserId
-      ? areaRows
-      : [base];
   });
 
 const getObservationDetailRows = async (
@@ -2167,7 +2132,12 @@ const getObservationDetailRows = async (
   rows: Array<Record<string, unknown>>;
   total: number;
 }> => {
-  const where = buildObservationWhere(query, access);
+  const where: Prisma.ObservationWhereInput = {
+    AND: [
+      buildObservationWhere(query, access),
+      { actionPlans: { some: buildActionPlanScopeWhere(access) } },
+    ],
+  };
   const total = await reportsPrisma.observation.count({ where });
   // shortcut: cap interactive detail at 5,000 observations; paginate when larger exports are required.
   if (total > 5000)
@@ -2212,15 +2182,6 @@ const getObservationDetailRows = async (
           status: true,
         },
         where: buildActionPlanScopeWhere(access),
-      },
-      areaAssignments: {
-        orderBy: { area: { name: "asc" } },
-        select: {
-          area: { select: areaSummarySelect },
-          areaResponsible: { select: userSummarySelect },
-          processOwner: { select: userSummarySelect },
-        },
-        where: buildObservationAreaScopeWhere(access),
       },
       auditRecommendation: true,
       auditReport: {

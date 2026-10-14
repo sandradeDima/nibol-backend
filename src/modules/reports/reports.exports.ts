@@ -83,12 +83,13 @@ const worksheet = (
   options: {
     autoFilter?: string;
     drawing?: boolean;
-    freezeColumns?: number;
     freezeRows?: number;
     mergeCells?: string[];
     rowHeights?: number[];
     rowStyles?: (row: unknown[], index: number) => number[] | undefined;
+    showGridLines?: boolean;
     widths?: number[];
+    zoomScale?: number;
   } = {},
 ): string => {
   const cols = (options.widths ?? [])
@@ -98,7 +99,7 @@ const worksheet = (
     )
     .join("");
   return `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-    <sheetViews><sheetView workbookViewId="0">${options.freezeRows || options.freezeColumns ? `<pane ${options.freezeColumns ? `xSplit="${options.freezeColumns}" ` : ""}${options.freezeRows ? `ySplit="${options.freezeRows}" ` : ""}topLeftCell="${columnName(options.freezeColumns ?? 0)}${(options.freezeRows ?? 0) + 1}" activePane="${options.freezeColumns && options.freezeRows ? "bottomRight" : options.freezeColumns ? "topRight" : "bottomLeft"}" state="frozen"/>` : ""}</sheetView></sheetViews>
+    <sheetViews><sheetView workbookViewId="0"${options.showGridLines === false ? ' showGridLines="0"' : ""}${options.zoomScale ? ` zoomScale="${options.zoomScale}" zoomScaleNormal="${options.zoomScale}"` : ""}>${options.freezeRows ? `<pane ySplit="${options.freezeRows}" topLeftCell="A${options.freezeRows + 1}" activePane="bottomLeft" state="frozen"/>` : ""}</sheetView></sheetViews>
     ${cols ? `<cols>${cols}</cols>` : ""}
     <sheetData>${rows
       .map((row, index) =>
@@ -456,6 +457,45 @@ export const observationDetailHeaders = [
   "Estado general OT",
 ] as const;
 
+const observationDetailStylesXml = `<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <numFmts count="1"><numFmt numFmtId="164" formatCode="dd/mm/yyyy;@"/></numFmts>
+  <fonts count="2"><font><sz val="10"/><color rgb="FF000000"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font></fonts>
+  <fills count="6"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF2F5597"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFC00000"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FF7030A0"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FF44546A"/></patternFill></fill></fills>
+  <borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color indexed="64"/></left><right style="thin"><color indexed="64"/></right><top style="thin"><color indexed="64"/></top><bottom style="thin"><color indexed="64"/></bottom><diagonal/></border></borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="7">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>
+    <xf numFmtId="0" fontId="1" fillId="2" borderId="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="1" fillId="3" borderId="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="1" fillId="4" borderId="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="164" fontId="0" fillId="0" borderId="1" applyNumberFormat="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="1" fillId="5" borderId="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+  </cellXfs>
+</styleSheet>`;
+
+const observationDetailHeaderStyles = observationDetailHeaders.map(
+  (_, index) =>
+    index < 3
+      ? 1
+      : index < 14
+        ? 2
+        : index < 17
+          ? 3
+          : index < 19
+            ? 2
+            : index < 21
+              ? 3
+              : 5,
+);
+
+const observationDetailWidths = [
+  12.33203125, 20.33203125, 18.83203125, 18.83203125, 27.6640625, 63.6640625,
+  65.33203125, 65.33203125, 44.83203125, 13.5, 19.1640625, 19.1640625,
+  19.1640625, 19.1640625, 55.33203125, 55.33203125, 32.5, 22.1640625, 18,
+  48.6640625, 35.83203125, 18.5, 25.5, 26.6640625,
+];
+
 export const buildObservationDetailWorkbook = (input: {
   filters: Record<string, unknown>;
   generatedAt: string;
@@ -497,28 +537,25 @@ export const buildObservationDetailWorkbook = (input: {
       name: "xl/workbook.xml",
     },
     { data: workbookRels, name: "xl/_rels/workbook.xml.rels" },
-    { data: stylesXml, name: "xl/styles.xml" },
+    { data: observationDetailStylesXml, name: "xl/styles.xml" },
     {
       data: worksheet(details, {
         autoFilter: `A2:X${details.length}`,
-        freezeColumns: 3,
         freezeRows: 2,
         mergeCells: ["A1:C1", "D1:N1", "O1:Q1", "R1:S1", "T1:U1", "V1:X1"],
-        rowHeights: [24, 52],
+        rowHeights: [15, 32.5],
         rowStyles: (_row, index) =>
-          Array(24).fill(index === 0 ? 1 : index === 1 ? 2 : 5),
-        widths: observationDetailHeaders.map((header, index) =>
-          [4, 5, 6, 7, 8, 14, 19, 20].includes(index)
-            ? 42
-            : Math.min(35, Math.max(18, header.length + 3)),
-        ),
+          index < 2 ? observationDetailHeaderStyles : Array(24).fill(6),
+        showGridLines: false,
+        widths: observationDetailWidths,
+        zoomScale: 70,
       }),
       name: "xl/worksheets/sheet1.xml",
     },
     {
       data: worksheet(filters, {
         mergeCells: ["A1:B1"],
-        rowStyles: (_row, index) => [index === 0 ? 1 : 3, index === 0 ? 1 : 3],
+        rowStyles: (_row, index) => [index === 0 ? 1 : 6, index === 0 ? 1 : 6],
         widths: [32, 70],
       }),
       name: "xl/worksheets/sheet2.xml",
