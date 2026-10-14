@@ -148,14 +148,6 @@ export const isActionPlanOverdue = (
   timeZone = "UTC",
 ): boolean => getActionPlanDeadlineStatus(plan, now, timeZone) === "VENCIDO";
 
-export const CLOSED_OBSERVATION_STATUS_KEYS = new Set(["CONCLUIDO"]);
-
-export const OPEN_OBSERVATION_STATUS_KEYS = new Set([
-  "NO_INICIADO",
-  "INICIADO",
-  "CON_AVANCE",
-]);
-
 export const hasGlobalBusinessAccess = (
   access: AuthorizationSummary,
 ): boolean => {
@@ -186,9 +178,7 @@ export const isObservationClosed = (status: {
   isFinal?: boolean;
   key: string;
 }): boolean => {
-  return (
-    Boolean(status.isFinal) || CLOSED_OBSERVATION_STATUS_KEYS.has(status.key)
-  );
+  return Boolean(status.isFinal);
 };
 
 export const isObservationOverdue = (
@@ -222,9 +212,9 @@ export const isObservationDueSoon = (
 };
 
 export const getObservationStatusGroup = (
-  status: { isFinal?: boolean; key: string; name: string },
+  status: { isFinal?: boolean; isInitial?: boolean; key: string; name: string },
   overdue: boolean,
-): "OPEN" | "IN_PROGRESS" | "IN_REVIEW" | "CLOSED" | "OVERDUE" => {
+): "OPEN" | "IN_PROGRESS" | "CLOSED" | "OVERDUE" => {
   if (overdue) {
     return "OVERDUE";
   }
@@ -233,15 +223,7 @@ export const getObservationStatusGroup = (
     return "CLOSED";
   }
 
-  if (status.key === "CON_AVANCE") {
-    return "IN_REVIEW";
-  }
-
-  if (status.key === "INICIADO") {
-    return "IN_PROGRESS";
-  }
-
-  return "OPEN";
+  return status.isInitial ? "OPEN" : "IN_PROGRESS";
 };
 
 export const getRiskGroupLabel = (key: string, name: string): string => {

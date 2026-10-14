@@ -164,8 +164,8 @@ const deadlineExtensionAdapter: WorkflowEntityAdapter = {
 
   async validateStart({ entityId, db }) {
     const request = (await this.getEntity(entityId, db)) as {
-      actionPlan: { observation: { status: { key: string } } } | null;
-      observation: { status: { key: string } } | null;
+      actionPlan: { observation: { status: { isFinal: boolean } } } | null;
+      observation: { status: { isFinal: boolean } } | null;
       proposedDueDate: Date;
       status: string;
     };
@@ -181,7 +181,7 @@ const deadlineExtensionAdapter: WorkflowEntityAdapter = {
         "La solicitud no tiene una observación asociada.",
         409,
       );
-    if (observation.status.key === "CONCLUIDO") {
+    if (observation.status.isFinal) {
       throw new AppError(
         "No se puede iniciar un flujo para una observación terminal.",
         409,

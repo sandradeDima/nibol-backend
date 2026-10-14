@@ -54,6 +54,7 @@ export type DashboardRiskSummary = {
 
 export type DashboardStatusSummary = {
   isFinal?: boolean;
+  isInitial?: boolean;
   key: string;
   name: string;
 };

@@ -99,9 +99,19 @@ export const recalculateObservationFromActionPlans = async (
   const key = observationAggregationService.calculateStatus(actionPlans);
   const status = await tx.observationStatus.findFirst({
     select: { id: true },
-    where: { active: true, deletedAt: null, key },
+    where: {
+      active: true,
+      deletedAt: null,
+      ...(key === "CONCLUIDO"
+        ? { isFinal: true }
+        : key === "NO_INICIADO"
+          ? { isInitial: true }
+          : { isFinal: false, isInitial: false }),
+    },
+    orderBy: { sortOrder: "asc" },
   });
-  if (!status) throw new AppError(`No está configurado el estado ${key}.`, 500);
+  if (!status)
+    throw new AppError(`No está configurado el estado ${key}.`, 500);
   await tx.observation.update({
     data: { progressPercent, statusId: status.id },
     where: { id: observationId },

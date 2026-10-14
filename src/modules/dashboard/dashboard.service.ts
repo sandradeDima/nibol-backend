@@ -103,7 +103,7 @@ const observationInclude = {
   },
   auditReport: { select: { reportNumber: true } },
   riskLevel: { select: { colorToken: true, key: true, name: true } },
-  status: { select: { isFinal: true, key: true, name: true } },
+  status: { select: { isFinal: true, isInitial: true, key: true, name: true } },
 } as const;
 
 const buildObservationInclude = (access: AuthorizationSummary) => ({
@@ -572,7 +572,7 @@ const operationalAttention = (
             new Date(value.data.now.getTime() + value.data.days * DAY)
         )
           return 1;
-        if (["INICIADO", "CON_AVANCE"].includes(item.status.key)) return 2;
+        if (!item.status.isInitial && !item.status.isFinal) return 2;
         return 3;
       };
       return (
@@ -746,7 +746,7 @@ const roleObservationInclude = (
     },
     auditReport: { select: { reportNumber: true } },
     riskLevel: { select: { colorToken: true, key: true, name: true } },
-    status: { select: { isFinal: true, key: true, name: true } },
+    status: { select: { isFinal: true, isInitial: true, key: true, name: true } },
   }) satisfies Prisma.ObservationInclude;
 
 type RoleObservationRecord = Prisma.ObservationGetPayload<{
@@ -1335,8 +1335,7 @@ export const dashboardService = {
         ).length,
         inProgressObservations: value.data.observations.filter(
           (item) =>
-            !item.status.isFinal &&
-            ["INICIADO", "CON_AVANCE"].includes(item.status.key),
+            !item.status.isInitial && !item.status.isFinal,
         ).length,
         overdueObservations: value.overdue.length,
         pendingObservations: value.open.length,

@@ -68,14 +68,14 @@ test("clasifica vencimientos sin contar estados finales como atrasados", () => {
 test("asigna grupos y etiquetas de negocio deterministas", () => {
   assert.equal(
     getObservationStatusGroup(
-      { isFinal: false, key: "CON_AVANCE", name: "Con avance" },
+      { isFinal: false, isInitial: false, key: "CA", name: "Con avance" },
       false,
     ),
-    "IN_REVIEW",
+    "IN_PROGRESS",
   );
   assert.equal(
     getObservationStatusGroup(
-      { isFinal: false, key: "INICIADO", name: "Iniciado" },
+      { isFinal: false, isInitial: false, key: "I", name: "Iniciado" },
       true,
     ),
     "OVERDUE",

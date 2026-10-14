@@ -428,7 +428,9 @@ const actionPlanReportSelect = {
           name: true,
         },
       },
-      status: { select: { isFinal: true, key: true, name: true } },
+      status: {
+        select: { isFinal: true, isInitial: true, key: true, name: true },
+      },
       title: true,
     },
   },
@@ -1384,7 +1386,13 @@ const getReportOptions = async (
       }),
       reportsPrisma.observationStatus.findMany({
         orderBy: { sortOrder: "asc" },
-        select: { id: true, isFinal: true, key: true, name: true },
+        select: {
+          id: true,
+          isFinal: true,
+          isInitial: true,
+          key: true,
+          name: true,
+        },
         where: { active: true, deletedAt: null },
       }),
     ]);
@@ -1752,7 +1760,7 @@ const getDashboard = async (
     AND: [where, buildObservationAttentionWhere("DUE_SOON", dueSoonDays)],
   };
   const inProcessWhere = {
-    AND: [where, { status: { key: { in: ["INICIADO", "CON_AVANCE"] } } }],
+    AND: [where, { status: { isInitial: false, isFinal: false } }],
   };
   const closedWhere = { AND: [where, { status: { isFinal: true } }] };
 
@@ -1787,7 +1795,9 @@ const getDashboard = async (
         riskLevel: {
           select: { colorToken: true, id: true, key: true, name: true },
         },
-        status: { select: { isFinal: true, key: true, name: true } },
+        status: {
+          select: { isFinal: true, isInitial: true, key: true, name: true },
+        },
         updatedAt: true,
       },
       where,
@@ -1840,13 +1850,11 @@ const getDashboard = async (
       label:
         statusGroup === "IN_PROGRESS"
           ? "En proceso"
-          : statusGroup === "IN_REVIEW"
-            ? "En revisión"
-            : statusGroup === "CLOSED"
-              ? "Cerradas"
-              : statusGroup === "OVERDUE"
-                ? "Vencidas"
-                : "Abiertas",
+          : statusGroup === "CLOSED"
+            ? "Cerradas"
+            : statusGroup === "OVERDUE"
+              ? "Vencidas"
+              : "Abiertas",
       value: 0,
       ...(statusGroup === "OVERDUE"
         ? { href: "/observaciones?filter.overdue=true" }
@@ -1888,10 +1896,7 @@ const getDashboard = async (
       } else {
         currentArea.open += 1;
       }
-      if (
-        observation.status.key === "INICIADO" ||
-        observation.status.key === "CON_AVANCE"
-      )
+      if (!observation.status.isInitial && !observation.status.isFinal)
         currentArea.inProcess += 1;
       if (observationOverdue) currentArea.overdue += 1;
       if (observationDueSoon) currentArea.dueSoon += 1;

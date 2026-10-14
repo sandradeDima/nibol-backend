@@ -292,7 +292,9 @@ const buildObservationInclude = (access: AuthorizationSummary) =>
       orderBy: { risk: { name: "asc" } },
       select: { risk: { select: { id: true, name: true } } },
     },
-    status: { select: { id: true, isFinal: true, key: true, name: true } },
+    status: {
+      select: { id: true, isFinal: true, isInitial: true, key: true, name: true },
+    },
   }) satisfies Prisma.ObservationInclude;
 
 type ObservationRecord = Prisma.ObservationGetPayload<{
@@ -850,11 +852,11 @@ export const observationsService = {
     }
     const concludedStatus = await prisma.observationStatus.findFirst({
       select: { id: true },
-      where: { active: true, deletedAt: null, key: "CONCLUIDO" },
+      where: { active: true, deletedAt: null, isFinal: true },
     });
     if (!concludedStatus) {
       throw new AppError(
-        "The CONCLUIDO observation status is not configured.",
+        "The final observation status is not configured.",
         500,
       );
     }
