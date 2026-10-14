@@ -58,6 +58,9 @@ export const PERMISSION_RESOURCES = [
 ] as const;
 
 export const PERMISSION_ACTIONS = ["view", "create", "edit", "delete"] as const;
+export const MODULE_PERMISSION_NAMES = PERMISSION_RESOURCES.map(
+  (resource) => `${resource}.view_module`,
+);
 
 export type PermissionResource = (typeof PERMISSION_RESOURCES)[number];
 export type PermissionAction = (typeof PERMISSION_ACTIONS)[number];
@@ -142,6 +145,7 @@ export const OBSERVATION_DOMAIN_PERMISSION_NAMES = [
 export const ALL_PERMISSION_NAMES = Array.from(
   new Set([
     ...DEFAULT_PERMISSION_NAMES,
+    ...MODULE_PERMISSION_NAMES,
     ...WORKFLOW_PERMISSION_NAMES,
     ...REPORT_PERMISSION_NAMES,
     ...AUDIT_REPORT_PERMISSION_NAMES,
@@ -215,17 +219,21 @@ export const ROLE_PERMISSION_NAMES: Record<RoleCode, readonly string[]> = {
     "users.view",
     "areas.view",
     "observations.view",
+    "observations.view_module",
     "observations.history.view",
     "recommended_action_plans.view",
+    "recommended_action_plans.view_module",
     "action_plans.view",
+    "action_plans.view_module",
     "action_plans.history.view",
     "evidence.view",
     "deadline_extensions.view",
     "progress_evaluations.view",
     "reports.view",
+    "reports.view_module",
     "reports.export",
-    "audit_reports.view",
-    "audit_reports.export",
+    "notifications.view",
+    "notifications.view_module",
   ],
   PROCESS_OWNER: AREA_PERMISSIONS,
   AREA_RESPONSIBLE: [

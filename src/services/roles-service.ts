@@ -90,6 +90,13 @@ const assertRoleNameAvailable = async (
 const getPermissionRecords = async (
   permissionNames: string[],
 ): Promise<Array<{ id: string; name: string }>> => {
+  for (const permissionName of permissionNames) {
+    const moduleMatch = /^([a-z0-9_.]+)\.view_module$/.exec(permissionName);
+    if (moduleMatch && !permissionNames.includes(`${moduleMatch[1]}.view`)) {
+      throw new AppError(`The ${moduleMatch[1]}.view permission is required to view its module.`, 400);
+    }
+  }
+
   if (permissionNames.length === 0) {
     return [];
   }

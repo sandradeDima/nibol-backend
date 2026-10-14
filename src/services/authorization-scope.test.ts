@@ -206,17 +206,21 @@ test("los permisos sensibles quedan separados por rol", () => {
     "users.view",
     "areas.view",
     "observations.view",
+    "observations.view_module",
     "observations.history.view",
     "recommended_action_plans.view",
+    "recommended_action_plans.view_module",
     "action_plans.view",
+    "action_plans.view_module",
     "action_plans.history.view",
     "evidence.view",
     "deadline_extensions.view",
     "progress_evaluations.view",
+    "notifications.view",
+    "notifications.view_module",
     "reports.view",
+    "reports.view_module",
     "reports.export",
-    "audit_reports.view",
-    "audit_reports.export",
   ]);
   assert.ok(!ROLE_PERMISSION_NAMES.AUDIT_CHIEF.includes("observations.delete"));
   assert.ok(!ROLE_PERMISSION_NAMES.AUDIT_CHIEF.includes("action_plans.delete"));
