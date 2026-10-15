@@ -145,6 +145,7 @@ const areaSummarySelect = {
 const observationIdentitySelect = {
   auditReport: { select: { reportNumber: true } },
   id: true,
+  mainObservation: { select: { name: true } },
   observationNumber: true,
   title: true,
 } as const;
@@ -154,6 +155,12 @@ const observationDisplayCode = (observation: {
   observationNumber: number;
 }): string =>
   `${observation.auditReport.reportNumber} / OBS-${String(observation.observationNumber).padStart(3, "0")}`;
+
+const observationDisplayNumber = (observation: {
+  auditReport: { reportNumber: string };
+  observationNumber: number;
+}): string =>
+  `${observation.auditReport.reportNumber}-${String(observation.observationNumber).padStart(2, "0")}`;
 
 const observationReportSelect = {
   areaAssignments: {
@@ -418,6 +425,7 @@ const actionPlanReportSelect = {
         select: { id: true, reportNumber: true, reportDate: true, title: true },
       },
       id: true,
+      mainObservation: { select: { name: true } },
       observationNumber: true,
       currentDueDate: true,
       riskLevel: {
@@ -719,6 +727,8 @@ const mapActionPlanRow = (
     observation: {
       code: observationCode,
       id: observation.id,
+      mainObservation: observation.mainObservation.name,
+      number: observationDisplayNumber(observation),
       status: observation.status,
       title: observation.title,
     },
@@ -885,7 +895,9 @@ const buildOperationalRows = (
         key: row.observation.status.key,
         name: row.observation.status.name,
       },
-      title: `${row.observation.code} · ${row.observation.title}`,
+      mainObservation: row.observation.mainObservation,
+      number: row.observation.number,
+      title: row.observation.title,
     });
   });
 
@@ -911,6 +923,8 @@ const buildOperationalRows = (
       executorName: row.executor?.name ?? "Sin asignar",
       href: row.href,
       observationCode: row.observation.code,
+      observationNumber: row.observation.number,
+      mainObservation: row.observation.mainObservation ?? "—",
       observationStatus: row.observation.status.name,
       progress: {
         code: row.officialProgress.code,
@@ -1227,7 +1241,10 @@ const toActionPlanFlatRow = (
   Informe: row.observation.code.split(" / ")[0],
   "Nivel de riesgo": row.riskLevel.name,
   "Estado de observación": row.observation.status.name,
-  Observación: `${row.observation.code} · ${row.observation.title}`,
+  "Número de observación": row.observation.number,
+  "Observación principal": row.observation.mainObservation,
+  "Título de observación": row.observation.title,
+  "Responsable de área": row.areaResponsible?.name ?? "Sin asignar",
   Plan: row.title,
   Reprogramado: row.reprogrammed ? "Sí" : "No",
 });
@@ -1243,11 +1260,14 @@ const getActionPlanReportRows = (
   const rows = dashboard.rows.map(toActionPlanFlatRow);
   const columns = [
     "Informe",
-    "Observación",
+    "Número de observación",
+    "Observación principal",
+    "Título de observación",
     "Plan",
     "Área",
     "Nivel de riesgo",
     "Dueño del proceso",
+    "Responsable de área",
     "Ejecutor",
     "Estado de observación",
     "Estado del plan de acción",
@@ -2062,7 +2082,7 @@ export const mapObservationDetailRows = (
       "Informe de Auditoría": observation.auditReport.reportNumber,
       "Título de informe": observation.auditReport.title,
       "Fecha de informe": observation.auditReport.reportDate.toISOString(),
-      "Número de observación": `${observation.auditReport.reportNumber}-${String(observation.observationNumber).padStart(2, "0")}`,
+      "Número de observación": observationDisplayNumber(observation),
       "Observación principal": observation.mainObservation.name,
       "Título de observación": observation.title,
       "Observación detallada": observation.description,
@@ -2242,6 +2262,11 @@ const getReportRows = async (
           responsibleUser: { select: userSummarySelect },
           status: true,
           description: true,
+          observationArea: {
+            select: {
+              areaResponsible: { select: userSummarySelect },
+            },
+          },
         },
         where: {
           AND: [
@@ -2253,7 +2278,10 @@ const getReportRows = async (
       return {
         columns: [
           "Plan de acción",
-          "Observación",
+          "Número de observación",
+          "Observación principal",
+          "Título de observación",
+          "Responsable de área",
           "Responsable",
           "Fecha límite",
           "Avance",
@@ -2266,7 +2294,10 @@ const getReportRows = async (
             "Plan de acción": actionPlan.description,
             "Fecha límite": effectiveDueDate.toISOString(),
             Estado: actionPlan.status,
-            Observación: `${observationDisplayCode(actionPlan.observation)} · ${actionPlan.observation.title}`,
+            "Número de observación": observationDisplayNumber(actionPlan.observation),
+            "Observación principal": actionPlan.observation.mainObservation.name,
+            "Título de observación": actionPlan.observation.title,
+            "Responsable de área": actionPlan.observationArea.areaResponsible?.name ?? "Sin asignar",
             Responsable: actionPlan.responsibleUser?.name ?? "Sin asignar",
           };
         }),
@@ -2294,7 +2325,9 @@ const getReportRows = async (
       });
       return {
         columns: [
-          "Observación",
+          "Número de observación",
+          "Observación principal",
+          "Título de observación",
           "Evidencia",
           "Tipo",
           "Cargada por",
@@ -2306,7 +2339,9 @@ const getReportRows = async (
           "Cargada por": evidence.uploadedByUser.name,
           Evidencia: evidence.originalName,
           Fecha: evidence.createdAt.toISOString(),
-          Observación: `${observationDisplayCode(evidence.observation)} · ${evidence.observation.title}`,
+          "Número de observación": observationDisplayNumber(evidence.observation),
+          "Observación principal": evidence.observation.mainObservation.name,
+          "Título de observación": evidence.observation.title,
           Tipo: `${evidence.context} · ${evidence.mimeType}`,
         })),
         total: evidences.length,
@@ -2352,7 +2387,9 @@ const getReportRows = async (
       });
       return {
         columns: [
-          "Observación",
+          "Número de observación",
+          "Observación principal",
+          "Título de observación",
           "Área",
           "Solicitante",
           "Fecha original",
@@ -2367,9 +2404,11 @@ const getReportRows = async (
             Estado: request.status,
             "Fecha original": request.previousDueDate.toISOString(),
             "Fecha solicitada": request.proposedDueDate.toISOString(),
-            Observación: observation
-              ? `${observationDisplayCode(observation)} · ${observation.title}`
+            "Número de observación": observation
+              ? observationDisplayNumber(observation)
               : "—",
+            "Observación principal": observation?.mainObservation.name ?? "—",
+            "Título de observación": observation?.title ?? "—",
             Solicitante: request.requestedByUser.name,
           };
         }),
@@ -2560,9 +2599,13 @@ const getAuditHistory = async (
       entityId: true,
       observation: {
         select: {
-          area: { select: areaSummarySelect },
-          code: true,
-          title: true,
+          areaAssignments: {
+            select: { area: { select: areaSummarySelect } },
+            take: 1,
+          },
+          auditReport: { select: { reportNumber: true } },
+          mainObservation: { select: { name: true } },
+          observationNumber: true,
         },
       },
       title: true,
@@ -2577,7 +2620,18 @@ const getAuditHistory = async (
             OR: [
               { title: { contains: query.search } },
               { description: { contains: query.search } },
-              { observation: { code: { contains: query.search } } },
+              {
+                observation: {
+                  auditReport: {
+                    reportNumber: { contains: query.search },
+                  },
+                },
+              },
+              {
+                observation: {
+                  mainObservation: { name: { contains: query.search } },
+                },
+              },
             ],
           }
         : {}),
@@ -2586,11 +2640,14 @@ const getAuditHistory = async (
   const normalizedRows = activities.map((activity: any) => ({
     action: activity.action,
     actor: activity.actorUser?.name ?? "Sistema",
-    area: activity.observation?.area.name ?? "—",
+    area: activity.observation?.areaAssignments[0]?.area.name ?? "—",
     date: activity.createdAt.toISOString(),
     description: activity.description ?? activity.title,
     event: getActivityLabel(activity.activityType, activity.action),
-    observation: activity.observation?.code ?? "—",
+    "Número de observación": activity.observation
+      ? observationDisplayNumber(activity.observation)
+      : "—",
+    "Observación principal": activity.observation?.mainObservation.name ?? "—",
     result: getActivityResult(activity.activityType),
   }));
   const filteredRows = normalizedRows.filter((row: any) => {
@@ -2637,7 +2694,8 @@ const getAuditHistory = async (
   return {
     columns: [
       "Fecha",
-      "Observación",
+      "Número de observación",
+      "Observación principal",
       "Área",
       "Responsable",
       "Acción",
@@ -2677,7 +2735,9 @@ const getAuditStructuredRows = async (
     });
     return {
       columns: [
-        "Observación",
+        "Número de observación",
+        "Observación principal",
+        "Título de observación",
         "Evidencia",
         "Tipo",
         "Cargado por",
@@ -2689,7 +2749,9 @@ const getAuditStructuredRows = async (
         "Cargado por": evidence.uploadedByUser.name,
         Evidencia: evidence.originalName,
         Fecha: evidence.createdAt.toISOString(),
-        Observación: `${observationDisplayCode(evidence.observation)} · ${evidence.observation.title}`,
+        "Número de observación": observationDisplayNumber(evidence.observation),
+        "Observación principal": evidence.observation.mainObservation.name,
+        "Título de observación": evidence.observation.title,
         Revisión: "Pendiente de revisión documental",
         Tipo: `${evidence.context} · ${evidence.mimeType}`,
       })),
@@ -2749,7 +2811,8 @@ const getAuditStructuredRows = async (
       columns:
         query.template === "DEADLINES"
           ? [
-              "Observación",
+              "Número de observación",
+              "Observación principal",
               "Área",
               "Responsable",
               "Riesgo",
@@ -2760,7 +2823,8 @@ const getAuditStructuredRows = async (
               "Días vencidos",
             ]
           : [
-              "Observación",
+              "Número de observación",
+              "Observación principal",
               "Área",
               "Solicitante",
               "Fecha original",
@@ -2796,9 +2860,10 @@ const getAuditStructuredRows = async (
               Estado: request.status,
               "Fecha actual": effectiveDueDate.toISOString(),
               "Fecha original": request.previousDueDate.toISOString(),
-              Observación: observation
-                ? observationDisplayCode(observation)
+              "Número de observación": observation
+                ? observationDisplayNumber(observation)
                 : "—",
+              "Observación principal": observation?.mainObservation.name ?? "—",
               Responsable: request.requestedByUser.name,
               Riesgo: observation?.riskLevel.name ?? "—",
             }
@@ -2807,9 +2872,10 @@ const getAuditStructuredRows = async (
               Estado: request.status,
               "Fecha original": request.previousDueDate.toISOString(),
               "Fecha solicitada": request.proposedDueDate.toISOString(),
-              Observación: observation
-                ? observationDisplayCode(observation)
+              "Número de observación": observation
+                ? observationDisplayNumber(observation)
                 : "—",
+              "Observación principal": observation?.mainObservation.name ?? "—",
               Solicitante: request.requestedByUser.name,
             };
       }),
@@ -2835,6 +2901,7 @@ const getAuditStructuredRows = async (
         auditReport: { select: { reportNumber: true } },
         currentDueDate: true,
         id: true,
+        mainObservation: { select: { name: true } },
         observationNumber: true,
         riskLevel: { select: { name: true } },
         title: true,
@@ -2843,7 +2910,9 @@ const getAuditStructuredRows = async (
     });
     return {
       columns: [
-        "Observación",
+        "Número de observación",
+        "Observación principal",
+        "Título de observación",
         "Área",
         "Responsable",
         "Riesgo",
@@ -2863,7 +2932,9 @@ const getAuditStructuredRows = async (
         ),
         "Fecha límite": observation.currentDueDate.toISOString(),
         Estado: "Vencida",
-        Observación: `${observationDisplayCode(observation)} · ${observation.title}`,
+        "Número de observación": observationDisplayNumber(observation),
+        "Observación principal": observation.mainObservation.name,
+        "Título de observación": observation.title,
         Responsable:
           observation.areaAssignments[0]?.areaResponsible.name ?? "Sin asignar",
         Riesgo: observation.riskLevel.name,

@@ -59,12 +59,7 @@ export const observationAggregationService = {
       return "CONCLUIDO";
     }
     if (
-      actionPlans.some(
-        (actionPlan) =>
-          actionPlan.progressPercent > 0 ||
-          actionPlan.status === "WITH_PROGRESS" ||
-          actionPlan.status === "CONCLUDED",
-      )
+      actionPlans.some((actionPlan) => actionPlan.status === "WITH_PROGRESS")
     ) {
       return "CON_AVANCE";
     }

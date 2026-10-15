@@ -261,6 +261,10 @@ const buildObservationInclude = (access: AuthorizationSummary) =>
       },
       where: buildActionPlanScopeWhere(access),
     },
+    deadlineExtensionRequests: {
+      select: { id: true },
+      where: { deletedAt: null, status: "MANAGER_APPROVED" },
+    },
     areaAssignments: {
       include: {
         actionPlans: {
@@ -384,11 +388,11 @@ const formatObservation = (
     auditorUser: record.auditorUser,
     category: record.category,
     currentDueDate: record.currentDueDate.toISOString(),
-    deadlineStatus: record.status.isFinal
-      ? "NO_APLICA"
-      : isOverdue
-        ? "VENCIDO"
-        : "VIGENTE",
+    deadlineStatus: getObservationDeadlineStatus(
+      record.status.isFinal,
+      isOverdue,
+      record.deadlineExtensionRequests.length > 0,
+    ),
     currentStage: record.currentStage,
     description: record.description,
     displayCode: `${record.auditReport.reportNumber} / OBS-${String(record.observationNumber).padStart(3, "0")}`,
@@ -588,6 +592,27 @@ type ObservationState = NonNullable<
   ListObservationsQuery["observationState"]
 >[number];
 
+const actionPlanStatusByObservationStatus = {
+  CON_AVANCE: "WITH_PROGRESS",
+  CONCLUIDO: "CONCLUDED",
+  INICIADO: "STARTED",
+  NO_INICIADO: "NOT_STARTED",
+} as const satisfies Record<
+  ObservationProgressStatus,
+  "CONCLUDED" | "NOT_STARTED" | "STARTED" | "WITH_PROGRESS"
+>;
+
+export const getObservationDeadlineStatus = (
+  isFinal: boolean,
+  isOverdue: boolean,
+  isReprogrammed: boolean,
+): ObservationDeadlineStatus => {
+  if (isFinal) return "VIGENTE";
+  if (isOverdue) return "VENCIDO";
+  if (isReprogrammed) return "REPROGRAMADO";
+  return "VIGENTE";
+};
+
 const isObservationState = (value: string): value is ObservationState =>
   ["PENDING", "CONCLUDED"].includes(value as ObservationState);
 
@@ -608,9 +633,21 @@ const buildObservationStateWhere = (
 
 export const buildObservationProgressWhere = (
   statuses: ObservationProgressStatus[],
+  access: AuthorizationSummary,
 ): Prisma.ObservationWhereInput | null => {
   if (statuses.length === 0) return null;
-  return { status: { key: { in: statuses } } };
+  return {
+    actionPlans: {
+      some: {
+        ...buildActionPlanScopeWhere(access),
+        status: {
+          in: statuses.map(
+            (status) => actionPlanStatusByObservationStatus[status],
+          ),
+        },
+      },
+    },
+  };
 };
 
 const buildObservationDeadlineWhereForValues = (
@@ -629,11 +666,16 @@ export const buildObservationDeadlineWhere = (
   deadlineStatus: ObservationDeadlineStatus,
   now: Date,
 ): Prisma.ObservationWhereInput => {
+  const approvedExtension = {
+    deletedAt: null,
+    status: "MANAGER_APPROVED",
+  } as const;
   switch (deadlineStatus) {
     case "REPROGRAMADO":
       return {
+        currentDueDate: { gte: now },
         deadlineExtensionRequests: {
-          some: { deletedAt: null, status: "MANAGER_APPROVED" },
+          some: approvedExtension,
         },
         status: { isFinal: false },
       };
@@ -641,8 +683,13 @@ export const buildObservationDeadlineWhere = (
       return { currentDueDate: { lt: now }, status: { isFinal: false } };
     case "VIGENTE":
       return {
-        currentDueDate: { gte: now },
-        status: { isFinal: false },
+        OR: [
+          {
+            currentDueDate: { gte: now },
+            deadlineExtensionRequests: { none: approvedExtension },
+          },
+          { status: { isFinal: true } },
+        ],
       };
   }
 };
@@ -1209,7 +1256,10 @@ export const observationsService = {
           ),
         ];
     const stateWhere = buildObservationStateWhere(stateValues);
-    const progressWhere = buildObservationProgressWhere(progressStatuses);
+    const progressWhere = buildObservationProgressWhere(
+      progressStatuses,
+      access,
+    );
     const deadlineWhere = buildObservationDeadlineWhereForValues(
       query.deadlineStatus ?? [],
       today,

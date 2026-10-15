@@ -94,7 +94,6 @@ export type DeadlineReminderEmailVariables = {
     bucket: "OVERDUE" | "DUE_TODAY" | "UPCOMING";
   }>;
   platformLink: string;
-  recipientRole: string;
   reprogrammed: number;
   roleCadence: string;
   subject: string;

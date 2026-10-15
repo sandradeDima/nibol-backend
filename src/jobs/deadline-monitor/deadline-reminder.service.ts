@@ -110,7 +110,6 @@ type ReminderPayload = {
   platformLink: string;
   recipientEmail: string;
   recipientName: string;
-  recipientRole: string;
   recipientUserId: string;
   reprogrammed: number;
   roleCadence: string;
@@ -600,8 +599,6 @@ const makePayload = (input: {
     platformLink: buildTargetUrl(),
     recipientEmail: input.digest.recipient.email,
     recipientName: input.digest.recipient.name,
-    recipientRole:
-      DEADLINE_REMINDER_ROLE_LABELS[input.digest.roles[0] ?? "EXECUTOR"],
     recipientUserId: input.digest.recipient.id,
     roleCadence: cadenceLabel,
     runType: input.runType,
@@ -735,7 +732,6 @@ const deliverReminderEmailDelivery = async (
         ...filteredPayload,
         appName: "NIBOL Bolivia",
         userName: payload.recipientName,
-        recipientRole: payload.recipientRole ?? "Ejecutor",
         platformLink: buildFrontendUrl(payload.platformLink),
         plans: plans.map((plan) => ({
           area: plan.area,

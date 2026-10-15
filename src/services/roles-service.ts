@@ -92,8 +92,23 @@ const getPermissionRecords = async (
 ): Promise<Array<{ id: string; name: string }>> => {
   for (const permissionName of permissionNames) {
     const moduleMatch = /^([a-z0-9_.]+)\.view_module$/.exec(permissionName);
-    if (moduleMatch && !permissionNames.includes(`${moduleMatch[1]}.view`)) {
-      throw new AppError(`The ${moduleMatch[1]}.view permission is required to view its module.`, 400);
+    if (moduleMatch) {
+      const resourcePermissionPrefix = `${moduleMatch[1]}.`;
+      const hasOtherPermission = permissionNames.some(
+        (selectedPermission) =>
+          selectedPermission !== permissionName &&
+          selectedPermission.startsWith(resourcePermissionPrefix) &&
+          !selectedPermission
+            .slice(resourcePermissionPrefix.length)
+            .includes("."),
+      );
+
+      if (!hasOtherPermission) {
+        throw new AppError(
+          `At least one ${moduleMatch[1]} permission is required to view its module.`,
+          400,
+        );
+      }
     }
   }
 

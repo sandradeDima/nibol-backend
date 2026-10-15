@@ -308,7 +308,9 @@ const reportContent = (input: PdfInput): string => {
   const operational = dashboard.operational;
   const criticalRows = operational.criticalOrOverdueObservations.map(
     (item) => ({
-      Observación: item.title,
+      "Número de observación": item.number,
+      "Observación principal": item.mainObservation,
+      "Título de observación": item.title,
       Área: item.area.name,
       Riesgo: item.riskLevel.name,
       "Estado de observación": item.observationStatus.name,
@@ -318,14 +320,16 @@ const reportContent = (input: PdfInput): string => {
     }),
   );
   const upcomingRows = operational.upcomingActionPlans.map((item) => ({
-    Observación: `${item.observationCode} · ${item.title}`,
+    "Número de observación": item.observationNumber,
+    "Observación principal": item.mainObservation,
+    "Plan de acción": item.title,
     Ejecutor: item.executorName,
     "Fecha límite": item.effectiveDueDate,
     "Estado según plazo": item.deadlineStatus,
     "Avance oficial": `${item.progress.percent}%`,
   }));
   const planTotals = `<p class="summary-line">Total ${formatCell(summary.total)} · Vigentes ${formatCell(summary.vigentes)} · Vencidos ${formatCell(summary.vencidos)} · Reprogramados ${formatCell(summary.reprogramados)}</p>`;
-  return `<h2 class="section-title">01 · Resumen de observaciones</h2>${observationKpis}<div class="grid two">${panel("Nivel de riesgo", donut(byRisk, true))}${panel("Estado según plazo", donut(charts.deadlineDistribution, true))}</div><h2 class="section-title">02 · Planes de acción</h2>${panel("Estado del plan de acción", progressCards)}<h2 class="section-title">03 · Observaciones por…</h2><div class="grid two">${panel("Estado de observación", bars(charts.statusDistribution))}${panel("Observaciones por área", bars(byArea))}${panel("Observaciones por Responsable de Área", bars(byResponsible))}${panel("Observaciones por Dueño del Proceso", bars(byOwner))}${panel("Observaciones por Ejecutor", bars(byExecutor))}</div><h2 class="section-title">04 · Planes por…</h2>${planTotals}<div class="grid two">${panel("Planes por área", bars(charts.areaDistribution))}${panel("Planes por Responsable de Área", bars(charts.areaResponsibleDistribution))}${panel("Planes por Dueño del Proceso", bars(charts.processOwnerDistribution))}${panel("Planes por Ejecutor", bars(charts.executorDistribution))}</div><h2 class="section-title">05 · Analítica complementaria</h2><div class="grid two">${panel("Tendencia mensual", trend(charts.trend))}${panel("Top responsables con mayor carga", bars(charts.topResponsibleWorkload ?? []))}${panel("Top áreas con más vencimientos", bars((charts.topOverdueAreas ?? []).map((item) => ({ ...item, colorToken: "VENCIDO" }))))}</div><h2 class="section-title">06 · Operación</h2>${table(Object.keys(criticalRows[0] ?? { Observación: "" }), criticalRows, "Observaciones críticas o vencidas")}${table(Object.keys(upcomingRows[0] ?? { Observación: "" }), upcomingRows, "Planes próximos a vencer")}${table(preview.columns, preview.rows, "Planes de acción")}`;
+  return `<h2 class="section-title">01 · Resumen de observaciones</h2>${observationKpis}<div class="grid two">${panel("Nivel de riesgo", donut(byRisk, true))}${panel("Estado según plazo", donut(charts.deadlineDistribution, true))}</div><h2 class="section-title">02 · Planes de acción</h2>${panel("Estado del plan de acción", progressCards)}<h2 class="section-title">03 · Observaciones por…</h2><div class="grid two">${panel("Estado de observación", bars(charts.statusDistribution))}${panel("Observaciones por área", bars(byArea))}${panel("Observaciones por Responsable de Área", bars(byResponsible))}${panel("Observaciones por Dueño del Proceso", bars(byOwner))}${panel("Observaciones por Ejecutor", bars(byExecutor))}</div><h2 class="section-title">04 · Planes por…</h2>${planTotals}<div class="grid two">${panel("Planes por área", bars(charts.areaDistribution))}${panel("Planes por Responsable de Área", bars(charts.areaResponsibleDistribution))}${panel("Planes por Dueño del Proceso", bars(charts.processOwnerDistribution))}${panel("Planes por Ejecutor", bars(charts.executorDistribution))}</div><h2 class="section-title">05 · Analítica complementaria</h2><div class="grid two">${panel("Tendencia mensual", trend(charts.trend))}${panel("Top responsables con mayor carga", bars(charts.topResponsibleWorkload ?? []))}${panel("Top áreas con más vencimientos", bars((charts.topOverdueAreas ?? []).map((item) => ({ ...item, colorToken: "VENCIDO" }))))}</div><h2 class="section-title">06 · Operación</h2>${table(Object.keys(criticalRows[0] ?? { "Número de observación": "", "Observación principal": "", "Título de observación": "" }), criticalRows, "Observaciones críticas o vencidas")}${table(Object.keys(upcomingRows[0] ?? { "Número de observación": "", "Observación principal": "", "Plan de acción": "" }), upcomingRows, "Planes próximos a vencer")}${table(preview.columns, preview.rows, "Planes de acción")}`;
 };
 
 const styles = `

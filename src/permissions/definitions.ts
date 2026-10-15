@@ -57,10 +57,22 @@ export const PERMISSION_RESOURCES = [
   ...generatedPermissionResources,
 ] as const;
 
+const ADDITIONAL_MODULE_PERMISSION_RESOURCES = [
+  "reports",
+  "recommended_action_plans",
+  "evidence",
+  "deadline_extensions",
+  "observations.history",
+  "action_plans.history",
+] as const;
+
 export const PERMISSION_ACTIONS = ["view", "create", "edit", "delete"] as const;
-export const MODULE_PERMISSION_NAMES = PERMISSION_RESOURCES.map(
-  (resource) => `${resource}.view_module`,
-);
+export const MODULE_PERMISSION_NAMES = [
+  ...PERMISSION_RESOURCES.map((resource) => `${resource}.view_module`),
+  ...ADDITIONAL_MODULE_PERMISSION_RESOURCES.map(
+    (resource) => `${resource}.view_module`,
+  ),
+];
 
 export type PermissionResource = (typeof PERMISSION_RESOURCES)[number];
 export type PermissionAction = (typeof PERMISSION_ACTIONS)[number];

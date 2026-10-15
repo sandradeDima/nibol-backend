@@ -45,6 +45,6 @@ test("only all concluded plans produce global conclusion", () => {
       ...plans,
       { progressPercent: 0, status: "NOT_STARTED" },
     ]),
-    "CON_AVANCE",
+    "INICIADO",
   );
 });

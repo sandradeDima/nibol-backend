@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildObservationDeadlineWhere,
   buildObservationProgressWhere,
+  getObservationDeadlineStatus,
   nextAvailableObservationNumber,
 } from "./observations.service.js";
 import { countWorkflowTasksForObservation } from "./observation-aggregation.service.js";
@@ -22,24 +23,68 @@ test("reutiliza el menor número libre dentro de un informe", () => {
   assert.equal(nextAvailableObservationNumber([]), 1);
 });
 
-test("el filtro de avance solo incluye los estados seleccionados", () => {
-  assert.deepEqual(buildObservationProgressWhere(["CON_AVANCE"]), {
-    status: { key: { in: ["CON_AVANCE"] } },
+const allScope = {
+  dataScope: "ALL" as const,
+  isAdmin: true,
+  permissions: [],
+  roleCode: "SYSTEM_ADMIN" as const,
+  roleName: "Administrador del sistema",
+  roles: ["Admin"],
+  userId: "user-1",
+};
+
+test("el filtro de avance consulta el estado exacto de los planes de acción", () => {
+  assert.deepEqual(buildObservationProgressWhere(["CON_AVANCE"], allScope), {
+    actionPlans: {
+      some: {
+        AND: [
+          {
+            OR: [
+              { remediationPlanId: null },
+              { remediationPlan: { deletedAt: null } },
+            ],
+          },
+        ],
+        deletedAt: null,
+        observation: { deletedAt: null },
+        status: { in: ["WITH_PROGRESS"] },
+      },
+    },
   });
+  assert.equal(buildObservationProgressWhere([], allScope), null);
 });
 
-test("los filtros de plazo excluyen observaciones concluidas", () => {
+test("los filtros de plazo coinciden con el estado visible", () => {
   const now = new Date("2026-10-14T00:00:00.000Z");
   assert.deepEqual(buildObservationDeadlineWhere("VIGENTE", now), {
-    currentDueDate: { gte: now },
-    status: { isFinal: false },
+    OR: [
+      {
+        currentDueDate: { gte: now },
+        deadlineExtensionRequests: {
+          none: { deletedAt: null, status: "MANAGER_APPROVED" },
+        },
+      },
+      { status: { isFinal: true } },
+    ],
   });
   assert.deepEqual(buildObservationDeadlineWhere("REPROGRAMADO", now), {
+    currentDueDate: { gte: now },
     deadlineExtensionRequests: {
       some: { deletedAt: null, status: "MANAGER_APPROVED" },
     },
     status: { isFinal: false },
   });
+  assert.deepEqual(buildObservationDeadlineWhere("VENCIDO", now), {
+    currentDueDate: { lt: now },
+    status: { isFinal: false },
+  });
+  assert.equal(getObservationDeadlineStatus(true, false, false), "VIGENTE");
+  assert.equal(getObservationDeadlineStatus(false, true, true), "VENCIDO");
+  assert.equal(
+    getObservationDeadlineStatus(false, false, true),
+    "REPROGRAMADO",
+  );
+  assert.equal(getObservationDeadlineStatus(false, false, false), "VIGENTE");
 });
 
 test("el correlativo se calcula por conjunto de números del informe", () => {

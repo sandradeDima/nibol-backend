@@ -94,27 +94,14 @@ test("el recordatorio agrupa observaciones únicas por área y muestra los dos g
   assert.match(rendered.text, /OPERACIONES · 5 Observaciones/);
   assert.doesNotMatch(rendered.html, /Al corte del/);
   assert.match(rendered.html, /Ver pendientes en NIBOL/);
-  assert.match(rendered.html, />Responsable de área<\/div>/);
   assert.doesNotMatch(
     rendered.html,
-    /Responsable de área \/ Dueño de proceso \/ Ejecutor/,
+    />(Responsable de área|Dueño del proceso|Ejecutor)<\/div>/,
   );
-  assert.match(rendered.text, /^Responsable de área/);
-  for (const role of ["Dueño del proceso", "Ejecutor"]) {
-    const roleEmail = deadlineReminderEmailTemplate.render({
-      brand: {
-        appName: "NIBOL Bolivia",
-        logoUrl: null,
-        primaryColor: "#07142d",
-        senderEmail: "no-reply@nibol.test",
-        senderName: "NIBOL",
-        supportEmail: "support@nibol.test",
-      },
-      variables: { ...sample, plans, recipientRole: role },
-    });
-    assert.ok(roleEmail.html.includes(`>${role}</div>`));
-    assert.ok(roleEmail.text.startsWith(role));
-  }
+  assert.doesNotMatch(
+    rendered.text,
+    /^(Responsable de área|Dueño del proceso|Ejecutor)$/m,
+  );
   assert.match(rendered.subject, /^NIBOL ·/);
 });
 
