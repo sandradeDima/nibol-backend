@@ -6,9 +6,8 @@ import { sendPaginated, sendSuccess } from "../../utils/response.js";
 import {
   buildExcelWorkbook,
   buildObservationDetailWorkbook,
-  buildReportPdf,
-  buildSimplePdf,
 } from "./reports.exports.js";
+import { buildReportPdf } from "./reports.pdf.js";
 import { reportsService } from "./reports.service.js";
 import {
   auditReportExportQuerySchema,
@@ -24,6 +23,18 @@ const getQueryValue = (value: unknown): string | undefined => {
   if (Array.isArray(value) && typeof value[0] === "string") return value[0];
   return undefined;
 };
+
+const auditTemplateLabels = {
+  ACTIVITY_AREA: "Actividad por área",
+  ACTIVITY_USER: "Actividad por usuario",
+  APPROVALS: "Aprobaciones y rechazos",
+  DEADLINES: "Fechas límite",
+  EVIDENCE: "Evidencias",
+  EXTENSIONS: "Ampliaciones",
+  HISTORY: "Historial de observación",
+  INCUMPLIMIENTOS: "Incumplimientos",
+  WORKFLOW_HISTORY: "Historial de flujos",
+} as const;
 
 const getAccess = (request: Request): AuthorizationSummary => {
   if (!request.authorizationSummary) {
@@ -62,6 +73,7 @@ const reportQueryInput = (request: Request) => ({
   processOwnerId: getQueryValue(request.query["filter.processOwnerId"]),
   reprogrammed: getQueryValue(request.query["filter.reprogrammed"]),
   reportName: getQueryValue(request.query.reportName),
+  pdfView: getQueryValue(request.query.pdfView),
   responsibleUserId: getQueryValue(request.query["filter.responsibleUserId"]),
   riskLevelId: getQueryValue(request.query["filter.riskLevelId"]),
   search:
@@ -189,16 +201,28 @@ export const reportsController = {
     const filters = report.filters;
 
     if (format === "pdf") {
+      if (query.pdfView !== "GENERATOR" && query.type !== "ACTION_PLANS")
+        throw new AppError("La vista PDF requiere planes de acción.", 400);
+      const access = getAccess(request);
+      const dashboard = ["REPORTS", "DASHBOARD"].includes(query.pdfView)
+        ? await reportsService.getDashboard(query, access)
+        : undefined;
+      const staticDashboard =
+        query.pdfView === "REPORTS"
+          ? await reportsService.getDashboard(
+              reportFiltersSchema.parse({}),
+              access,
+            )
+          : undefined;
       sendFile(
         response,
-        buildReportPdf({
-          charts: report.charts,
-          columns: report.columns,
+        await buildReportPdf({
+          ...(dashboard ? { dashboard } : {}),
           filters,
-          generatedAt: report.generatedAt,
+          preview: report,
           reportName: report.reportName,
-          rows: report.rows,
-          summary: report.summary,
+          ...(staticDashboard ? { staticDashboard } : {}),
+          view: query.pdfView,
         }),
         "application/pdf",
         "reporte-nibol.pdf",
@@ -241,11 +265,12 @@ export const reportsController = {
 
   async exportAudit(request: Request, response: Response) {
     const query = auditReportExportQuerySchema.parse(auditQueryInput(request));
-    const report = await reportsService.getAuditReport(
-      query,
-      getAccess(request),
-    );
+    const access = getAccess(request);
     const format = getQueryValue(request.query.format) ?? "excel";
+    const report = await reportsService.getAuditReport(
+      format === "pdf" ? { ...query, page: 1 } : query,
+      access,
+    );
     const reportName = `Reporte de Auditoría — ${query.template}`;
     const filters = {
       Área: query.areaId ?? "Todas",
@@ -258,14 +283,31 @@ export const reportsController = {
     };
 
     if (format === "pdf") {
+      if (
+        ["HISTORY", "ACTIVITY_AREA", "ACTIVITY_USER", "APPROVALS"].includes(
+          query.template,
+        )
+      ) {
+        for (
+          let page = 2;
+          (page - 1) * query.perPage < report.summary.total;
+          page += 1
+        ) {
+          const next = await reportsService.getAuditReport(
+            { ...query, page },
+            access,
+          );
+          report.rows.push(...next.rows);
+          report.timeline?.push(...(next.timeline ?? []));
+        }
+      }
       sendFile(
         response,
-        buildSimplePdf({
-          columns: report.columns,
+        await buildReportPdf({
+          audit: report,
           filters,
-          generatedAt: report.generatedAt,
-          reportName,
-          rows: report.rows,
+          reportName: auditTemplateLabels[query.template],
+          view: "AUDIT",
         }),
         "application/pdf",
         "reporte-auditoria-nibol.pdf",

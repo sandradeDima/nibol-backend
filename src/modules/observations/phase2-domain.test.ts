@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { nextAvailableObservationNumber } from "./observations.service.js";
+import {
+  buildObservationDeadlineWhere,
+  buildObservationProgressWhere,
+  nextAvailableObservationNumber,
+} from "./observations.service.js";
 import { countWorkflowTasksForObservation } from "./observation-aggregation.service.js";
 import { observationDeadlineService } from "./observation-deadline.service.js";
 import {
@@ -16,6 +20,26 @@ test("reutiliza el menor número libre dentro de un informe", () => {
   assert.equal(nextAvailableObservationNumber([1, 2, 4, 5]), 3);
   assert.equal(nextAvailableObservationNumber([1, 2, 3]), 4);
   assert.equal(nextAvailableObservationNumber([]), 1);
+});
+
+test("el filtro de avance solo incluye los estados seleccionados", () => {
+  assert.deepEqual(buildObservationProgressWhere(["CON_AVANCE"]), {
+    status: { key: { in: ["CON_AVANCE"] } },
+  });
+});
+
+test("los filtros de plazo excluyen observaciones concluidas", () => {
+  const now = new Date("2026-10-14T00:00:00.000Z");
+  assert.deepEqual(buildObservationDeadlineWhere("VIGENTE", now), {
+    currentDueDate: { gte: now },
+    status: { isFinal: false },
+  });
+  assert.deepEqual(buildObservationDeadlineWhere("REPROGRAMADO", now), {
+    deadlineExtensionRequests: {
+      some: { deletedAt: null, status: "MANAGER_APPROVED" },
+    },
+    status: { isFinal: false },
+  });
 });
 
 test("el correlativo se calcula por conjunto de números del informe", () => {

@@ -186,7 +186,10 @@ export const isObservationOverdue = (
   status: { isFinal?: boolean; key: string },
   now = new Date(),
 ): boolean => {
-  return !isObservationClosed(status) && dueDate.getTime() < now.getTime();
+  return (
+    !isObservationClosed(status) &&
+    getDateOnlyKey(dueDate) < getBusinessDateKey(now)
+  );
 };
 
 export const isObservationDueSoon = (

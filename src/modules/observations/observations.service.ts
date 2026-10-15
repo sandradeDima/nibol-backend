@@ -293,7 +293,13 @@ const buildObservationInclude = (access: AuthorizationSummary) =>
       select: { risk: { select: { id: true, name: true } } },
     },
     status: {
-      select: { id: true, isFinal: true, isInitial: true, key: true, name: true },
+      select: {
+        id: true,
+        isFinal: true,
+        isInitial: true,
+        key: true,
+        name: true,
+      },
     },
   }) satisfies Prisma.ObservationInclude;
 
@@ -600,12 +606,11 @@ const buildObservationStateWhere = (
   return { status: { isFinal: selectedStates.has("CONCLUDED") } };
 };
 
-const buildObservationProgressWhere = (
+export const buildObservationProgressWhere = (
   statuses: ObservationProgressStatus[],
 ): Prisma.ObservationWhereInput | null => {
   if (statuses.length === 0) return null;
-  if (statuses.length === 1) return buildBusinessStatusWhere(statuses[0]!);
-  return { OR: statuses.map((status) => buildBusinessStatusWhere(status)) };
+  return { status: { key: { in: statuses } } };
 };
 
 const buildObservationDeadlineWhereForValues = (
@@ -620,50 +625,7 @@ const buildObservationDeadlineWhereForValues = (
   };
 };
 
-const buildBusinessStatusWhere = (
-  status: ObservationProgressStatus,
-): Prisma.ObservationWhereInput => {
-  switch (status) {
-    case "NO_INICIADO":
-      return {
-        OR: [
-          { actionPlans: { none: { deletedAt: null } } },
-          {
-            actionPlans: {
-              every: {
-                OR: [{ deletedAt: { not: null } }, { status: "NOT_STARTED" }],
-              },
-            },
-          },
-        ],
-      };
-    case "INICIADO":
-      return {
-        actionPlans: {
-          none: { deletedAt: null, progressPercent: { gt: 0 } },
-          some: { deletedAt: null, status: "STARTED" },
-        },
-        status: { isFinal: false },
-      };
-    case "CON_AVANCE":
-      return {
-        actionPlans: {
-          some: {
-            deletedAt: null,
-            OR: [
-              { progressPercent: { gt: 0 } },
-              { status: { in: ["WITH_PROGRESS", "CONCLUDED"] } },
-            ],
-          },
-        },
-        status: { isFinal: false },
-      };
-    case "CONCLUIDO":
-      return { status: { isFinal: true } };
-  }
-};
-
-const buildObservationDeadlineWhere = (
+export const buildObservationDeadlineWhere = (
   deadlineStatus: ObservationDeadlineStatus,
   now: Date,
 ): Prisma.ObservationWhereInput => {
@@ -673,12 +635,14 @@ const buildObservationDeadlineWhere = (
         deadlineExtensionRequests: {
           some: { deletedAt: null, status: "MANAGER_APPROVED" },
         },
+        status: { isFinal: false },
       };
     case "VENCIDO":
       return { currentDueDate: { lt: now }, status: { isFinal: false } };
     case "VIGENTE":
       return {
-        OR: [{ currentDueDate: { gte: now } }, { status: { isFinal: true } }],
+        currentDueDate: { gte: now },
+        status: { isFinal: false },
       };
   }
 };

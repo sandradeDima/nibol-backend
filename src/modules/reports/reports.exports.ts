@@ -14,6 +14,8 @@ type ReportExportInput = {
 
 const escapeXml = (value: unknown): string =>
   String(value ?? "")
+    // XML 1.0 disallows these control characters.
+    // eslint-disable-next-line no-control-regex
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -26,14 +28,6 @@ const stringifyCell = (value: unknown): string => {
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
 };
-
-const flattenFilters = (filters: Record<string, unknown>): string =>
-  Object.entries(filters)
-    .filter(
-      ([, value]) => value !== undefined && value !== null && value !== "",
-    )
-    .map(([key, value]) => `${key}: ${stringifyCell(value)}`)
-    .join(" · ") || "Sin filtros adicionales";
 
 const isIsoDate = (value: string): boolean =>
   /^\d{4}-\d{2}-\d{2}T/.test(value) && !Number.isNaN(Date.parse(value));
@@ -136,41 +130,6 @@ const workbookRels = `<Relationships xmlns="http://schemas.openxmlformats.org/pa
   <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>
   <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
 </Relationships>`;
-
-const stylesXml = `<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <numFmts count="1"><numFmt numFmtId="164" formatCode="dd/mm/yyyy"/></numFmts>
-  <fonts count="2"><font><sz val="10"/><color rgb="FF334155"/><name val="Aptos"/></font><font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Aptos Display"/></font></fonts>
-  <fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF102A43"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE9F0F7"/><bgColor indexed="64"/></patternFill></fill></fills>
-  <borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left/><right/><top/><bottom style="thin"><color rgb="FFD7E0EA"/></bottom><diagonal/></border></borders>
-  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-  <cellXfs count="6">
-    <xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>
-    <xf numFmtId="0" fontId="1" fillId="2" borderId="0" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="1" fillId="2" borderId="1" applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>
-    <xf numFmtId="0" fontId="0" fillId="3" borderId="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
-    <xf numFmtId="164" fontId="0" fillId="0" borderId="1" applyNumberFormat="1"/>
-    <xf numFmtId="0" fontId="0" fillId="0" borderId="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
-  </cellXfs>
-</styleSheet>`;
-
-const colorFor = (
-  item: { colorToken?: string | null; key: string },
-  index: number,
-): string => {
-  const token = item.colorToken?.toLowerCase();
-  if (token?.startsWith("#")) return token;
-  if (["high", "alto", "critical", "critico", "crítico"].includes(token ?? ""))
-    return "#D71920";
-  if (["medium", "medio", "moderate", "moderado"].includes(token ?? ""))
-    return "#B45309";
-  if (["low", "bajo"].includes(token ?? "")) return "#0F766E";
-  if (["NOT_STARTED", "NI"].includes(item.key)) return "#6B7280";
-  if (["STARTED", "I"].includes(item.key)) return "#1D4ED8";
-  if (["WITH_PROGRESS", "CA"].includes(item.key)) return "#B45309";
-  if (["CONCLUDED", "CO"].includes(item.key)) return "#0F766E";
-  if (["VENCIDO", "vencidos", "OVERDUE"].includes(item.key)) return "#D71920";
-  return ["#0F766E", "#1D4ED8", "#6D28D9", "#475569", "#B45309"][index % 5]!;
-};
 
 const summaryNumber = (
   summary: ReportDashboardData["summary"] | undefined,
@@ -277,15 +236,44 @@ const summaryRows = (
   ];
 };
 
+const reportColumnGroup = (column: string): string => {
+  if (column.includes("Observación")) return "Observación";
+  if (/^(Área|Responsable|Solicitante|Cargad[oa] por)$/.test(column))
+    return "Responsables y área";
+  if (/^(Fecha|Días|Tiempo)/.test(column)) return "Fechas y plazos";
+  if (/^(Estado|Resultado|Revisión|Riesgo|Avance|Cumplimiento)/.test(column))
+    return "Estado y evaluación";
+  return "Detalle del reporte";
+};
+
+const reportGroups = (columns: string[]) => {
+  const labels = columns.map(reportColumnGroup);
+  const groups = columns.map((column, index) =>
+    index === 0 || labels[index] !== labels[index - 1] ? labels[index] : "",
+  );
+  const mergeCells: string[] = [];
+  for (let start = 0; start < columns.length; ) {
+    let end = start + 1;
+    while (end < columns.length && labels[end] === labels[start]) end += 1;
+    if (end - start > 1)
+      mergeCells.push(`${columnName(start)}1:${columnName(end - 1)}1`);
+    start = end;
+  }
+  return { groups, mergeCells };
+};
+
 export const buildExcelWorkbook = (input: ReportExportInput): Buffer => {
   const { columns, filters, generatedAt, reportName, rows } = input;
-  const filterText = flattenFilters(filters);
   const summary = [
     [reportName, ""],
     ["Generado", generatedAt.replace("T", " ").replace(/\.\d{3}Z$/, " UTC")],
-    ["Filtros aplicados", filterText],
+    ...Object.entries(filters).map(([key, value]) => [
+      key,
+      stringifyCell(value),
+    ]),
     ["", ""],
-    ...summaryRows(input.summary, rows),
+    ["Registros del reporte", rows.length],
+    ...(input.summary ? summaryRows(input.summary, rows) : []),
     ...(
       [
         ["Riesgo", input.charts?.riskDistribution],
@@ -303,12 +291,14 @@ export const buildExcelWorkbook = (input: ReportExportInput): Buffer => {
         : [],
     ),
   ];
+  const { groups, mergeCells } = reportGroups(columns);
   const data = [
+    groups,
     columns,
     ...rows.map((row) => columns.map((column) => row[column])),
   ];
   const widths = columns.map((column) =>
-    Math.min(34, Math.max(14, column.length + 4)),
+    Math.min(55, Math.max(18, column.length + 5)),
   );
   const entries: Array<{ data: string | Buffer; name: string }> = [
     { data: contentTypes(), name: "[Content_Types].xml" },
@@ -316,32 +306,40 @@ export const buildExcelWorkbook = (input: ReportExportInput): Buffer => {
       data: '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
       name: "_rels/.rels",
     },
-    { data: workbookXml, name: "xl/workbook.xml" },
-    { data: workbookRels, name: "xl/_rels/workbook.xml.rels" },
-    { data: stylesXml, name: "xl/styles.xml" },
     {
-      data: worksheet(summary, {
-        freezeRows: 5,
-        mergeCells: ["A1:B1"],
+      data: workbookXml
+        .replace('name="RESUMEN"', 'name="DATA"')
+        .replace('name="DATOS"', 'name="FILTROS Y RESUMEN"'),
+      name: "xl/workbook.xml",
+    },
+    { data: workbookRels, name: "xl/_rels/workbook.xml.rels" },
+    { data: observationDetailStylesXml, name: "xl/styles.xml" },
+    {
+      data: worksheet(data, {
+        autoFilter: `A2:${columnName(Math.max(0, columns.length - 1))}${data.length}`,
+        freezeRows: 2,
+        mergeCells,
+        rowHeights: [15, 32.5],
         rowStyles: (_row, index) =>
-          index === 0
-            ? [1, 1]
-            : index === 4
-              ? [2, 2]
-              : index > 4
-                ? [3, 3]
-                : [3, 3],
-        widths: [30, 70],
+          index < 2
+            ? columns.map(
+                (_, column) =>
+                  [1, 2, 3, 5][
+                    (groups.slice(0, column + 1).filter(Boolean).length - 1) % 4
+                  ] ?? 1,
+              )
+            : columns.map(() => 6),
+        showGridLines: false,
+        widths,
+        zoomScale: 70,
       }),
       name: "xl/worksheets/sheet1.xml",
     },
     {
-      data: worksheet(data, {
-        autoFilter: `A1:${columnName(Math.max(0, columns.length - 1))}${data.length}`,
-        freezeRows: 1,
-        rowStyles: (_row, index) =>
-          index === 0 ? columns.map(() => 2) : columns.map(() => 5),
-        widths,
+      data: worksheet(summary, {
+        mergeCells: ["A1:B1"],
+        rowStyles: (_row, index) => [index === 0 ? 1 : 6, index === 0 ? 1 : 6],
+        widths: [32, 70],
       }),
       name: "xl/worksheets/sheet2.xml",
     },
@@ -523,375 +521,3 @@ export const buildObservationDetailWorkbook = (input: {
     },
   ]);
 };
-
-const pdfText = (value: string): string =>
-  value
-    .replaceAll("\\", "\\\\")
-    .replaceAll("(", "\\(")
-    .replaceAll(")", "\\)")
-    .replaceAll("\n", " ")
-    .replaceAll("—", "-")
-    .replaceAll("–", "-")
-    .replaceAll("…", "...");
-
-const pdfColor = (hex: string): string => {
-  const value = hex.replace("#", "");
-  const channels = [0, 2, 4].map((index) =>
-    (Number.parseInt(value.slice(index, index + 2), 16) / 255).toFixed(3),
-  );
-  return `${channels.join(" ")} rg`;
-};
-
-const pdfRect = (
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  color: string,
-) => `${pdfColor(color)} ${x} ${y} ${width} ${height} re f`;
-
-const pdfLabel = (
-  x: number,
-  y: number,
-  value: string,
-  size = 9,
-  bold = false,
-  color = "#334155",
-): string =>
-  `${pdfColor(color)} BT /F${bold ? 2 : 1} ${size} Tf ${x} ${y} Td (${pdfText(value)}) Tj ET`;
-
-const pdfBarList = (
-  commands: string[],
-  title: string,
-  items: ReportDashboardData["charts"]["riskDistribution"],
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-): void => {
-  commands.push(pdfRect(x, y, width, height, "#F8FAFC"));
-  commands.push(pdfLabel(x + 14, y + height - 24, title, 12, true, "#102A43"));
-  const visible = items.slice(0, 6);
-  const max = Math.max(...visible.map((item) => item.value), 1);
-  const barWidth = width - 125;
-  visible.forEach((item, index) => {
-    const rowY = y + height - 52 - index * 25;
-    const label =
-      item.label.length > 17 ? `${item.label.slice(0, 16)}...` : item.label;
-    commands.push(pdfLabel(x + 14, rowY + 4, label, 8));
-    commands.push(pdfRect(x + 108, rowY, barWidth, 11, "#E2E8F0"));
-    commands.push(
-      pdfRect(
-        x + 108,
-        rowY,
-        Math.max(4, (item.value / max) * barWidth),
-        11,
-        colorFor(item, index),
-      ),
-    );
-    commands.push(
-      pdfLabel(
-        x + width - 14,
-        rowY + 4,
-        String(item.value),
-        8,
-        true,
-        "#102A43",
-      ),
-    );
-  });
-  if (!visible.length)
-    commands.push(
-      pdfLabel(
-        x + 14,
-        y + height - 54,
-        "Sin datos para este corte",
-        9,
-        false,
-        "#64748B",
-      ),
-    );
-};
-
-const makePdf = (input: ReportExportInput): Buffer => {
-  const pages: Array<{ content: string; width: number; height: number }> = [];
-  const charts = input.charts;
-  const summary = input.summary;
-  const total = summaryNumber(summary, "totalObservations", input.rows.length);
-  const pending = summaryNumber(
-    summary,
-    "pendingObservations",
-    input.rows.length,
-  );
-  const closed = summaryNumber(summary, "closedObservations", 0);
-  const first: string[] = [pdfRect(0, 0, 595, 842, "#FFFFFF")];
-  first.push(
-    pdfRect(0, 770, 595, 72, "#102A43"),
-    pdfRect(0, 766, 595, 4, "#C62828"),
-  );
-  first.push(pdfLabel(34, 807, input.reportName, 18, true, "#FFFFFF"));
-  first.push(
-    pdfLabel(
-      34,
-      787,
-      `NIBOL · Generado ${input.generatedAt}`,
-      8,
-      false,
-      "#D7E0EA",
-    ),
-  );
-  first.push(
-    pdfLabel(
-      34,
-      744,
-      `Filtros: ${flattenFilters(input.filters).slice(0, 130)}`,
-      8,
-      false,
-      "#64748B",
-    ),
-  );
-  const cards = [
-    ["Total observaciones", total, "#0B7285"],
-    ["Pendientes", pending, "#D97706"],
-    ["Cerradas", closed, "#16A34A"],
-  ] as const;
-  cards.forEach(([label, value, color], index) => {
-    const x = 34 + index * 177;
-    first.push(
-      pdfRect(x, 655, 163, 67, "#F8FAFC"),
-      pdfRect(x, 655, 5, 67, color),
-    );
-    first.push(
-      pdfLabel(x + 16, 699, label, 8, false, "#64748B"),
-      pdfLabel(x + 16, 671, String(value), 22, true, "#102A43"),
-    );
-  });
-  pdfBarList(
-    first,
-    "Riesgo",
-    charts?.riskDistribution ?? [],
-    34,
-    467,
-    253,
-    155,
-  );
-  pdfBarList(
-    first,
-    "Estado según plazo",
-    charts?.deadlineDistribution ?? [],
-    308,
-    467,
-    253,
-    155,
-  );
-  pdfBarList(
-    first,
-    "Estado del plan de acción",
-    charts?.progressDistribution ?? [],
-    34,
-    279,
-    253,
-    155,
-  );
-  pdfBarList(
-    first,
-    "Distribución por área",
-    charts?.areaDistribution ?? [],
-    308,
-    279,
-    253,
-    155,
-  );
-  first.push(pdfLabel(34, 237, "Lectura del corte", 12, true, "#102A43"));
-  const insight = summary?.predominantRisk
-    ? `Riesgo predominante: ${summary.predominantRisk.label} (${summary.predominantRisk.count}).`
-    : input.rows.length
-      ? "El corte contiene registros dentro del alcance autorizado."
-      : "No hay registros para los filtros seleccionados.";
-  first.push(pdfLabel(34, 216, insight, 9, false, "#475569"));
-  first.push(
-    pdfLabel(
-      34,
-      42,
-      "La fuente de KPIs, gráficos, filas y exportación es el mismo corte filtrado.",
-      8,
-      false,
-      "#64748B",
-    ),
-  );
-  pages.push({ content: first.join("\n"), height: 842, width: 595 });
-
-  const distributionCommands: string[] = [pdfRect(0, 0, 595, 842, "#FFFFFF")];
-  distributionCommands.push(
-    pdfRect(0, 770, 595, 72, "#102A43"),
-    pdfRect(0, 766, 595, 4, "#C62828"),
-  );
-  distributionCommands.push(
-    pdfLabel(34, 807, "Distribuciones del corte", 18, true, "#FFFFFF"),
-  );
-  distributionCommands.push(
-    pdfLabel(34, 787, input.reportName, 8, false, "#D7E0EA"),
-  );
-  pdfBarList(
-    distributionCommands,
-    "Responsables de área",
-    charts?.areaResponsibleDistribution ?? [],
-    34,
-    555,
-    253,
-    170,
-  );
-  pdfBarList(
-    distributionCommands,
-    "Dueños del proceso",
-    charts?.processOwnerDistribution ?? [],
-    308,
-    555,
-    253,
-    170,
-  );
-  pdfBarList(
-    distributionCommands,
-    "Ejecutores",
-    charts?.executorDistribution ?? [],
-    34,
-    335,
-    253,
-    170,
-  );
-  pdfBarList(
-    distributionCommands,
-    "Reprogramación",
-    charts?.reprogrammedDistribution ?? [],
-    308,
-    335,
-    253,
-    170,
-  );
-  pdfBarList(
-    distributionCommands,
-    "Vigencia",
-    charts?.currentVsOverdue ?? [],
-    34,
-    115,
-    253,
-    170,
-  );
-  pdfBarList(
-    distributionCommands,
-    "Cumplimiento",
-    charts?.areaPerformance ?? [],
-    308,
-    115,
-    253,
-    170,
-  );
-  pages.push({
-    content: distributionCommands.join("\n"),
-    height: 842,
-    width: 595,
-  });
-
-  const tableColumns = input.columns.slice(0, 8);
-  const rowsPerPage = 27;
-  for (
-    let start = 0;
-    start < Math.max(1, input.rows.length);
-    start += rowsPerPage
-  ) {
-    const commands: string[] = [pdfRect(0, 0, 842, 595, "#FFFFFF")];
-    commands.push(
-      pdfRect(0, 523, 842, 72, "#102A43"),
-      pdfRect(0, 519, 842, 4, "#C62828"),
-    );
-    commands.push(
-      pdfLabel(28, 560, `${input.reportName} · Registros`, 15, true, "#FFFFFF"),
-    );
-    commands.push(
-      pdfLabel(
-        28,
-        540,
-        `Página de datos · ${start + 1}-${Math.min(start + rowsPerPage, input.rows.length)} de ${input.rows.length}`,
-        8,
-        false,
-        "#D7E0EA",
-      ),
-    );
-    const colWidth = 786 / Math.max(tableColumns.length, 1);
-    tableColumns.forEach((column, index) => {
-      const x = 28 + index * colWidth;
-      commands.push(
-        pdfRect(x, 486, colWidth, 24, "#E9F0F7"),
-        pdfLabel(x + 4, 494, column.slice(0, 19), 6.5, true, "#102A43"),
-      );
-    });
-    input.rows.slice(start, start + rowsPerPage).forEach((row, rowIndex) => {
-      const y = 465 - rowIndex * 16;
-      if (rowIndex % 2 === 1)
-        commands.push(pdfRect(28, y - 4, 786, 16, "#F8FAFC"));
-      tableColumns.forEach((column, index) => {
-        const value = stringifyCell(row[column]).replaceAll("\n", " ");
-        commands.push(
-          pdfLabel(
-            32 + index * colWidth,
-            y,
-            value.slice(0, 27),
-            6.2,
-            false,
-            "#334155",
-          ),
-        );
-      });
-    });
-    commands.push(
-      pdfLabel(
-        28,
-        28,
-        "Para detalle completo, consulte el archivo Excel.",
-        8,
-        false,
-        "#64748B",
-      ),
-    );
-    pages.push({ content: commands.join("\n"), height: 595, width: 842 });
-  }
-
-  const objects: string[] = [];
-  const pageIds: number[] = [];
-  let nextId = 5;
-  pages.forEach((page) => {
-    const contentId = nextId++;
-    const pageId = nextId++;
-    const content = page.content;
-    objects[contentId] =
-      `${contentId} 0 obj\n<< /Length ${Buffer.byteLength(content, "latin1")} >>\nstream\n${content}\nendstream\nendobj\n`;
-    objects[pageId] =
-      `${pageId} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${page.width} ${page.height}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${contentId} 0 R >>\nendobj\n`;
-    pageIds.push(pageId);
-  });
-  objects[1] = "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n";
-  objects[2] = `2 0 obj\n<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${pageIds.length} >>\nendobj\n`;
-  objects[3] =
-    "3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>\nendobj\n";
-  objects[4] =
-    "4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>\nendobj\n";
-  let pdf = "%PDF-1.4\n";
-  const offsets: number[] = [];
-  for (let id = 1; id < objects.length; id += 1) {
-    offsets[id] = Buffer.byteLength(pdf, "latin1");
-    pdf += objects[id] ?? "";
-  }
-  const xrefOffset = Buffer.byteLength(pdf, "latin1");
-  pdf += `xref\n0 ${objects.length}\n0000000000 65535 f \n`;
-  for (let id = 1; id < objects.length; id += 1)
-    pdf += `${String(offsets[id] ?? 0).padStart(10, "0")} 00000 n \n`;
-  pdf += `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
-  return Buffer.from(pdf, "latin1");
-};
-
-export const buildReportPdf = (input: ReportExportInput): Buffer =>
-  makePdf(input);
-
-export const buildSimplePdf = (
-  input: Omit<ReportExportInput, "charts" | "summary">,
-): Buffer => makePdf(input);

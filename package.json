@@ -7,6 +7,7 @@
     "dev": "tsx watch src/server.ts",
     "prebuild": "prisma generate",
     "build": "tsc -p tsconfig.json",
+    "postbuild": "mkdir -p dist/src/modules/reports/fonts && cp src/modules/reports/fonts/*.woff2 dist/src/modules/reports/fonts/",
     "start": "node dist/src/server.js",
     "test": "tsx --test src/jobs/deadline-monitor/*.test.ts src/services/authorization-scope.test.ts src/services/entity-activity.test.ts src/utils/*.test.ts src/modules/dashboard/*.test.ts src/modules/extension-requests/*.test.ts src/modules/observations/*.test.ts src/modules/progress/*.test.ts src/modules/remediation/*.test.ts src/modules/reports/*.test.ts src/modules/workflows/*.test.ts",
     "pretypecheck": "prisma generate",
@@ -46,6 +47,7 @@
     "multer": "^2.2.0",
     "nodemailer": "^9.0.1",
     "prisma": "^7.8.0",
+    "puppeteer": "^25.14.0",
     "uuid": "^14.0.0",
     "zod": "^4.4.3"
   },

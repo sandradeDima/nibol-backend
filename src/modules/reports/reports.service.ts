@@ -2144,8 +2144,8 @@ const getObservationDetailRows = async (
     ],
   };
   const total = await reportsPrisma.observation.count({ where });
-  // shortcut: cap interactive detail at 5,000 observations; paginate when larger exports are required.
-  if (total > 5000)
+  // shortcut: exports load all matching observations in memory; stream them if report volumes outgrow the PDF renderer.
+  if (total > 5000 && query.perPage < 5000)
     throw new AppError(
       "El reporte supera 5.000 observaciones. Aplique filtros para reducirlo.",
       413,

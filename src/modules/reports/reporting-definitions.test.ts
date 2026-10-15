@@ -31,6 +31,14 @@ const now = new Date("2026-08-12T12:00:00.000Z");
 test("clasifica vencimientos sin contar estados finales como atrasados", () => {
   assert.equal(
     isObservationOverdue(
+      new Date("2026-08-12T00:00:00.000Z"),
+      { isFinal: false, key: "INICIADO" },
+      now,
+    ),
+    false,
+  );
+  assert.equal(
+    isObservationOverdue(
       new Date("2026-08-11T12:00:00.000Z"),
       {
         isFinal: false,

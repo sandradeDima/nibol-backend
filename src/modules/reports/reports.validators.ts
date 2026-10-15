@@ -119,6 +119,9 @@ export const auditReportQuerySchema = z.object({
 });
 
 export const reportExportQuerySchema = reportPreviewQuerySchema.extend({
+  pdfView: z
+    .enum(["REPORTS", "DASHBOARD", "GENERATOR", "ATTENTION"])
+    .default("GENERATOR"),
   perPage: z.coerce.number().int().min(1).max(5000).default(5000),
 });
 
