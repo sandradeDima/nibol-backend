@@ -69,8 +69,8 @@ export const observationAssignmentEmailTemplate: EmailTemplateDefinition<"observ
               </td>
               <td style="border-bottom:1px solid #e4edf6;color:#42668f;font-size:12px;font-weight:700;line-height:1.35;padding:8px 8px;vertical-align:middle;">${escapeHtml(item.title)}</td>
               <td style="border-bottom:1px solid #e4edf6;padding:8px 10px;text-align:left;vertical-align:middle;white-space:nowrap;">
-                <span style="background:#fff4e5;border-radius:999px;color:#c87913;display:inline-block;font-size:11px;font-weight:700;padding:6px 10px;">
-                  <span style="background:${emailRiskColor(item.risk, item.riskColorToken)};border-radius:50%;display:inline-block;height:10px;margin-right:6px;vertical-align:-1px;width:10px;"></span>${escapeHtml(item.risk)}
+                <span style="background:${emailRiskColor(item.risk, item.riskColorToken)};border-radius:999px;color:#ffffff;display:inline-block;font-size:11px;font-weight:700;padding:6px 10px;">
+                  <span style="background:#ffffff;border-radius:50%;display:inline-block;height:10px;margin-right:6px;vertical-align:-1px;width:10px;"></span>${escapeHtml(item.risk)}
                 </span>
               </td>
             </tr>`,

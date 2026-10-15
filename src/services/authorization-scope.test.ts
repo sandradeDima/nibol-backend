@@ -209,7 +209,6 @@ test("los permisos sensibles quedan separados por rol", () => {
     "observations.view_module",
     "observations.history.view",
     "recommended_action_plans.view",
-    "recommended_action_plans.view_module",
     "action_plans.view",
     "action_plans.view_module",
     "action_plans.history.view",

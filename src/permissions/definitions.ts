@@ -234,7 +234,6 @@ export const ROLE_PERMISSION_NAMES: Record<RoleCode, readonly string[]> = {
     "observations.view_module",
     "observations.history.view",
     "recommended_action_plans.view",
-    "recommended_action_plans.view_module",
     "action_plans.view",
     "action_plans.view_module",
     "action_plans.history.view",
