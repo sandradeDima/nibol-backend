@@ -451,7 +451,9 @@ export const entityActivityService = {
   async list(query: EntityActivityQuery, access: AuthorizationSummary) {
     const where = buildWhere(query, access);
     const includeTechnicalDetails = Boolean(
-      query.includeTechnicalDetails && isSystemOperator(access),
+      query.includeTechnicalDetails &&
+      (isSystemOperator(access) ||
+        access.permissions.includes("activity.technical")),
     );
     const [total, activities] = await prisma.$transaction([
       prisma.entityActivity.count({ where }),

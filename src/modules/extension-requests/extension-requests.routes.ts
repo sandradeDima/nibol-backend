@@ -1,7 +1,10 @@
 import { Router } from "express";
 
 import { asyncHandler } from "../../middleware/async-handler.js";
-import { requirePermission } from "../../middleware/authorization-middleware.js";
+import {
+  requireAnyPermission,
+  requirePermission,
+} from "../../middleware/authorization-middleware.js";
 import { EXTENSION_REQUESTS_PERMISSIONS as permissions } from "./extension-requests.constants.js";
 import { extensionRequestsController as controller } from "./extension-requests.controller.js";
 
@@ -13,12 +16,20 @@ extensionRequestsRouter.get(
 );
 extensionRequestsRouter.get(
   "/extension-requests",
-  requirePermission(permissions.view),
+  requireAnyPermission([
+    permissions.view,
+    permissions.approve,
+    permissions.reject,
+  ]),
   asyncHandler(controller.list),
 );
 extensionRequestsRouter.get(
   "/extension-requests/:id",
-  requirePermission(permissions.view),
+  requireAnyPermission([
+    permissions.view,
+    permissions.approve,
+    permissions.reject,
+  ]),
   asyncHandler(controller.getById),
 );
 extensionRequestsRouter.post(

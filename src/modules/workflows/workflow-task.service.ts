@@ -54,6 +54,21 @@ const assertPermission = (access: WorkflowActorContext, permission: string) => {
   }
 };
 
+const assertTaskReadPermission = (access: WorkflowActorContext) => {
+  if (
+    ![
+      "workflow_tasks.view",
+      ...Object.values(workflowTaskActionPermissions),
+      "workflow_tasks.reassign",
+    ].some((permission) => access.permissions.includes(permission))
+  ) {
+    throw new AppError(
+      "Falta un permiso para consultar tareas de workflow.",
+      403,
+    );
+  }
+};
+
 export const taskIsActionable = (status: string): boolean =>
   status === "PENDING" || status === "IN_PROGRESS";
 
@@ -164,10 +179,19 @@ const actionStatus: Record<
 
 const getAllowedActions = (
   configuration: ReturnType<typeof getNodeConfiguration>,
-) =>
-  configuration.nodeType === "STAGE" || configuration.nodeType === "APPROVAL"
-    ? configuration.allowedActions
-    : [];
+  permissions?: readonly string[],
+) => {
+  const actions =
+    configuration.nodeType === "STAGE" || configuration.nodeType === "APPROVAL"
+      ? configuration.allowedActions
+      : [];
+  return permissions
+    ? actions.filter((action) => {
+        const permission = workflowTaskActionPermissions[action as TaskAction];
+        return permission ? permissions.includes(permission) : false;
+      })
+    : actions;
+};
 
 export type ActiveWorkflowTaskSummary = {
   allowedActions: string[];
@@ -199,6 +223,7 @@ const activeTaskWhere = (input: {
 export const findActiveWorkflowTasksForEntities = async (input: {
   entityIds?: readonly string[];
   entityType: string;
+  permissions?: readonly string[];
   processType: string;
   userId: string;
 }): Promise<Map<string, ActiveWorkflowTaskSummary>> => {
@@ -219,6 +244,7 @@ export const findActiveWorkflowTasksForEntities = async (input: {
     result.set(task.instance.entityId, {
       allowedActions: getAllowedActions(
         getNodeConfiguration(task.node.configurationJson),
+        input.permissions,
       ),
       canAct: true,
       id: task.id,
@@ -231,6 +257,7 @@ export const findActiveWorkflowTasksForEntities = async (input: {
 export const findActiveWorkflowTaskForEntity = async (input: {
   entityId: string;
   entityType: string;
+  permissions?: readonly string[];
   processType: string;
   userId: string;
 }): Promise<ActiveWorkflowTaskSummary | null> =>
@@ -305,7 +332,7 @@ const mapTask = (
 ) => {
   if (!task) return null;
   const configuration = getNodeConfiguration(task.node.configurationJson);
-  const allowedActions = getAllowedActions(configuration);
+  const allowedActions = getAllowedActions(configuration, access.permissions);
   const context = restoreWorkflowRuntimeContext(
     task.instance.processType,
     task.instance.contextJson,
@@ -496,7 +523,7 @@ export const workflowTaskService = {
     query: WorkflowTaskListQuery,
     access: WorkflowActorContext,
   ) {
-    assertPermission(access, "workflow_tasks.view");
+    assertTaskReadPermission(access);
     const where = buildTaskWhere(access.userId, query);
     const [total, tasks] = await prisma.$transaction([
       prisma.workflowTask.count({ where }),
@@ -581,11 +608,7 @@ export const workflowTaskService = {
           },
           priority: null,
           status: task.status,
-          allowedActions:
-            configuration.nodeType === "STAGE" ||
-            configuration.nodeType === "APPROVAL"
-              ? configuration.allowedActions
-              : [],
+          allowedActions: getAllowedActions(configuration, access.permissions),
         };
       }),
       pagination: { page: query.page, perPage: query.perPage, total },
@@ -593,7 +616,7 @@ export const workflowTaskService = {
   },
 
   async getTask(taskId: string, access: WorkflowActorContext) {
-    assertPermission(access, "workflow_tasks.view");
+    assertTaskReadPermission(access);
     const task = await getTaskRecord(prisma, taskId);
     if (!task) throw new AppError("No se encontró la tarea solicitada.", 404);
     const canAct = taskIsActionable(task.status)

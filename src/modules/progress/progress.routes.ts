@@ -4,6 +4,7 @@ import { Router } from "express";
 import { asyncHandler } from "../../middleware/async-handler.js";
 import {
   requireAllPermissions,
+  requireAnyPermission,
   requirePermission,
 } from "../../middleware/authorization-middleware.js";
 import { progressController as controller } from "./progress.controller.js";
@@ -16,12 +17,20 @@ export const progressRouter = Router();
 
 progressRouter.get(
   "/progress-evaluations",
-  requirePermission("action_plans.view"),
+  requireAnyPermission([
+    "action_plans.view",
+    "progress_evaluations.view",
+    "action_plans.evaluate",
+  ]),
   asyncHandler(controller.listProgressEvaluations),
 );
 progressRouter.get(
   "/progress-evaluations/:id",
-  requirePermission("action_plans.view"),
+  requireAnyPermission([
+    "action_plans.view",
+    "progress_evaluations.view",
+    "action_plans.evaluate",
+  ]),
   asyncHandler(controller.getProgressEvaluation),
 );
 progressRouter.post(

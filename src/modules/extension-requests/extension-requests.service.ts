@@ -224,6 +224,7 @@ const formatWithReviewTask = async (
     ? await findActiveWorkflowTaskForEntity({
         entityId: record.id,
         entityType: "deadline_extension_request",
+        permissions: extensionWorkflowPermissions(access),
         processType: "DEADLINE_EXTENSION",
         userId: access.userId,
       })
@@ -235,6 +236,16 @@ const accessWhere = (
   access: AuthorizationSummary,
 ): Prisma.DeadlineExtensionRequestWhereInput =>
   buildExtensionRequestScopeWhere(access);
+
+const extensionWorkflowPermissions = (access: AuthorizationSummary) => [
+  ...access.permissions,
+  ...(authorizationService.can(access, "deadline_extensions.approve")
+    ? ["workflow_tasks.approve"]
+    : []),
+  ...(authorizationService.can(access, "deadline_extensions.reject")
+    ? ["workflow_tasks.reject"]
+    : []),
+];
 
 const find = async (
   id: string,
@@ -381,9 +392,18 @@ export const extensionRequestsService = {
   },
 
   async list(query: ListExtensionRequestsQuery, access: AuthorizationSummary) {
+    if (
+      !authorizationService.can(access, "deadline_extensions.view") &&
+      !query.reviewQueue
+    )
+      throw new AppError(
+        "Solo puede consultar la bandeja de ampliaciones pendientes.",
+        403,
+      );
     const reviewTasks = query.reviewQueue
       ? await findActiveWorkflowTasksForEntities({
           entityType: "deadline_extension_request",
+          permissions: extensionWorkflowPermissions(access),
           processType: "DEADLINE_EXTENSION",
           userId: access.userId,
         })
@@ -721,6 +741,7 @@ export const extensionRequestsService = {
       const task = await findActiveWorkflowTaskForEntity({
         entityId: id,
         entityType: "deadline_extension_request",
+        permissions: extensionWorkflowPermissions(access),
         processType: "DEADLINE_EXTENSION",
         userId: access.userId,
       });
@@ -733,7 +754,14 @@ export const extensionRequestsService = {
         task.id,
         approved ? "APPROVE" : "REJECT",
         { comment: input.comment ?? undefined },
-        { ...access, ipAddress: null },
+        {
+          ...access,
+          ipAddress: null,
+          permissions: [
+            ...access.permissions,
+            approved ? "workflow_tasks.approve" : "workflow_tasks.reject",
+          ],
+        },
       );
     } else {
       await prisma.$transaction(async (tx) => {

@@ -521,6 +521,18 @@ const legacyReviewTask = (
   };
 };
 
+const progressWorkflowPermissions = (access: AuthorizationSummary) => [
+  ...access.permissions,
+  ...(authorizationService.can(access, "action_plans.evaluate") &&
+  authorizationService.can(access, "action_plans.approve")
+    ? ["workflow_tasks.approve"]
+    : []),
+  ...(authorizationService.can(access, "action_plans.evaluate") &&
+  authorizationService.can(access, "action_plans.return")
+    ? ["workflow_tasks.request_correction", "workflow_tasks.reject"]
+    : []),
+];
+
 const formatWithReviewTask = async (
   record: EvaluationRecord,
   access: AuthorizationSummary,
@@ -529,6 +541,7 @@ const formatWithReviewTask = async (
     ? await findActiveWorkflowTaskForEntity({
         entityId: record.id,
         entityType: "progress_evaluation",
+        permissions: progressWorkflowPermissions(access),
         processType: "OBSERVATION_CLOSURE",
         userId: access.userId,
       })
@@ -693,9 +706,19 @@ export const progressService = {
     query: ListProgressEvaluationsQuery,
     access: AuthorizationSummary,
   ) {
+    if (
+      !authorizationService.can(access, "action_plans.view") &&
+      !authorizationService.can(access, "progress_evaluations.view") &&
+      !query.reviewQueue
+    )
+      throw new AppError(
+        "Solo puede consultar la bandeja de evaluaciones pendientes.",
+        403,
+      );
     const reviewTasks = query.reviewQueue
       ? await findActiveWorkflowTasksForEntities({
           entityType: "progress_evaluation",
+          permissions: progressWorkflowPermissions(access),
           processType: "OBSERVATION_CLOSURE",
           userId: access.userId,
         })
@@ -828,6 +851,7 @@ export const progressService = {
       const task = await findActiveWorkflowTaskForEntity({
         entityId: id,
         entityType: "progress_evaluation",
+        permissions: progressWorkflowPermissions(access),
         processType: "OBSERVATION_CLOSURE",
         userId: access.userId,
       });
@@ -846,7 +870,11 @@ export const progressService = {
           task.id,
           "APPROVE",
           { ...(input.comment ? { comment: input.comment } : {}) },
-          { ...access, ipAddress: null },
+          {
+            ...access,
+            ipAddress: null,
+            permissions: progressWorkflowPermissions(access),
+          },
         );
       } else {
         const workflowAction = task.allowedActions.includes(
@@ -865,7 +893,11 @@ export const progressService = {
           task.id,
           workflowAction,
           { comment: input.comment ?? undefined },
-          { ...access, ipAddress: null },
+          {
+            ...access,
+            ipAddress: null,
+            permissions: progressWorkflowPermissions(access),
+          },
         );
       }
       return {

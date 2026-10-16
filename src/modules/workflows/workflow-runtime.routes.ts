@@ -14,6 +14,7 @@ import {
 } from "./workflows.permissions.js";
 
 export const workflowRuntimeRouter = Router();
+const workflowTaskPermissions = Object.values(WORKFLOW_TASK_PERMISSIONS);
 
 workflowRuntimeRouter.get(
   "/workflow-instances/start-options",
@@ -71,13 +72,13 @@ workflowRuntimeRouter.get(
 
 workflowRuntimeRouter.get(
   "/workflow-tasks/my-pending",
-  requirePermission(WORKFLOW_TASK_PERMISSIONS.view),
+  requireAnyPermission(workflowTaskPermissions),
   asyncHandler(workflowRuntimeController.listMyPending),
 );
 
 workflowRuntimeRouter.get(
   "/workflow-tasks/:taskId",
-  requirePermission(WORKFLOW_TASK_PERMISSIONS.view),
+  requireAnyPermission(workflowTaskPermissions),
   asyncHandler(workflowRuntimeController.getTask),
 );
 

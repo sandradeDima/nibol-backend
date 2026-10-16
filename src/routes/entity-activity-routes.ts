@@ -3,7 +3,10 @@ import { Router } from "express";
 import { z } from "zod";
 
 import { asyncHandler } from "../middleware/async-handler.js";
-import { requireAnyPermission } from "../middleware/authorization-middleware.js";
+import {
+  requireAnyPermission,
+  requirePermission,
+} from "../middleware/authorization-middleware.js";
 import { activityLogService } from "../services/activity-log-service.js";
 import { entityActivityService } from "../services/entity-activity-service.js";
 import { AppError } from "../utils/app-error.js";
@@ -143,6 +146,7 @@ entityActivityRouter.get(
 entityActivityRouter.get(
   "/activity/export",
   activityAccess,
+  requirePermission("activity.export"),
   asyncHandler(async (request, response) => {
     const query = parseQuery(request);
     const access = getAccess(request);
