@@ -1,31 +1,29 @@
-CREATE TABLE `audit_report_classes` (
-    `id` CHAR(36) NOT NULL,
-    `name` VARCHAR(191) NOT NULL,
-    `description` VARCHAR(500) NULL,
-    `active` BOOLEAN NOT NULL DEFAULT true,
-    `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    `updated_at` DATETIME(3) NOT NULL,
-    `deleted_at` DATETIME(3) NULL,
+-- CreateTable
+CREATE TABLE [dbo].[audit_report_classes] (
+    [id] CHAR(36) NOT NULL,
+    [name] NVARCHAR(191) NOT NULL,
+    [description] NVARCHAR(500),
+    [active] BIT NOT NULL CONSTRAINT [audit_report_classes_active_df] DEFAULT 1,
+    [created_at] DATETIME2 NOT NULL CONSTRAINT [audit_report_classes_created_at_df] DEFAULT CURRENT_TIMESTAMP,
+    [updated_at] DATETIME2 NOT NULL,
+    [deleted_at] DATETIME2,
+    CONSTRAINT [audit_report_classes_pkey] PRIMARY KEY CLUSTERED ([id]),
+    CONSTRAINT [audit_report_classes_name_key] UNIQUE NONCLUSTERED ([name])
+);
 
-    UNIQUE INDEX `audit_report_classes_name_key`(`name`),
-    INDEX `audit_report_classes_active_deleted_at_idx`(`active`, `deleted_at`),
-    INDEX `audit_report_classes_deleted_at_idx`(`deleted_at`),
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE NONCLUSTERED INDEX [audit_report_classes_active_deleted_at_idx] ON [dbo].[audit_report_classes]([active], [deleted_at]);
+CREATE NONCLUSTERED INDEX [audit_report_classes_deleted_at_idx] ON [dbo].[audit_report_classes]([deleted_at]);
 
-ALTER TABLE `audit_reports`
-    ADD COLUMN `report_class_id` CHAR(36) NULL,
-    ADD INDEX `audit_reports_report_class_id_idx`(`report_class_id`),
-    ADD CONSTRAINT `audit_reports_report_class_id_fkey`
-        FOREIGN KEY (`report_class_id`) REFERENCES `audit_report_classes`(`id`)
-        ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE [dbo].[audit_reports] ADD [report_class_id] CHAR(36) NULL;
+CREATE NONCLUSTERED INDEX [audit_reports_report_class_id_idx] ON [dbo].[audit_reports]([report_class_id]);
+ALTER TABLE [dbo].[audit_reports] ADD CONSTRAINT [audit_reports_report_class_id_fkey] FOREIGN KEY ([report_class_id]) REFERENCES [dbo].[audit_report_classes]([id]) ON DELETE SET NULL ON UPDATE NO ACTION;
 
-UPDATE `risk_levels`
-SET `color_token` = CASE `color_token`
+UPDATE [dbo].[risk_levels]
+SET [color_token] = CASE [color_token]
     WHEN 'critical' THEN '#B42318'
     WHEN 'high' THEN '#D92D20'
     WHEN 'medium' THEN '#DC6803'
     WHEN 'low' THEN '#027A48'
-    ELSE `color_token`
+    ELSE [color_token]
 END
-WHERE `color_token` IN ('critical', 'high', 'medium', 'low');
+WHERE [color_token] IN ('critical', 'high', 'medium', 'low');

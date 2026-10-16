@@ -4,7 +4,8 @@ import bcrypt from "bcryptjs";
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { createConnection, type RowDataPacket } from "mysql2/promise";
+import type { Prisma } from "../generated/prisma/client.js";
+import { prisma } from "../src/utils/prisma.js";
 import { v5 as uuidv5 } from "uuid";
 import { z } from "zod";
 
@@ -45,6 +46,7 @@ const seedEnvSchema = z.object({
 });
 
 const env = seedEnvSchema.parse(process.env);
+const includeDemo = process.argv.includes("--demo");
 const adminSeeds = resolveAdminSeedConfigs(process.env);
 const primaryAdminSeed = getPrimaryAdminSeed(adminSeeds);
 
@@ -669,46 +671,60 @@ const requiredTables = [
   "workflow_transitions",
 ] as const;
 
-type NamedIdRow = RowDataPacket & {
+type NamedIdRow = {
   code?: string;
   id: string;
   name: string;
 };
 
-type AreaRow = RowDataPacket & {
+type AreaRow = {
   code: string;
   id: string;
 };
 
-type CountRow = RowDataPacket & {
+type CountRow = {
   total: number;
 };
 
-type RiskLevelRow = RowDataPacket & {
+type RiskLevelRow = {
   id: string;
   name: string;
 };
 
-type ObservationStatusRow = RowDataPacket & {
+type ObservationStatusRow = {
   id: string;
   key: string;
 };
 
-type UserRow = RowDataPacket & {
+type UserRow = {
   id: string;
 };
 
-const placeholders = (length: number): string => {
-  return Array.from({ length }, () => "?").join(", ");
+const executeSqlServer = async (
+  connection: Prisma.TransactionClient,
+  query: string,
+  parameters: unknown[] = [],
+): Promise<void> => {
+  await connection.$executeRawUnsafe(query, ...parameters);
 };
 
+const querySqlServer = async <T>(
+  connection: Prisma.TransactionClient,
+  query: string,
+  parameters: unknown[] = [],
+): Promise<T[]> => connection.$queryRawUnsafe<T[]>(query, ...parameters);
+
+const placeholders = (length: number): string =>
+  Array.from({ length }, (_, index) => `@P${index + 1}`).join(", ");
+
 const assertTablesExist = async (
-  connection: Awaited<ReturnType<typeof createConnection>>,
+  connection: Prisma.TransactionClient,
 ): Promise<void> => {
-  const [rows] = await connection.query<RowDataPacket[]>("SHOW TABLES");
-  const availableTables = new Set(
-    rows.flatMap((row) => Object.values(row).map((value) => String(value))),
+  const rows = await querySqlServer<{ name: string }>(
+    connection,
+    "SELECT [name] FROM [sys].[tables] WHERE [schema_id] = SCHEMA_ID('dbo')",
   );
+  const availableTables = new Set(rows.map((row) => row.name));
 
   const missingTables = requiredTables.filter(
     (table) => !availableTables.has(table),
@@ -722,20 +738,18 @@ const assertTablesExist = async (
 };
 
 const seedRoles = async (
-  connection: Awaited<ReturnType<typeof createConnection>>,
+  connection: Prisma.TransactionClient,
 ): Promise<void> => {
   for (const role of roles) {
-    await connection.execute(
+    await executeSqlServer(
+      connection,
       `
-        INSERT INTO roles (id, code, name, description, created_at, updated_at, deleted_at)
-        VALUES (?, ?, ?, ?, NOW(3), NOW(3), NULL)
-        ON DUPLICATE KEY UPDATE
-          code = VALUES(code),
-          name = VALUES(name),
-          description = VALUES(description),
-          deleted_at = NULL,
-          updated_at = NOW(3)
-      `,
+MERGE [dbo].[roles] AS target
+ USING (VALUES (@P1, @P2, @P3, @P4, SYSUTCDATETIME(), SYSUTCDATETIME(), NULL)) AS source ([id], [code], [name], [description], [created_at], [updated_at], [deleted_at])
+ ON target.[code] = source.[code]
+ WHEN MATCHED THEN UPDATE SET target.[code] = source.[code], target.[name] = source.[name], target.[description] = source.[description], target.[deleted_at] = NULL, target.[updated_at] = SYSUTCDATETIME()
+ WHEN NOT MATCHED THEN INSERT ([id], [code], [name], [description], [created_at], [updated_at], [deleted_at]) VALUES (source.[id], source.[code], source.[name], source.[description], source.[created_at], source.[updated_at], source.[deleted_at]);
+`,
       [
         uuidv5(`role:${role.code}`, SEED_NAMESPACE),
         role.code,
@@ -747,18 +761,18 @@ const seedRoles = async (
 };
 
 const seedPermissions = async (
-  connection: Awaited<ReturnType<typeof createConnection>>,
+  connection: Prisma.TransactionClient,
 ): Promise<void> => {
   for (const permission of permissions) {
-    await connection.execute(
+    await executeSqlServer(
+      connection,
       `
-        INSERT INTO permissions (id, name, description, created_at, updated_at, deleted_at)
-        VALUES (?, ?, ?, NOW(3), NOW(3), NULL)
-        ON DUPLICATE KEY UPDATE
-          description = VALUES(description),
-          deleted_at = NULL,
-          updated_at = NOW(3)
-      `,
+MERGE [dbo].[permissions] AS target
+ USING (VALUES (@P1, @P2, @P3, SYSUTCDATETIME(), SYSUTCDATETIME(), NULL)) AS source ([id], [name], [description], [created_at], [updated_at], [deleted_at])
+ ON target.[name] = source.[name]
+ WHEN MATCHED THEN UPDATE SET target.[description] = source.[description], target.[deleted_at] = NULL, target.[updated_at] = SYSUTCDATETIME()
+ WHEN NOT MATCHED THEN INSERT ([id], [name], [description], [created_at], [updated_at], [deleted_at]) VALUES (source.[id], source.[name], source.[description], source.[created_at], source.[updated_at], source.[deleted_at]);
+`,
       [
         permissionIdByName.get(permission.name),
         permission.name,
@@ -769,35 +783,18 @@ const seedPermissions = async (
 };
 
 const seedRiskLevels = async (
-  connection: Awaited<ReturnType<typeof createConnection>>,
+  connection: Prisma.TransactionClient,
 ): Promise<void> => {
   for (const riskLevel of riskLevels) {
-    await connection.execute(
+    await executeSqlServer(
+      connection,
       `
-        INSERT INTO risk_levels (
-          id,
-          name,
-          \`key\`,
-          description,
-          color_token,
-          severity_order,
-          max_remediation_days,
-          active,
-          created_at,
-          updated_at,
-          deleted_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, true, NOW(3), NOW(3), NULL)
-        ON DUPLICATE KEY UPDATE
-          \`key\` = VALUES(\`key\`),
-          description = VALUES(description),
-          color_token = VALUES(color_token),
-          severity_order = VALUES(severity_order),
-          max_remediation_days = VALUES(max_remediation_days),
-          active = VALUES(active),
-          deleted_at = NULL,
-          updated_at = NOW(3)
-      `,
+MERGE [dbo].[risk_levels] AS target
+ USING (VALUES (@P1, @P2, @P3, @P4, @P5, @P6, @P7, 1, SYSUTCDATETIME(), SYSUTCDATETIME(), NULL)) AS source ([id], [name], [key], [description], [color_token], [severity_order], [max_remediation_days], [active], [created_at], [updated_at], [deleted_at])
+ ON target.[key] = source.[key]
+ WHEN MATCHED THEN UPDATE SET target.[key] = source.[key], target.[description] = source.[description], target.[color_token] = source.[color_token], target.[severity_order] = source.[severity_order], target.[max_remediation_days] = source.[max_remediation_days], target.[active] = source.[active], target.[deleted_at] = NULL, target.[updated_at] = SYSUTCDATETIME()
+ WHEN NOT MATCHED THEN INSERT ([id], [name], [key], [description], [color_token], [severity_order], [max_remediation_days], [active], [created_at], [updated_at], [deleted_at]) VALUES (source.[id], source.[name], source.[key], source.[description], source.[color_token], source.[severity_order], source.[max_remediation_days], source.[active], source.[created_at], source.[updated_at], source.[deleted_at]);
+`,
       [
         uuidv5(`risk-level:${riskLevel.key}`, SEED_NAMESPACE),
         riskLevel.name,
@@ -812,15 +809,18 @@ const seedRiskLevels = async (
 };
 
 const seedExtensionClassifications = async (
-  connection: Awaited<ReturnType<typeof createConnection>>,
+  connection: Prisma.TransactionClient,
 ): Promise<void> => {
   for (const item of extensionClassifications) {
-    await connection.execute(
-      `INSERT INTO deadline_extension_classifications
-        (id, code, name, description, max_additional_days, active, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, true, NOW(3), NOW(3))
-       ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description),
-         max_additional_days = VALUES(max_additional_days), active = true, updated_at = NOW(3)`,
+    await executeSqlServer(
+      connection,
+      `
+MERGE [dbo].[deadline_extension_classifications] AS target
+ USING (VALUES (@P1, @P2, @P3, @P4, @P5, 1, SYSUTCDATETIME(), SYSUTCDATETIME())) AS source ([id], [code], [name], [description], [max_additional_days], [active], [created_at], [updated_at])
+ ON target.[code] = source.[code]
+ WHEN MATCHED THEN UPDATE SET target.[name] = source.[name], target.[description] = source.[description], target.[max_additional_days] = source.[max_additional_days], target.[active] = 1, target.[updated_at] = SYSUTCDATETIME()
+ WHEN NOT MATCHED THEN INSERT ([id], [code], [name], [description], [max_additional_days], [active], [created_at], [updated_at]) VALUES (source.[id], source.[code], source.[name], source.[description], source.[max_additional_days], source.[active], source.[created_at], source.[updated_at]);
+`,
       [
         uuidv5(`extension-classification:${item.code}`, SEED_NAMESPACE),
         item.code,
@@ -833,38 +833,18 @@ const seedExtensionClassifications = async (
 };
 
 const seedObservationStatuses = async (
-  connection: Awaited<ReturnType<typeof createConnection>>,
+  connection: Prisma.TransactionClient,
 ): Promise<void> => {
   for (const status of observationStatuses) {
-    await connection.execute(
+    await executeSqlServer(
+      connection,
       `
-        INSERT INTO observation_statuses (
-          id,
-          name,
-          \`key\`,
-          description,
-          sort_order,
-          is_initial,
-          is_final,
-          counts_as_overdue,
-          active,
-          created_at,
-          updated_at,
-          deleted_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, true, NOW(3), NOW(3), NULL)
-        ON DUPLICATE KEY UPDATE
-          name = VALUES(name),
-          \`key\` = VALUES(\`key\`),
-          description = VALUES(description),
-          sort_order = VALUES(sort_order),
-          is_initial = VALUES(is_initial),
-          is_final = VALUES(is_final),
-          counts_as_overdue = VALUES(counts_as_overdue),
-          active = VALUES(active),
-          deleted_at = NULL,
-          updated_at = NOW(3)
-      `,
+MERGE [dbo].[observation_statuses] AS target
+ USING (VALUES (@P1, @P2, @P3, @P4, @P5, @P6, @P7, @P8, 1, SYSUTCDATETIME(), SYSUTCDATETIME(), NULL)) AS source ([id], [name], [key], [description], [sort_order], [is_initial], [is_final], [counts_as_overdue], [active], [created_at], [updated_at], [deleted_at])
+ ON target.[key] = source.[key]
+ WHEN MATCHED THEN UPDATE SET target.[name] = source.[name], target.[key] = source.[key], target.[description] = source.[description], target.[sort_order] = source.[sort_order], target.[is_initial] = source.[is_initial], target.[is_final] = source.[is_final], target.[counts_as_overdue] = source.[counts_as_overdue], target.[active] = source.[active], target.[deleted_at] = NULL, target.[updated_at] = SYSUTCDATETIME()
+ WHEN NOT MATCHED THEN INSERT ([id], [name], [key], [description], [sort_order], [is_initial], [is_final], [counts_as_overdue], [active], [created_at], [updated_at], [deleted_at]) VALUES (source.[id], source.[name], source.[key], source.[description], source.[sort_order], source.[is_initial], source.[is_final], source.[counts_as_overdue], source.[active], source.[created_at], source.[updated_at], source.[deleted_at]);
+`,
       [
         uuidv5(`observation-status:${status.key}`, SEED_NAMESPACE),
         status.name,
@@ -880,33 +860,19 @@ const seedObservationStatuses = async (
 };
 
 const seedAreas = async (
-  connection: Awaited<ReturnType<typeof createConnection>>,
+  connection: Prisma.TransactionClient,
   managerUserId: string,
 ): Promise<void> => {
   for (const area of areas) {
-    await connection.execute(
+    await executeSqlServer(
+      connection,
       `
-        INSERT INTO areas (
-          id,
-          name,
-          code,
-          description,
-          manager_user_id,
-          active,
-          created_at,
-          updated_at,
-          deleted_at
-        )
-        VALUES (?, ?, ?, ?, ?, true, NOW(3), NOW(3), NULL)
-        ON DUPLICATE KEY UPDATE
-          name = VALUES(name),
-          code = VALUES(code),
-          description = VALUES(description),
-          manager_user_id = VALUES(manager_user_id),
-          active = VALUES(active),
-          deleted_at = NULL,
-          updated_at = NOW(3)
-      `,
+MERGE [dbo].[areas] AS target
+ USING (VALUES (@P1, @P2, @P3, @P4, @P5, 1, SYSUTCDATETIME(), SYSUTCDATETIME(), NULL)) AS source ([id], [name], [code], [description], [manager_user_id], [active], [created_at], [updated_at], [deleted_at])
+ ON target.[code] = source.[code]
+ WHEN MATCHED THEN UPDATE SET target.[name] = source.[name], target.[code] = source.[code], target.[description] = source.[description], target.[manager_user_id] = source.[manager_user_id], target.[active] = source.[active], target.[deleted_at] = NULL, target.[updated_at] = SYSUTCDATETIME()
+ WHEN NOT MATCHED THEN INSERT ([id], [name], [code], [description], [manager_user_id], [active], [created_at], [updated_at], [deleted_at]) VALUES (source.[id], source.[name], source.[code], source.[description], source.[manager_user_id], source.[active], source.[created_at], source.[updated_at], source.[deleted_at]);
+`,
       [
         uuidv5(`area:${area.key}`, SEED_NAMESPACE),
         area.name,
@@ -919,37 +885,18 @@ const seedAreas = async (
 };
 
 const seedSystemParameters = async (
-  connection: Awaited<ReturnType<typeof createConnection>>,
+  connection: Prisma.TransactionClient,
 ): Promise<void> => {
   for (const parameter of systemParameters) {
-    await connection.execute(
+    await executeSqlServer(
+      connection,
       `
-        INSERT INTO system_parameters (
-          id,
-          \`key\`,
-          name,
-          value,
-          value_type,
-          group_name,
-          description,
-          editable,
-          active,
-          created_at,
-          updated_at,
-          deleted_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3), NOW(3), NULL)
-        ON DUPLICATE KEY UPDATE
-          name = VALUES(name),
-          value = VALUES(value),
-          value_type = VALUES(value_type),
-          group_name = VALUES(group_name),
-          description = VALUES(description),
-          editable = VALUES(editable),
-          active = VALUES(active),
-          deleted_at = NULL,
-          updated_at = NOW(3)
-      `,
+MERGE [dbo].[system_parameters] AS target
+ USING (VALUES (@P1, @P2, @P3, @P4, @P5, @P6, @P7, @P8, @P9, SYSUTCDATETIME(), SYSUTCDATETIME(), NULL)) AS source ([id], [key], [name], [value], [value_type], [group_name], [description], [editable], [active], [created_at], [updated_at], [deleted_at])
+ ON target.[key] = source.[key]
+ WHEN MATCHED THEN UPDATE SET target.[name] = source.[name], target.[value] = source.[value], target.[value_type] = source.[value_type], target.[group_name] = source.[group_name], target.[description] = source.[description], target.[editable] = source.[editable], target.[active] = source.[active], target.[deleted_at] = NULL, target.[updated_at] = SYSUTCDATETIME()
+ WHEN NOT MATCHED THEN INSERT ([id], [key], [name], [value], [value_type], [group_name], [description], [editable], [active], [created_at], [updated_at], [deleted_at]) VALUES (source.[id], source.[key], source.[name], source.[value], source.[value_type], source.[group_name], source.[description], source.[editable], source.[active], source.[created_at], source.[updated_at], source.[deleted_at]);
+`,
       [
         uuidv5(`system-parameter:${parameter.key}`, SEED_NAMESPACE),
         parameter.key,
@@ -966,32 +913,18 @@ const seedSystemParameters = async (
 };
 
 const seedCatalogs = async (
-  connection: Awaited<ReturnType<typeof createConnection>>,
+  connection: Prisma.TransactionClient,
 ): Promise<void> => {
   for (const catalog of catalogs) {
-    await connection.execute(
+    await executeSqlServer(
+      connection,
       `
-        INSERT INTO catalogs (
-          id,
-          type,
-          name,
-          \`key\`,
-          description,
-          active,
-          sort_order,
-          created_at,
-          updated_at,
-          deleted_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, NOW(3), NOW(3), NULL)
-        ON DUPLICATE KEY UPDATE
-          name = VALUES(name),
-          description = VALUES(description),
-          active = VALUES(active),
-          sort_order = VALUES(sort_order),
-          deleted_at = NULL,
-          updated_at = NOW(3)
-      `,
+MERGE [dbo].[catalogs] AS target
+ USING (VALUES (@P1, @P2, @P3, @P4, @P5, @P6, @P7, SYSUTCDATETIME(), SYSUTCDATETIME(), NULL)) AS source ([id], [type], [name], [key], [description], [active], [sort_order], [created_at], [updated_at], [deleted_at])
+ ON target.[id] = source.[id] OR (source.[key] IS NOT NULL AND target.[type] = source.[type] AND target.[key] = source.[key])
+ WHEN MATCHED THEN UPDATE SET target.[name] = source.[name], target.[description] = source.[description], target.[active] = source.[active], target.[sort_order] = source.[sort_order], target.[deleted_at] = NULL, target.[updated_at] = SYSUTCDATETIME()
+ WHEN NOT MATCHED THEN INSERT ([id], [type], [name], [key], [description], [active], [sort_order], [created_at], [updated_at], [deleted_at]) VALUES (source.[id], source.[type], source.[name], source.[key], source.[description], source.[active], source.[sort_order], source.[created_at], source.[updated_at], source.[deleted_at]);
+`,
       [
         uuidv5(
           `catalog:${catalog.type}:${catalog.key ?? catalog.name}`,
@@ -1009,12 +942,13 @@ const seedCatalogs = async (
 };
 
 const getRoleMap = async (
-  connection: Awaited<ReturnType<typeof createConnection>>,
+  connection: Prisma.TransactionClient,
 ): Promise<Map<string, string>> => {
-  const [rows] = await connection.execute<NamedIdRow[]>(
+  const rows = await querySqlServer<NamedIdRow>(
+    connection,
     `
       SELECT id, code
-      FROM roles
+      FROM [dbo].[roles]
     `,
   );
 
@@ -1026,12 +960,13 @@ const getRoleMap = async (
 };
 
 const getAreaMap = async (
-  connection: Awaited<ReturnType<typeof createConnection>>,
+  connection: Prisma.TransactionClient,
 ): Promise<Map<SeedAreaKey, string>> => {
-  const [rows] = await connection.execute<AreaRow[]>(
+  const rows = await querySqlServer<AreaRow>(
+    connection,
     `
       SELECT id, code
-      FROM areas
+      FROM [dbo].[areas]
       WHERE code IN (${placeholders(areas.length)})
     `,
     areas.map((area) => area.code),
@@ -1055,12 +990,13 @@ const getAreaMap = async (
 };
 
 const getRiskLevelMap = async (
-  connection: Awaited<ReturnType<typeof createConnection>>,
+  connection: Prisma.TransactionClient,
 ): Promise<Map<SeedRiskLevelKey, string>> => {
-  const [rows] = await connection.execute<RiskLevelRow[]>(
+  const rows = await querySqlServer<RiskLevelRow>(
+    connection,
     `
       SELECT id, name
-      FROM risk_levels
+      FROM [dbo].[risk_levels]
       WHERE name IN (${placeholders(riskLevels.length)})
     `,
     riskLevels.map((riskLevel) => riskLevel.name),
@@ -1084,13 +1020,14 @@ const getRiskLevelMap = async (
 };
 
 const getObservationStatusMap = async (
-  connection: Awaited<ReturnType<typeof createConnection>>,
+  connection: Prisma.TransactionClient,
 ): Promise<Map<SeedObservationStatusKey, string>> => {
-  const [rows] = await connection.execute<ObservationStatusRow[]>(
+  const rows = await querySqlServer<ObservationStatusRow>(
+    connection,
     `
-      SELECT id, \`key\`
-      FROM observation_statuses
-      WHERE \`key\` IN (${placeholders(observationStatuses.length)})
+      SELECT id, [key]
+      FROM [dbo].[observation_statuses]
+      WHERE [key] IN (${placeholders(observationStatuses.length)})
     `,
     observationStatuses.map((status) => status.key),
   );
@@ -2120,7 +2057,7 @@ const lifecycleWorkflowGraph = (input: {
 };
 
 const seedCanonicalWorkflows = async (
-  connection: Awaited<ReturnType<typeof createConnection>>,
+  connection: Prisma.TransactionClient,
   roleMap: Map<string, string>,
   adminUserId: string,
 ): Promise<number> => {
@@ -2164,9 +2101,10 @@ const seedCanonicalWorkflows = async (
   ];
 
   for (const graph of graphs) {
-    const [publishedRows] = await connection.execute<RowDataPacket[]>(
-      `SELECT id FROM workflow_definitions
-       WHERE process_type = ? AND status = 'PUBLISHED' AND id <> ?`,
+    const publishedRows = await querySqlServer<{ id: string }>(
+      connection,
+      `SELECT id FROM [dbo].[workflow_definitions]
+       WHERE process_type = @P1 AND status = 'PUBLISHED' AND id <> @P2`,
       [graph.processType, graph.definitionId],
     );
     if (publishedRows.length > 0) {
@@ -2174,12 +2112,15 @@ const seedCanonicalWorkflows = async (
         `A different published workflow already exists for ${graph.processType}.`,
       );
     }
-    await connection.execute(
-      `INSERT INTO workflow_definitions
-        (id, name, description, process_type, status, active_version_id, created_by_id, created_at, updated_at, archived_at)
-       VALUES (?, ?, ?, ?, 'DRAFT', NULL, ?, NOW(3), NOW(3), NULL)
-       ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description),
-         process_type = VALUES(process_type), status = 'PUBLISHED', archived_at = NULL, updated_at = NOW(3)`,
+    await executeSqlServer(
+      connection,
+      `
+MERGE [dbo].[workflow_definitions] AS target
+ USING (VALUES (@P1, @P2, @P3, @P4, 'DRAFT', NULL, @P5, SYSUTCDATETIME(), SYSUTCDATETIME(), NULL)) AS source ([id], [name], [description], [process_type], [status], [active_version_id], [created_by_id], [created_at], [updated_at], [archived_at])
+ ON target.[id] = source.[id]
+ WHEN MATCHED THEN UPDATE SET target.[name] = source.[name], target.[description] = source.[description], target.[process_type] = source.[process_type], target.[status] = 'PUBLISHED', target.[archived_at] = NULL, target.[updated_at] = SYSUTCDATETIME()
+ WHEN NOT MATCHED THEN INSERT ([id], [name], [description], [process_type], [status], [active_version_id], [created_by_id], [created_at], [updated_at], [archived_at]) VALUES (source.[id], source.[name], source.[description], source.[process_type], source.[status], source.[active_version_id], source.[created_by_id], source.[created_at], source.[updated_at], source.[archived_at]);
+`,
       [
         graph.definitionId,
         graph.name,
@@ -2188,13 +2129,15 @@ const seedCanonicalWorkflows = async (
         adminUserId,
       ],
     );
-    await connection.execute(
-      `INSERT INTO workflow_versions
-        (id, workflow_definition_id, version_number, status, change_description, created_by_id, published_by_id, created_at, published_at)
-       VALUES (?, ?, 1, 'PUBLISHED', ?, ?, ?, NOW(3), NOW(3))
-       ON DUPLICATE KEY UPDATE status = 'PUBLISHED', change_description = VALUES(change_description),
-         created_by_id = VALUES(created_by_id), published_by_id = VALUES(published_by_id),
-         published_at = COALESCE(published_at, NOW(3))`,
+    await executeSqlServer(
+      connection,
+      `
+MERGE [dbo].[workflow_versions] AS target
+ USING (VALUES (@P1, @P2, 1, 'PUBLISHED', @P3, @P4, @P5, SYSUTCDATETIME(), SYSUTCDATETIME())) AS source ([id], [workflow_definition_id], [version_number], [status], [change_description], [created_by_id], [published_by_id], [created_at], [published_at])
+ ON target.[workflow_definition_id] = source.[workflow_definition_id] AND target.[version_number] = source.[version_number]
+ WHEN MATCHED THEN UPDATE SET target.[status] = 'PUBLISHED', target.[change_description] = source.[change_description], target.[created_by_id] = source.[created_by_id], target.[published_by_id] = source.[published_by_id], target.[published_at] = COALESCE(target.[published_at], SYSUTCDATETIME())
+ WHEN NOT MATCHED THEN INSERT ([id], [workflow_definition_id], [version_number], [status], [change_description], [created_by_id], [published_by_id], [created_at], [published_at]) VALUES (source.[id], source.[workflow_definition_id], source.[version_number], source.[status], source.[change_description], source.[created_by_id], source.[published_by_id], source.[created_at], source.[published_at]);
+`,
       [
         graph.versionId,
         graph.definitionId,
@@ -2204,15 +2147,15 @@ const seedCanonicalWorkflows = async (
       ],
     );
     for (const item of graph.nodes) {
-      await connection.execute(
-        `INSERT INTO workflow_nodes
-          (id, workflow_version_id, node_key, name, description, type, assignment_strategy,
-           position_x, position_y, configuration_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3), NOW(3))
-         ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description),
-           type = VALUES(type), assignment_strategy = VALUES(assignment_strategy),
-           position_x = VALUES(position_x), position_y = VALUES(position_y),
-           configuration_json = VALUES(configuration_json), updated_at = NOW(3)`,
+      await executeSqlServer(
+        connection,
+        `
+MERGE [dbo].[workflow_nodes] AS target
+ USING (VALUES (@P1, @P2, @P3, @P4, @P5, @P6, @P7, @P8, @P9, @P10, SYSUTCDATETIME(), SYSUTCDATETIME())) AS source ([id], [workflow_version_id], [node_key], [name], [description], [type], [assignment_strategy], [position_x], [position_y], [configuration_json], [created_at], [updated_at])
+ ON target.[workflow_version_id] = source.[workflow_version_id] AND target.[node_key] = source.[node_key]
+ WHEN MATCHED THEN UPDATE SET target.[name] = source.[name], target.[description] = source.[description], target.[type] = source.[type], target.[assignment_strategy] = source.[assignment_strategy], target.[position_x] = source.[position_x], target.[position_y] = source.[position_y], target.[configuration_json] = source.[configuration_json], target.[updated_at] = SYSUTCDATETIME()
+ WHEN NOT MATCHED THEN INSERT ([id], [workflow_version_id], [node_key], [name], [description], [type], [assignment_strategy], [position_x], [position_y], [configuration_json], [created_at], [updated_at]) VALUES (source.[id], source.[workflow_version_id], source.[node_key], source.[name], source.[description], source.[type], source.[assignment_strategy], source.[position_x], source.[position_y], source.[configuration_json], source.[created_at], source.[updated_at]);
+`,
         [
           uuidv5(`${graph.versionId}:node:${item.key}`, SEED_NAMESPACE),
           graph.versionId,
@@ -2227,15 +2170,24 @@ const seedCanonicalWorkflows = async (
         ],
       );
     }
-    const [nodeRows] = await connection.execute<RowDataPacket[]>(
-      `SELECT id, node_key FROM workflow_nodes WHERE workflow_version_id = ?`,
+    const nodeRows = await querySqlServer<{ id: string; node_key: string }>(
+      connection,
+      `SELECT id, node_key FROM [dbo].[workflow_nodes] WHERE workflow_version_id = @P1`,
       [graph.versionId],
     );
     const nodeIds = new Map(
       nodeRows.map((row) => [String(row.node_key), String(row.id)]),
     );
-    await connection.execute(
-      `DELETE FROM workflow_condition_groups WHERE workflow_version_id = ?`,
+    await executeSqlServer(
+      connection,
+      `UPDATE [dbo].[workflow_transitions]
+       SET [condition_group_id] = NULL
+       WHERE [workflow_version_id] = @P1 AND [condition_group_id] IS NOT NULL`,
+      [graph.versionId],
+    );
+    await executeSqlServer(
+      connection,
+      `DELETE FROM [dbo].[workflow_condition_groups] WHERE workflow_version_id = @P1`,
       [graph.versionId],
     );
     const conditionGroupIds = new Map<string, string>();
@@ -2246,11 +2198,15 @@ const seedCanonicalWorkflows = async (
         SEED_NAMESPACE,
       );
       conditionGroupIds.set(`${item.source}:${item.target}`, groupId);
-      await connection.execute(
-        `INSERT INTO workflow_condition_groups
-          (id, workflow_version_id, logic_operator, description)
-         VALUES (?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE logic_operator = VALUES(logic_operator), description = VALUES(description)`,
+      await executeSqlServer(
+        connection,
+        `
+MERGE [dbo].[workflow_condition_groups] AS target
+ USING (VALUES (@P1, @P2, @P3, @P4)) AS source ([id], [workflow_version_id], [logic_operator], [description])
+ ON target.[id] = source.[id]
+ WHEN MATCHED THEN UPDATE SET target.[logic_operator] = source.[logic_operator], target.[description] = source.[description]
+ WHEN NOT MATCHED THEN INSERT ([id], [workflow_version_id], [logic_operator], [description]) VALUES (source.[id], source.[workflow_version_id], source.[logic_operator], source.[description]);
+`,
         [
           groupId,
           graph.versionId,
@@ -2259,12 +2215,15 @@ const seedCanonicalWorkflows = async (
         ],
       );
       for (const [sequence, condition] of item.condition.conditions.entries()) {
-        await connection.execute(
-          `INSERT INTO workflow_conditions
-            (id, condition_group_id, field, operator, value_json, sequence, description)
-           VALUES (?, ?, ?, ?, ?, ?, ?)
-           ON DUPLICATE KEY UPDATE field = VALUES(field), operator = VALUES(operator),
-             value_json = VALUES(value_json), description = VALUES(description)`,
+        await executeSqlServer(
+          connection,
+          `
+MERGE [dbo].[workflow_conditions] AS target
+ USING (VALUES (@P1, @P2, @P3, @P4, @P5, @P6, @P7)) AS source ([id], [condition_group_id], [field], [operator], [value_json], [sequence], [description])
+ ON target.[condition_group_id] = source.[condition_group_id] AND target.[sequence] = source.[sequence]
+ WHEN MATCHED THEN UPDATE SET target.[field] = source.[field], target.[operator] = source.[operator], target.[value_json] = source.[value_json], target.[description] = source.[description]
+ WHEN NOT MATCHED THEN INSERT ([id], [condition_group_id], [field], [operator], [value_json], [sequence], [description]) VALUES (source.[id], source.[condition_group_id], source.[field], source.[operator], source.[value_json], source.[sequence], source.[description]);
+`,
           [
             uuidv5(`${groupId}:condition:${sequence}`, SEED_NAMESPACE),
             groupId,
@@ -2287,13 +2246,15 @@ const seedCanonicalWorkflows = async (
       const conditionGroupId = item.condition
         ? (conditionGroupIds.get(`${item.source}:${item.target}`) ?? null)
         : null;
-      await connection.execute(
-        `INSERT INTO workflow_transitions
-          (id, workflow_version_id, source_node_id, target_node_id, label, priority, transition_type, condition_group_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE source_node_id = VALUES(source_node_id), target_node_id = VALUES(target_node_id),
-           label = VALUES(label), priority = VALUES(priority), transition_type = VALUES(transition_type),
-           condition_group_id = VALUES(condition_group_id)`,
+      await executeSqlServer(
+        connection,
+        `
+MERGE [dbo].[workflow_transitions] AS target
+ USING (VALUES (@P1, @P2, @P3, @P4, @P5, @P6, @P7, @P8)) AS source ([id], [workflow_version_id], [source_node_id], [target_node_id], [label], [priority], [transition_type], [condition_group_id])
+ ON target.[id] = source.[id]
+ WHEN MATCHED THEN UPDATE SET target.[source_node_id] = source.[source_node_id], target.[target_node_id] = source.[target_node_id], target.[label] = source.[label], target.[priority] = source.[priority], target.[transition_type] = source.[transition_type], target.[condition_group_id] = source.[condition_group_id]
+ WHEN NOT MATCHED THEN INSERT ([id], [workflow_version_id], [source_node_id], [target_node_id], [label], [priority], [transition_type], [condition_group_id]) VALUES (source.[id], source.[workflow_version_id], source.[source_node_id], source.[target_node_id], source.[label], source.[priority], source.[transition_type], source.[condition_group_id]);
+`,
         [
           uuidv5(
             `${graph.versionId}:transition:${item.source}:${item.target}:${item.type}`,
@@ -2309,8 +2270,9 @@ const seedCanonicalWorkflows = async (
         ],
       );
     }
-    await connection.execute(
-      `UPDATE workflow_definitions SET active_version_id = ?, status = 'PUBLISHED', archived_at = NULL, updated_at = NOW(3) WHERE id = ?`,
+    await executeSqlServer(
+      connection,
+      `UPDATE [dbo].[workflow_definitions] SET active_version_id = @P1, status = 'PUBLISHED', archived_at = NULL, updated_at = SYSUTCDATETIME() WHERE id = @P2`,
       [graph.versionId, graph.definitionId],
     );
   }
@@ -2318,12 +2280,13 @@ const seedCanonicalWorkflows = async (
 };
 
 const getPermissionMap = async (
-  connection: Awaited<ReturnType<typeof createConnection>>,
+  connection: Prisma.TransactionClient,
 ): Promise<Map<string, string>> => {
-  const [rows] = await connection.execute<NamedIdRow[]>(
+  const rows = await querySqlServer<NamedIdRow>(
+    connection,
     `
       SELECT id, name
-      FROM permissions
+      FROM [dbo].[permissions]
       WHERE name IN (${placeholders(permissions.length)})
     `,
     permissions.map((permission) => permission.name),
@@ -2333,16 +2296,18 @@ const getPermissionMap = async (
 };
 
 const syncRolePermissions = async (
-  connection: Awaited<ReturnType<typeof createConnection>>,
+  connection: Prisma.TransactionClient,
   roleMap: Map<string, string>,
   permissionMap: Map<string, string>,
 ): Promise<void> => {
   for (const role of roles) {
     const roleId = roleMap.get(role.code);
     if (!roleId) throw new Error(`Role ${role.code} not found after seeding.`);
-    await connection.execute("DELETE FROM role_permissions WHERE role_id = ?", [
-      roleId,
-    ]);
+    await executeSqlServer(
+      connection,
+      "DELETE FROM [dbo].[role_permissions] WHERE role_id = @P1",
+      [roleId],
+    );
     for (const permissionName of ROLE_PERMISSION_NAMES[role.code]) {
       const permissionId = permissionMap.get(permissionName);
       if (!permissionId) {
@@ -2351,10 +2316,11 @@ const syncRolePermissions = async (
         );
       }
 
-      await connection.execute(
-        `INSERT INTO role_permissions
+      await executeSqlServer(
+        connection,
+        `INSERT INTO [dbo].[role_permissions]
           (id, role_id, permission_id, created_at, updated_at)
-          VALUES (?, ?, ?, NOW(3), NOW(3))`,
+          VALUES (@P1, @P2, @P3, SYSUTCDATETIME(), SYSUTCDATETIME())`,
         [
           uuidv5(`role-permission:${roleId}:${permissionId}`, SEED_NAMESPACE),
           roleId,
@@ -2366,47 +2332,30 @@ const syncRolePermissions = async (
 };
 
 const seedAdminUser = async (
-  connection: Awaited<ReturnType<typeof createConnection>>,
+  connection: Prisma.TransactionClient,
   adminSeed: AdminSeedConfig,
 ): Promise<string> => {
   const passwordHash = await bcrypt.hash(adminSeed.password, 12);
   const adminIds = getAdminSeedIds(adminSeed);
 
-  await connection.execute(
+  await executeSqlServer(
+    connection,
     `
-      INSERT INTO users (
-        id,
-        name,
-        email,
-        password,
-        avatar,
-        is_active,
-        email_verified,
-        last_login_at,
-        created_at,
-        updated_at,
-        deleted_at
-      )
-      VALUES (?, ?, ?, ?, NULL, true, true, NULL, NOW(3), NOW(3), NULL)
-      ON DUPLICATE KEY UPDATE
-        name = VALUES(name),
-        email = VALUES(email),
-        password = VALUES(password),
-        avatar = VALUES(avatar),
-        is_active = VALUES(is_active),
-        email_verified = VALUES(email_verified),
-        deleted_at = NULL,
-        updated_at = NOW(3)
-    `,
+MERGE [dbo].[users] AS target
+ USING (VALUES (@P1, @P2, @P3, @P4, NULL, 1, 1, NULL, SYSUTCDATETIME(), SYSUTCDATETIME(), NULL)) AS source ([id], [name], [email], [password], [avatar], [is_active], [email_verified], [last_login_at], [created_at], [updated_at], [deleted_at])
+ ON target.[email] = source.[email]
+ WHEN MATCHED THEN UPDATE SET target.[name] = source.[name], target.[email] = source.[email], target.[password] = source.[password], target.[avatar] = source.[avatar], target.[is_active] = source.[is_active], target.[email_verified] = source.[email_verified], target.[deleted_at] = NULL, target.[updated_at] = SYSUTCDATETIME()
+ WHEN NOT MATCHED THEN INSERT ([id], [name], [email], [password], [avatar], [is_active], [email_verified], [last_login_at], [created_at], [updated_at], [deleted_at]) VALUES (source.[id], source.[name], source.[email], source.[password], source.[avatar], source.[is_active], source.[email_verified], source.[last_login_at], source.[created_at], source.[updated_at], source.[deleted_at]);
+`,
     [adminIds.userId, adminSeed.name, adminSeed.email, passwordHash],
   );
 
-  const [rows] = await connection.execute<UserRow[]>(
+  const rows = await querySqlServer<UserRow>(
+    connection,
     `
-      SELECT id
-      FROM users
-      WHERE email = ?
-      LIMIT 1
+      SELECT TOP (1) id
+      FROM [dbo].[users]
+      WHERE email = @P1
     `,
     [adminSeed.email],
   );
@@ -2421,7 +2370,7 @@ const seedAdminUser = async (
 };
 
 const seedAdminUserRole = async (
-  connection: Awaited<ReturnType<typeof createConnection>>,
+  connection: Prisma.TransactionClient,
   adminUserId: string,
   roleMap: Map<string, string>,
 ): Promise<void> => {
@@ -2431,17 +2380,21 @@ const seedAdminUserRole = async (
     throw new Error("System admin role not found before assigning user role.");
   }
 
-  await connection.execute("DELETE FROM user_roles WHERE user_id = ?", [
-    adminUserId,
-  ]);
+  await executeSqlServer(
+    connection,
+    "DELETE FROM [dbo].[user_roles] WHERE user_id = @P1",
+    [adminUserId],
+  );
 
-  await connection.execute(
+  await executeSqlServer(
+    connection,
     `
-      INSERT INTO user_roles (id, user_id, role_id, created_at, updated_at)
-      VALUES (?, ?, ?, NOW(3), NOW(3))
-      ON DUPLICATE KEY UPDATE
-        updated_at = NOW(3)
-    `,
+MERGE [dbo].[user_roles] AS target
+ USING (VALUES (@P1, @P2, @P3, SYSUTCDATETIME(), SYSUTCDATETIME())) AS source ([id], [user_id], [role_id], [created_at], [updated_at])
+ ON target.[id] = source.[id]
+ WHEN MATCHED THEN UPDATE SET target.[updated_at] = SYSUTCDATETIME()
+ WHEN NOT MATCHED THEN INSERT ([id], [user_id], [role_id], [created_at], [updated_at]) VALUES (source.[id], source.[user_id], source.[role_id], source.[created_at], source.[updated_at]);
+`,
     [
       uuidv5(`user-role:${adminUserId}:${adminRoleId}`, SEED_NAMESPACE),
       adminUserId,
@@ -2451,36 +2404,22 @@ const seedAdminUserRole = async (
 };
 
 const seedAdminAccount = async (
-  connection: Awaited<ReturnType<typeof createConnection>>,
+  connection: Prisma.TransactionClient,
   adminUserId: string,
   adminSeed: AdminSeedConfig,
 ): Promise<void> => {
   const passwordHash = await bcrypt.hash(adminSeed.password, 12);
   const adminIds = getAdminSeedIds(adminSeed);
 
-  await connection.execute(
+  await executeSqlServer(
+    connection,
     `
-      INSERT INTO accounts (
-        id,
-        account_id,
-        provider_id,
-        user_id,
-        access_token,
-        refresh_token,
-        id_token,
-        access_token_expires_at,
-        refresh_token_expires_at,
-        scope,
-        password,
-        created_at,
-        updated_at
-      )
-      VALUES (?, ?, 'credential', ?, NULL, NULL, NULL, NULL, NULL, NULL, ?, NOW(3), NOW(3))
-      ON DUPLICATE KEY UPDATE
-        user_id = VALUES(user_id),
-        password = VALUES(password),
-        updated_at = NOW(3)
-    `,
+MERGE [dbo].[accounts] AS target
+ USING (VALUES (@P1, @P2, 'credential', @P3, NULL, NULL, NULL, NULL, NULL, NULL, @P4, SYSUTCDATETIME(), SYSUTCDATETIME())) AS source ([id], [account_id], [provider_id], [user_id], [access_token], [refresh_token], [id_token], [access_token_expires_at], [refresh_token_expires_at], [scope], [password], [created_at], [updated_at])
+ ON target.[provider_id] = source.[provider_id] AND target.[account_id] = source.[account_id]
+ WHEN MATCHED THEN UPDATE SET target.[user_id] = source.[user_id], target.[password] = source.[password], target.[updated_at] = SYSUTCDATETIME()
+ WHEN NOT MATCHED THEN INSERT ([id], [account_id], [provider_id], [user_id], [access_token], [refresh_token], [id_token], [access_token_expires_at], [refresh_token_expires_at], [scope], [password], [created_at], [updated_at]) VALUES (source.[id], source.[account_id], source.[provider_id], source.[user_id], source.[access_token], source.[refresh_token], source.[id_token], source.[access_token_expires_at], source.[refresh_token_expires_at], source.[scope], source.[password], source.[created_at], source.[updated_at]);
+`,
     [adminIds.accountId, adminUserId, adminUserId, passwordHash],
   );
 };
@@ -2493,7 +2432,7 @@ type DemoUserIds = {
 };
 
 const seedDemoUsers = async (
-  connection: Awaited<ReturnType<typeof createConnection>>,
+  connection: Prisma.TransactionClient,
   roleMap: Map<string, string>,
 ): Promise<DemoUserIds> => {
   if (!env.SEED_DEMO_PASSWORD && process.env.NODE_ENV === "production")
@@ -2510,41 +2449,54 @@ const seedDemoUsers = async (
   };
 
   for (const user of demoUsers) {
-    const userId = uuidv5(`demo-user:${user.email}`, SEED_NAMESPACE);
+    const plannedUserId = uuidv5(`demo-user:${user.email}`, SEED_NAMESPACE);
     const roleId = roleMap.get(user.roleCode);
     if (!roleId)
       throw new Error(`Role ${user.roleCode} not found for demo user.`);
+
+    await executeSqlServer(
+      connection,
+      `
+MERGE [dbo].[users] AS target
+ USING (VALUES (@P1, @P2, @P3, @P4, NULL, @P5, 1, 1, NULL, SYSUTCDATETIME(), SYSUTCDATETIME(), NULL)) AS source ([id], [name], [email], [password], [avatar], [job_title], [is_active], [email_verified], [last_login_at], [created_at], [updated_at], [deleted_at])
+ ON target.[email] = source.[email]
+ WHEN MATCHED THEN UPDATE SET target.[name] = source.[name], target.[password] = source.[password], target.[job_title] = source.[job_title], target.[is_active] = 1, target.[email_verified] = 1, target.[deleted_at] = NULL, target.[updated_at] = SYSUTCDATETIME()
+ WHEN NOT MATCHED THEN INSERT ([id], [name], [email], [password], [avatar], [job_title], [is_active], [email_verified], [last_login_at], [created_at], [updated_at], [deleted_at]) VALUES (source.[id], source.[name], source.[email], source.[password], source.[avatar], source.[job_title], source.[is_active], source.[email_verified], source.[last_login_at], source.[created_at], source.[updated_at], source.[deleted_at]);
+`,
+      [plannedUserId, user.name, user.email, passwordHash, user.jobTitle],
+    );
+    const userRows = await querySqlServer<UserRow>(
+      connection,
+      `SELECT TOP (1) id FROM [dbo].[users] WHERE email = @P1`,
+      [user.email],
+    );
+    const userId = userRows[0]?.id;
+    if (!userId) throw new Error(`Demo user ${user.email} was not seeded.`);
     if (user.roleCode === "AUDITOR") userIds.auditorId = userId;
     if (user.roleCode === "PROCESS_OWNER") userIds.processOwnerId = userId;
     if (user.roleCode === "AREA_RESPONSIBLE")
       userIds.areaResponsibleId = userId;
     if (user.roleCode === "EXECUTOR") userIds.executorId = userId;
-
-    await connection.execute(
-      `INSERT INTO users (
-        id, name, email, password, avatar, job_title, is_active, email_verified,
-        last_login_at, created_at, updated_at, deleted_at
-      ) VALUES (?, ?, ?, ?, NULL, ?, true, true, NULL, NOW(3), NOW(3), NULL)
-      ON DUPLICATE KEY UPDATE
-        name = VALUES(name), password = VALUES(password), job_title = VALUES(job_title),
-        is_active = true, email_verified = true, deleted_at = NULL, updated_at = NOW(3)`,
-      [userId, user.name, user.email, passwordHash, user.jobTitle],
+    await executeSqlServer(
+      connection,
+      "DELETE FROM [dbo].[user_roles] WHERE user_id = @P1",
+      [userId],
     );
-    await connection.execute("DELETE FROM user_roles WHERE user_id = ?", [
-      userId,
-    ]);
-    await connection.execute(
-      `INSERT INTO user_roles (id, user_id, role_id, created_at, updated_at)
-       VALUES (?, ?, ?, NOW(3), NOW(3))`,
+    await executeSqlServer(
+      connection,
+      `INSERT INTO [dbo].[user_roles] (id, user_id, role_id, created_at, updated_at)
+       VALUES (@P1, @P2, @P3, SYSUTCDATETIME(), SYSUTCDATETIME())`,
       [uuidv5(`user-role:${userId}:${roleId}`, SEED_NAMESPACE), userId, roleId],
     );
-    await connection.execute(
-      `INSERT INTO accounts (
-        id, account_id, provider_id, user_id, access_token, refresh_token,
-        id_token, access_token_expires_at, refresh_token_expires_at, scope,
-        password, created_at, updated_at
-      ) VALUES (?, ?, 'credential', ?, NULL, NULL, NULL, NULL, NULL, NULL, ?, NOW(3), NOW(3))
-      ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), password = VALUES(password), updated_at = NOW(3)`,
+    await executeSqlServer(
+      connection,
+      `
+MERGE [dbo].[accounts] AS target
+ USING (VALUES (@P1, @P2, 'credential', @P3, NULL, NULL, NULL, NULL, NULL, NULL, @P4, SYSUTCDATETIME(), SYSUTCDATETIME())) AS source ([id], [account_id], [provider_id], [user_id], [access_token], [refresh_token], [id_token], [access_token_expires_at], [refresh_token_expires_at], [scope], [password], [created_at], [updated_at])
+ ON target.[provider_id] = source.[provider_id] AND target.[account_id] = source.[account_id]
+ WHEN MATCHED THEN UPDATE SET target.[user_id] = source.[user_id], target.[password] = source.[password], target.[updated_at] = SYSUTCDATETIME()
+ WHEN NOT MATCHED THEN INSERT ([id], [account_id], [provider_id], [user_id], [access_token], [refresh_token], [id_token], [access_token_expires_at], [refresh_token_expires_at], [scope], [password], [created_at], [updated_at]) VALUES (source.[id], source.[account_id], source.[provider_id], source.[user_id], source.[access_token], source.[refresh_token], source.[id_token], source.[access_token_expires_at], source.[refresh_token_expires_at], source.[scope], source.[password], source.[created_at], source.[updated_at]);
+`,
       [
         uuidv5(`demo-account:${user.email}`, SEED_NAMESPACE),
         userId,
@@ -2557,37 +2509,17 @@ const seedDemoUsers = async (
 };
 
 const seedDefaultSettings = async (
-  connection: Awaited<ReturnType<typeof createConnection>>,
+  connection: Prisma.TransactionClient,
 ): Promise<void> => {
-  await connection.execute(
+  await executeSqlServer(
+    connection,
     `
-      INSERT INTO settings (
-        id,
-        app_name,
-        logo,
-        primary_color,
-        support_email,
-        timezone,
-        date_format,
-        sender_name,
-        sender_email,
-        created_at,
-        updated_at,
-        deleted_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3), NOW(3), NULL)
-      ON DUPLICATE KEY UPDATE
-        app_name = VALUES(app_name),
-        logo = VALUES(logo),
-        primary_color = VALUES(primary_color),
-        support_email = VALUES(support_email),
-        timezone = VALUES(timezone),
-        date_format = VALUES(date_format),
-        sender_name = VALUES(sender_name),
-        sender_email = VALUES(sender_email),
-        deleted_at = NULL,
-        updated_at = NOW(3)
-    `,
+MERGE [dbo].[settings] AS target
+ USING (VALUES (@P1, @P2, @P3, @P4, @P5, @P6, @P7, @P8, @P9, SYSUTCDATETIME(), SYSUTCDATETIME(), NULL)) AS source ([id], [app_name], [logo], [primary_color], [support_email], [timezone], [date_format], [sender_name], [sender_email], [created_at], [updated_at], [deleted_at])
+ ON target.[id] = source.[id]
+ WHEN MATCHED THEN UPDATE SET target.[app_name] = source.[app_name], target.[logo] = source.[logo], target.[primary_color] = source.[primary_color], target.[support_email] = source.[support_email], target.[timezone] = source.[timezone], target.[date_format] = source.[date_format], target.[sender_name] = source.[sender_name], target.[sender_email] = source.[sender_email], target.[deleted_at] = NULL, target.[updated_at] = SYSUTCDATETIME()
+ WHEN NOT MATCHED THEN INSERT ([id], [app_name], [logo], [primary_color], [support_email], [timezone], [date_format], [sender_name], [sender_email], [created_at], [updated_at], [deleted_at]) VALUES (source.[id], source.[app_name], source.[logo], source.[primary_color], source.[support_email], source.[timezone], source.[date_format], source.[sender_name], source.[sender_email], source.[created_at], source.[updated_at], source.[deleted_at]);
+`,
     [
       ids.settings,
       env.SEED_APP_NAME,
@@ -2603,7 +2535,7 @@ const seedDefaultSettings = async (
 };
 
 const seedSampleObservationsIfEmpty = async (
-  connection: Awaited<ReturnType<typeof createConnection>>,
+  connection: Prisma.TransactionClient,
   options: {
     adminUserId: string;
     areaMap: Map<SeedAreaKey, string>;
@@ -2612,10 +2544,11 @@ const seedSampleObservationsIfEmpty = async (
     statusMap: Map<SeedObservationStatusKey, string>;
   },
 ): Promise<number> => {
-  const [countRows] = await connection.execute<CountRow[]>(
+  const countRows = await querySqlServer<CountRow>(
+    connection,
     `
       SELECT COUNT(*) AS total
-      FROM observations
+      FROM [dbo].[observations]
       WHERE deleted_at IS NULL
     `,
   );
@@ -2638,9 +2571,10 @@ const seedSampleObservationsIfEmpty = async (
     financial: uuidv5("risk:informacion-financiera-incorrecta", SEED_NAMESPACE),
   };
 
-  await connection.execute(
-    `INSERT INTO audit_reports (id, report_number, title, report_date, created_by_user_id, created_at, updated_at, deleted_at)
-     VALUES (?, ?, ?, ?, ?, NOW(3), NOW(3), NULL)`,
+  await executeSqlServer(
+    connection,
+    `INSERT INTO [dbo].[audit_reports] (id, report_number, title, report_date, created_by_user_id, created_at, updated_at, deleted_at)
+     VALUES (@P1, @P2, @P3, @P4, @P5, SYSUTCDATETIME(), SYSUTCDATETIME(), NULL)`,
     [
       auditReportId,
       "AI-2026-004",
@@ -2649,18 +2583,20 @@ const seedSampleObservationsIfEmpty = async (
       options.adminUserId,
     ],
   );
-  await connection.execute(
-    `INSERT INTO observation_dictionary (id, name, description, is_active, created_at, updated_at)
-     VALUES (?, ?, ?, true, NOW(3), NOW(3))`,
+  await executeSqlServer(
+    connection,
+    `INSERT INTO [dbo].[observation_dictionary] (id, name, description, is_active, created_at, updated_at)
+     VALUES (@P1, @P2, @P3, 1, SYSUTCDATETIME(), SYSUTCDATETIME())`,
     [
       dictionaryId,
       "Debilidad de control interno",
       "Diseño o ejecución insuficiente de un control clave.",
     ],
   );
-  await connection.execute(
-    `INSERT INTO audit_reports (id, report_number, title, report_date, created_by_user_id, created_at, updated_at, deleted_at)
-     VALUES (?, ?, ?, ?, ?, NOW(3), NOW(3), NULL)`,
+  await executeSqlServer(
+    connection,
+    `INSERT INTO [dbo].[audit_reports] (id, report_number, title, report_date, created_by_user_id, created_at, updated_at, deleted_at)
+     VALUES (@P1, @P2, @P3, @P4, @P5, SYSUTCDATETIME(), SYSUTCDATETIME(), NULL)`,
     [
       secondAuditReportId,
       "AI-2026-005",
@@ -2679,9 +2615,10 @@ const seedSampleObservationsIfEmpty = async (
     ],
     ["financial", riskIds.financial, "Información financiera incorrecta"],
   ] as const) {
-    await connection.execute(
-      `INSERT INTO risks (id, name, description, is_active, created_at, updated_at)
-       VALUES (?, ?, ?, true, NOW(3), NOW(3))`,
+    await executeSqlServer(
+      connection,
+      `INSERT INTO [dbo].[risks] (id, name, description, is_active, created_at, updated_at)
+       VALUES (@P1, @P2, @P3, 1, SYSUTCDATETIME(), SYSUTCDATETIME())`,
       [id, name, `Riesgo de referencia ${key} para datos demostrativos.`],
     );
   }
@@ -2755,13 +2692,14 @@ const seedSampleObservationsIfEmpty = async (
       );
     }
 
-    await connection.execute(
-      `INSERT INTO observations (
+    await executeSqlServer(
+      connection,
+      `INSERT INTO [dbo].[observations] (
         id, audit_report_id, observation_number, main_observation_id, title, description,
         audit_recommendation, risk_level_id, status_id, auditor_user_id,
         original_due_date, current_due_date, source, process_name, category,
         progress_percent, current_stage, created_at, updated_at, deleted_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3), NOW(3), NULL)`,
+      ) VALUES (@P1, @P2, @P3, @P4, @P5, @P6, @P7, @P8, @P9, @P10, @P11, @P12, @P13, @P14, @P15, @P16, @P17, SYSUTCDATETIME(), SYSUTCDATETIME(), NULL)`,
       [
         observationId,
         sample.auditReportId,
@@ -2784,8 +2722,9 @@ const seedSampleObservationsIfEmpty = async (
     );
 
     for (const riskId of sample.riskIds) {
-      await connection.execute(
-        `INSERT INTO observation_risks (id, observation_id, risk_id, created_at) VALUES (?, ?, ?, NOW(3))`,
+      await executeSqlServer(
+        connection,
+        `INSERT INTO [dbo].[observation_risks] (id, observation_id, risk_id, created_at) VALUES (@P1, @P2, @P3, SYSUTCDATETIME())`,
         [
           uuidv5(`observation-risk:${displayCode}:${riskId}`, SEED_NAMESPACE),
           observationId,
@@ -2806,10 +2745,11 @@ const seedSampleObservationsIfEmpty = async (
       );
       const processOwnerUserId = options.demoUserIds.processOwnerId;
       const areaResponsibleUserId = options.demoUserIds.areaResponsibleId;
-      await connection.execute(
-        `INSERT INTO observation_areas (
+      await executeSqlServer(
+        connection,
+        `INSERT INTO [dbo].[observation_areas] (
           id, observation_id, area_id, process_owner_user_id, area_responsible_user_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, NOW(3), NOW(3))`,
+        ) VALUES (@P1, @P2, @P3, @P4, @P5, SYSUTCDATETIME(), SYSUTCDATETIME())`,
         [
           observationAreaId,
           observationId,
@@ -2837,12 +2777,13 @@ const seedSampleObservationsIfEmpty = async (
           "Individualizar cuentas privilegiadas",
           "Actualizar protocolo de contingencia operativa",
         ];
-        await connection.execute(
-          `INSERT INTO action_plans (
+        await executeSqlServer(
+          connection,
+          `INSERT INTO [dbo].[action_plans] (
             id, remediation_plan_id, observation_id, observation_area_id, responsible_user_id,
             title, description, original_due_date, current_due_date, completed_at,
             progress_percent, status, sort_order, created_at, updated_at, deleted_at
-          ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, NOW(3), NOW(3), NULL)`,
+          ) VALUES (@P1, NULL, @P2, @P3, @P4, @P5, @P6, @P7, @P8, NULL, @P9, @P10, @P11, SYSUTCDATETIME(), SYSUTCDATETIME(), NULL)`,
           [
             actionPlanId,
             observationId,
@@ -2862,12 +2803,13 @@ const seedSampleObservationsIfEmpty = async (
           `progress-evaluation:${actionPlanId}`,
           SEED_NAMESPACE,
         );
-        await connection.execute(
-          `INSERT INTO progress_evaluations (
+        await executeSqlServer(
+          connection,
+          `INSERT INTO [dbo].[progress_evaluations] (
             id, action_plan_id, submitted_by_user_id, type, reported_progress_percent, evaluated_status,
             comment, review_status, reviewed_by_user_id, submitted_at, reviewed_at,
             review_comment, created_at, updated_at, deleted_at, workflow_instance_id
-          ) VALUES (?, ?, ?, 'ADVANCE', ?, ?, ?, 'APPROVED', ?, NOW(3), NOW(3), ?, NOW(3), NOW(3), NULL, NULL)`,
+          ) VALUES (@P1, @P2, @P3, 'ADVANCE', @P4, @P5, @P6, 'APPROVED', @P7, SYSUTCDATETIME(), SYSUTCDATETIME(), @P8, SYSUTCDATETIME(), SYSUTCDATETIME(), NULL, NULL)`,
           [
             evaluationId,
             actionPlanId,
@@ -2881,12 +2823,13 @@ const seedSampleObservationsIfEmpty = async (
         );
 
         if (areaIndex === 0) {
-          await connection.execute(
-            `INSERT INTO deadline_extension_requests (
+          await executeSqlServer(
+            connection,
+            `INSERT INTO [dbo].[deadline_extension_requests] (
               id, target_type, observation_id, action_plan_id, observation_area_id, requested_by_user_id,
               classification_id, max_additional_days, max_allowed_date, previous_due_date, proposed_due_date, reason, status, manager_reviewer_id,
               manager_reviewed_at, manager_comment, final_approved_at, created_at, updated_at, deleted_at, workflow_instance_id
-            ) VALUES (?, 'ACTION_PLAN', NULL, ?, ?, ?, ?, 15, ?, ?, ?, ?, 'MANAGER_APPROVED', ?, NOW(3), ?, NOW(3), NOW(3), NOW(3), NULL)`,
+            ) VALUES (@P1, 'ACTION_PLAN', NULL, @P2, @P3, @P4, @P5, 15, @P6, @P7, @P8, @P9, 'MANAGER_APPROVED', @P10, SYSUTCDATETIME(), @P11, SYSUTCDATETIME(), SYSUTCDATETIME(), SYSUTCDATETIME(), NULL, NULL)`,
             [
               uuidv5(`extension:${actionPlanId}`, SEED_NAMESPACE),
               actionPlanId,
@@ -2910,7 +2853,7 @@ const seedSampleObservationsIfEmpty = async (
 };
 
 const seedCanonicalQaFixture = async (
-  connection: Awaited<ReturnType<typeof createConnection>>,
+  connection: Prisma.TransactionClient,
   options: {
     adminUserId: string;
     areaMap: Map<SeedAreaKey, string>;
@@ -2931,28 +2874,40 @@ const seedCanonicalQaFixture = async (
     throw new Error("Canonical QA areas are not available.");
   }
 
-  await connection.execute(
-    `INSERT INTO audit_reports
-      (id, report_number, title, report_date, created_by_user_id, created_at, updated_at, deleted_at)
-     VALUES (?, 'NIBOL-QA-2026-001', ?, '2026-09-09', ?, NOW(3), NOW(3), NULL)
-     ON DUPLICATE KEY UPDATE title = VALUES(title), report_date = VALUES(report_date),
-       created_by_user_id = VALUES(created_by_user_id), deleted_at = NULL, updated_at = NOW(3)`,
+  await executeSqlServer(
+    connection,
+    `
+MERGE [dbo].[audit_reports] AS target
+ USING (VALUES (@P1, 'NIBOL-QA-2026-001', @P2, '2026-09-09', @P3, SYSUTCDATETIME(), SYSUTCDATETIME(), NULL)) AS source ([id], [report_number], [title], [report_date], [created_by_user_id], [created_at], [updated_at], [deleted_at])
+ ON target.[report_number] = source.[report_number]
+ WHEN MATCHED THEN UPDATE SET target.[title] = source.[title], target.[report_date] = source.[report_date], target.[created_by_user_id] = source.[created_by_user_id], target.[deleted_at] = NULL, target.[updated_at] = SYSUTCDATETIME()
+ WHEN NOT MATCHED THEN INSERT ([id], [report_number], [title], [report_date], [created_by_user_id], [created_at], [updated_at], [deleted_at]) VALUES (source.[id], source.[report_number], source.[title], source.[report_date], source.[created_by_user_id], source.[created_at], source.[updated_at], source.[deleted_at]);
+`,
     [reportId, "Auditoría QA del Flujo Base NIBOL", options.adminUserId],
   );
-  await connection.execute(
-    `INSERT INTO observation_dictionary
-      (id, name, description, is_active, created_at, updated_at)
-     VALUES (?, 'Control de seguimiento QA', ?, true, NOW(3), NOW(3))
-     ON DUPLICATE KEY UPDATE description = VALUES(description), is_active = true, updated_at = NOW(3)`,
+  await executeSqlServer(
+    connection,
+    `
+MERGE [dbo].[observation_dictionary] AS target
+ USING (VALUES (@P1, 'Control de seguimiento QA', @P2, 1, SYSUTCDATETIME(), SYSUTCDATETIME())) AS source ([id], [name], [description], [is_active], [created_at], [updated_at])
+ ON target.[name] = source.[name]
+ WHEN MATCHED THEN UPDATE SET target.[description] = source.[description], target.[is_active] = 1, target.[updated_at] = SYSUTCDATETIME()
+ WHEN NOT MATCHED THEN INSERT ([id], [name], [description], [is_active], [created_at], [updated_at]) VALUES (source.[id], source.[name], source.[description], source.[is_active], source.[created_at], source.[updated_at]);
+`,
     [
       dictionaryId,
       "Hallazgo estable para validar el ciclo completo de auditoría.",
     ],
   );
-  await connection.execute(
-    `INSERT INTO risks (id, name, description, is_active, created_at, updated_at)
-     VALUES (?, 'Riesgo financiero QA', ?, true, NOW(3), NOW(3))
-     ON DUPLICATE KEY UPDATE description = VALUES(description), is_active = true, updated_at = NOW(3)`,
+  await executeSqlServer(
+    connection,
+    `
+MERGE [dbo].[risks] AS target
+ USING (VALUES (@P1, 'Riesgo financiero QA', @P2, 1, SYSUTCDATETIME(), SYSUTCDATETIME())) AS source ([id], [name], [description], [is_active], [created_at], [updated_at])
+ ON target.[name] = source.[name]
+ WHEN MATCHED THEN UPDATE SET target.[description] = source.[description], target.[is_active] = 1, target.[updated_at] = SYSUTCDATETIME()
+ WHEN NOT MATCHED THEN INSERT ([id], [name], [description], [is_active], [created_at], [updated_at]) VALUES (source.[id], source.[name], source.[description], source.[is_active], source.[created_at], source.[updated_at]);
+`,
     [riskId, "Riesgo estable del fixture canónico NIBOL."],
   );
 
@@ -3008,20 +2963,15 @@ const seedCanonicalQaFixture = async (
   ];
 
   for (const observation of observations) {
-    await connection.execute(
-      `INSERT INTO observations
-        (id, audit_report_id, observation_number, main_observation_id, title, description,
-         audit_recommendation, risk_level_id, status_id, auditor_user_id, original_due_date,
-         current_due_date, source, process_name, category, progress_percent, current_stage,
-         sent_at, created_at, updated_at, deleted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Auditoría interna', 'Control financiero',
-         'Hallazgo QA', ?, ?, ?, NOW(3), NOW(3), NULL)
-       ON DUPLICATE KEY UPDATE title = VALUES(title), description = VALUES(description),
-         audit_recommendation = VALUES(audit_recommendation), risk_level_id = VALUES(risk_level_id),
-         status_id = VALUES(status_id), auditor_user_id = VALUES(auditor_user_id),
-         original_due_date = VALUES(original_due_date), current_due_date = VALUES(current_due_date),
-         progress_percent = VALUES(progress_percent), current_stage = VALUES(current_stage),
-         sent_at = VALUES(sent_at), deleted_at = NULL, updated_at = NOW(3)`,
+    await executeSqlServer(
+      connection,
+      `
+MERGE [dbo].[observations] AS target
+ USING (VALUES (@P1, @P2, @P3, @P4, @P5, @P6, @P7, @P8, @P9, @P10, @P11, @P12, 'Auditoría interna', 'Control financiero', 'Hallazgo QA', @P13, @P14, @P15, SYSUTCDATETIME(), SYSUTCDATETIME(), NULL)) AS source ([id], [audit_report_id], [observation_number], [main_observation_id], [title], [description], [audit_recommendation], [risk_level_id], [status_id], [auditor_user_id], [original_due_date], [current_due_date], [source], [process_name], [category], [progress_percent], [current_stage], [sent_at], [created_at], [updated_at], [deleted_at])
+ ON target.[audit_report_id] = source.[audit_report_id] AND target.[observation_number] = source.[observation_number]
+ WHEN MATCHED THEN UPDATE SET target.[title] = source.[title], target.[description] = source.[description], target.[audit_recommendation] = source.[audit_recommendation], target.[risk_level_id] = source.[risk_level_id], target.[status_id] = source.[status_id], target.[auditor_user_id] = source.[auditor_user_id], target.[original_due_date] = source.[original_due_date], target.[current_due_date] = source.[current_due_date], target.[progress_percent] = source.[progress_percent], target.[current_stage] = source.[current_stage], target.[sent_at] = source.[sent_at], target.[deleted_at] = NULL, target.[updated_at] = SYSUTCDATETIME()
+ WHEN NOT MATCHED THEN INSERT ([id], [audit_report_id], [observation_number], [main_observation_id], [title], [description], [audit_recommendation], [risk_level_id], [status_id], [auditor_user_id], [original_due_date], [current_due_date], [source], [process_name], [category], [progress_percent], [current_stage], [sent_at], [created_at], [updated_at], [deleted_at]) VALUES (source.[id], source.[audit_report_id], source.[observation_number], source.[main_observation_id], source.[title], source.[description], source.[audit_recommendation], source.[risk_level_id], source.[status_id], source.[auditor_user_id], source.[original_due_date], source.[current_due_date], source.[source], source.[process_name], source.[category], source.[progress_percent], source.[current_stage], source.[sent_at], source.[created_at], source.[updated_at], source.[deleted_at]);
+`,
       [
         observation.id,
         reportId,
@@ -3040,10 +2990,15 @@ const seedCanonicalQaFixture = async (
         observation.sentAt,
       ],
     );
-    await connection.execute(
-      `INSERT INTO observation_risks (id, observation_id, risk_id, created_at)
-       VALUES (?, ?, ?, NOW(3))
-       ON DUPLICATE KEY UPDATE risk_id = VALUES(risk_id)`,
+    await executeSqlServer(
+      connection,
+      `
+MERGE [dbo].[observation_risks] AS target
+ USING (VALUES (@P1, @P2, @P3, SYSUTCDATETIME())) AS source ([id], [observation_id], [risk_id], [created_at])
+ ON target.[observation_id] = source.[observation_id] AND target.[risk_id] = source.[risk_id]
+ WHEN MATCHED THEN UPDATE SET target.[risk_id] = source.[risk_id]
+ WHEN NOT MATCHED THEN INSERT ([id], [observation_id], [risk_id], [created_at]) VALUES (source.[id], source.[observation_id], source.[risk_id], source.[created_at]);
+`,
       [
         uuidv5(`qa-observation-risk:${observation.number}`, SEED_NAMESPACE),
         observation.id,
@@ -3051,12 +3006,15 @@ const seedCanonicalQaFixture = async (
       ],
     );
     for (const [areaIndex, areaId] of observation.areaIds.entries()) {
-      await connection.execute(
-        `INSERT INTO observation_areas
-          (id, observation_id, area_id, process_owner_user_id, area_responsible_user_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, NOW(3), NOW(3))
-         ON DUPLICATE KEY UPDATE process_owner_user_id = VALUES(process_owner_user_id),
-           area_responsible_user_id = VALUES(area_responsible_user_id), updated_at = NOW(3)`,
+      await executeSqlServer(
+        connection,
+        `
+MERGE [dbo].[observation_areas] AS target
+ USING (VALUES (@P1, @P2, @P3, @P4, @P5, SYSUTCDATETIME(), SYSUTCDATETIME())) AS source ([id], [observation_id], [area_id], [process_owner_user_id], [area_responsible_user_id], [created_at], [updated_at])
+ ON target.[observation_id] = source.[observation_id] AND target.[area_id] = source.[area_id]
+ WHEN MATCHED THEN UPDATE SET target.[process_owner_user_id] = source.[process_owner_user_id], target.[area_responsible_user_id] = source.[area_responsible_user_id], target.[updated_at] = SYSUTCDATETIME()
+ WHEN NOT MATCHED THEN INSERT ([id], [observation_id], [area_id], [process_owner_user_id], [area_responsible_user_id], [created_at], [updated_at]) VALUES (source.[id], source.[observation_id], source.[area_id], source.[process_owner_user_id], source.[area_responsible_user_id], source.[created_at], source.[updated_at]);
+`,
         [
           uuidv5(
             `qa-observation-area:${observation.number}:${areaId}`,
@@ -3069,20 +3027,15 @@ const seedCanonicalQaFixture = async (
         ],
       );
       if (observation.number === 1 && areaIndex === 0) {
-        await connection.execute(
-          `INSERT INTO remediation_plans
-            (id, observation_id, area_id, owner_user_id, strategy_text, mitigation_text,
-             additional_comments, status, sent_to_audit_at, approved_at, approved_by_user_id,
-             returned_at, returned_by_user_id, return_reason, created_by_user_id, created_at,
-             updated_at, deleted_at, workflow_instance_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'DRAFT', NULL, NULL, NULL, NULL, NULL, NULL, ?, NOW(3), NOW(3), NULL, NULL)
-           ON DUPLICATE KEY UPDATE owner_user_id = VALUES(owner_user_id),
-             strategy_text = VALUES(strategy_text), mitigation_text = VALUES(mitigation_text),
-             additional_comments = VALUES(additional_comments), status = 'DRAFT',
-             sent_to_audit_at = NULL, approved_at = NULL, approved_by_user_id = NULL,
-             returned_at = NULL, returned_by_user_id = NULL, return_reason = NULL,
-             created_by_user_id = VALUES(created_by_user_id), deleted_at = NULL,
-             workflow_instance_id = NULL, updated_at = NOW(3)`,
+        await executeSqlServer(
+          connection,
+          `
+MERGE [dbo].[remediation_plans] AS target
+ USING (VALUES (@P1, @P2, @P3, @P4, @P5, @P6, @P7, 'DRAFT', NULL, NULL, NULL, NULL, NULL, NULL, @P8, SYSUTCDATETIME(), SYSUTCDATETIME(), NULL, NULL)) AS source ([id], [observation_id], [area_id], [owner_user_id], [strategy_text], [mitigation_text], [additional_comments], [status], [sent_to_audit_at], [approved_at], [approved_by_user_id], [returned_at], [returned_by_user_id], [return_reason], [created_by_user_id], [created_at], [updated_at], [deleted_at], [workflow_instance_id])
+ ON target.[observation_id] = source.[observation_id] AND target.[area_id] = source.[area_id]
+ WHEN MATCHED THEN UPDATE SET target.[owner_user_id] = source.[owner_user_id], target.[strategy_text] = source.[strategy_text], target.[mitigation_text] = source.[mitigation_text], target.[additional_comments] = source.[additional_comments], target.[status] = 'DRAFT', target.[sent_to_audit_at] = NULL, target.[approved_at] = NULL, target.[approved_by_user_id] = NULL, target.[returned_at] = NULL, target.[returned_by_user_id] = NULL, target.[return_reason] = NULL, target.[created_by_user_id] = source.[created_by_user_id], target.[deleted_at] = NULL, target.[workflow_instance_id] = NULL, target.[updated_at] = SYSUTCDATETIME()
+ WHEN NOT MATCHED THEN INSERT ([id], [observation_id], [area_id], [owner_user_id], [strategy_text], [mitigation_text], [additional_comments], [status], [sent_to_audit_at], [approved_at], [approved_by_user_id], [returned_at], [returned_by_user_id], [return_reason], [created_by_user_id], [created_at], [updated_at], [deleted_at], [workflow_instance_id]) VALUES (source.[id], source.[observation_id], source.[area_id], source.[owner_user_id], source.[strategy_text], source.[mitigation_text], source.[additional_comments], source.[status], source.[sent_to_audit_at], source.[approved_at], source.[approved_by_user_id], source.[returned_at], source.[returned_by_user_id], source.[return_reason], source.[created_by_user_id], source.[created_at], source.[updated_at], source.[deleted_at], source.[workflow_instance_id]);
+`,
           [
             uuidv5("qa-remediation-plan:1", SEED_NAMESPACE),
             observation.id,
@@ -3178,18 +3131,15 @@ const seedCanonicalQaFixture = async (
 
   for (const plan of qaPlans) {
     const isConcluded = plan.status === "CONCLUDED";
-    await connection.execute(
-      `INSERT INTO remediation_plans
-        (id, observation_id, area_id, owner_user_id, strategy_text, mitigation_text,
-         additional_comments, status, sent_to_audit_at, approved_at, approved_by_user_id,
-         returned_at, returned_by_user_id, return_reason, created_by_user_id, created_at,
-         updated_at, deleted_at, workflow_instance_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'APPROVED', '2026-09-09 10:00:00', '2026-09-09 10:05:00', ?,
-         NULL, NULL, NULL, ?, NOW(3), NOW(3), NULL, NULL)
-       ON DUPLICATE KEY UPDATE owner_user_id = VALUES(owner_user_id), status = 'APPROVED',
-         sent_to_audit_at = VALUES(sent_to_audit_at), approved_at = VALUES(approved_at),
-         approved_by_user_id = VALUES(approved_by_user_id), deleted_at = NULL,
-         workflow_instance_id = NULL, updated_at = NOW(3)`,
+    await executeSqlServer(
+      connection,
+      `
+MERGE [dbo].[remediation_plans] AS target
+ USING (VALUES (@P1, @P2, @P3, @P4, @P5, @P6, @P7, 'APPROVED', '2026-09-09 10:00:00', '2026-09-09 10:05:00', @P8, NULL, NULL, NULL, @P9, SYSUTCDATETIME(), SYSUTCDATETIME(), NULL, NULL)) AS source ([id], [observation_id], [area_id], [owner_user_id], [strategy_text], [mitigation_text], [additional_comments], [status], [sent_to_audit_at], [approved_at], [approved_by_user_id], [returned_at], [returned_by_user_id], [return_reason], [created_by_user_id], [created_at], [updated_at], [deleted_at], [workflow_instance_id])
+ ON target.[observation_id] = source.[observation_id] AND target.[area_id] = source.[area_id]
+ WHEN MATCHED THEN UPDATE SET target.[owner_user_id] = source.[owner_user_id], target.[status] = 'APPROVED', target.[sent_to_audit_at] = source.[sent_to_audit_at], target.[approved_at] = source.[approved_at], target.[approved_by_user_id] = source.[approved_by_user_id], target.[deleted_at] = NULL, target.[workflow_instance_id] = NULL, target.[updated_at] = SYSUTCDATETIME()
+ WHEN NOT MATCHED THEN INSERT ([id], [observation_id], [area_id], [owner_user_id], [strategy_text], [mitigation_text], [additional_comments], [status], [sent_to_audit_at], [approved_at], [approved_by_user_id], [returned_at], [returned_by_user_id], [return_reason], [created_by_user_id], [created_at], [updated_at], [deleted_at], [workflow_instance_id]) VALUES (source.[id], source.[observation_id], source.[area_id], source.[owner_user_id], source.[strategy_text], source.[mitigation_text], source.[additional_comments], source.[status], source.[sent_to_audit_at], source.[approved_at], source.[approved_by_user_id], source.[returned_at], source.[returned_by_user_id], source.[return_reason], source.[created_by_user_id], source.[created_at], source.[updated_at], source.[deleted_at], source.[workflow_instance_id]);
+`,
       [
         plan.remediationPlanId,
         plan.observationId,
@@ -3202,17 +3152,15 @@ const seedCanonicalQaFixture = async (
         options.demoUserIds.areaResponsibleId,
       ],
     );
-    await connection.execute(
-      `INSERT INTO action_plans
-        (id, remediation_plan_id, observation_id, observation_area_id, responsible_user_id,
-         title, description, original_due_date, current_due_date, completed_at, progress_percent,
-         status, sort_order, created_at, updated_at, deleted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NOW(3), NOW(3), NULL)
-       ON DUPLICATE KEY UPDATE responsible_user_id = VALUES(responsible_user_id),
-         title = VALUES(title), description = VALUES(description), original_due_date = VALUES(original_due_date),
-         current_due_date = VALUES(current_due_date), completed_at = VALUES(completed_at),
-         progress_percent = VALUES(progress_percent), status = VALUES(status), deleted_at = NULL,
-         updated_at = NOW(3)`,
+    await executeSqlServer(
+      connection,
+      `
+MERGE [dbo].[action_plans] AS target
+ USING (VALUES (@P1, @P2, @P3, @P4, @P5, @P6, @P7, @P8, @P9, @P10, @P11, @P12, 0, SYSUTCDATETIME(), SYSUTCDATETIME(), NULL)) AS source ([id], [remediation_plan_id], [observation_id], [observation_area_id], [responsible_user_id], [title], [description], [original_due_date], [current_due_date], [completed_at], [progress_percent], [status], [sort_order], [created_at], [updated_at], [deleted_at])
+ ON target.[id] = source.[id]
+ WHEN MATCHED THEN UPDATE SET target.[responsible_user_id] = source.[responsible_user_id], target.[title] = source.[title], target.[description] = source.[description], target.[original_due_date] = source.[original_due_date], target.[current_due_date] = source.[current_due_date], target.[completed_at] = source.[completed_at], target.[progress_percent] = source.[progress_percent], target.[status] = source.[status], target.[deleted_at] = NULL, target.[updated_at] = SYSUTCDATETIME()
+ WHEN NOT MATCHED THEN INSERT ([id], [remediation_plan_id], [observation_id], [observation_area_id], [responsible_user_id], [title], [description], [original_due_date], [current_due_date], [completed_at], [progress_percent], [status], [sort_order], [created_at], [updated_at], [deleted_at]) VALUES (source.[id], source.[remediation_plan_id], source.[observation_id], source.[observation_area_id], source.[responsible_user_id], source.[title], source.[description], source.[original_due_date], source.[current_due_date], source.[completed_at], source.[progress_percent], source.[status], source.[sort_order], source.[created_at], source.[updated_at], source.[deleted_at]);
+`,
       [
         plan.actionPlanId,
         plan.remediationPlanId,
@@ -3234,16 +3182,15 @@ const seedCanonicalQaFixture = async (
     "qa-progress-evaluation:2",
     SEED_NAMESPACE,
   );
-  await connection.execute(
-    `INSERT INTO progress_evaluations
-      (id, action_plan_id, submitted_by_user_id, type, reported_progress_percent,
-       evaluated_status, comment, review_status, reviewed_by_user_id, submitted_at,
-       reviewed_at, review_comment, created_at, updated_at, deleted_at, workflow_instance_id)
-     VALUES (?, ?, ?, 'ADVANCE', 20, 'STARTED', ?, 'APPROVED', ?, '2026-09-08 14:00:00',
-       '2026-09-08 16:00:00', ?, NOW(3), NOW(3), NULL, NULL)
-     ON DUPLICATE KEY UPDATE reported_progress_percent = 20, evaluated_status = 'STARTED',
-       review_status = 'APPROVED', reviewed_by_user_id = VALUES(reviewed_by_user_id),
-       deleted_at = NULL, updated_at = NOW(3)`,
+  await executeSqlServer(
+    connection,
+    `
+MERGE [dbo].[progress_evaluations] AS target
+ USING (VALUES (@P1, @P2, @P3, 'ADVANCE', 20, 'STARTED', @P4, 'APPROVED', @P5, '2026-09-08 14:00:00', '2026-09-08 16:00:00', @P6, SYSUTCDATETIME(), SYSUTCDATETIME(), NULL, NULL)) AS source ([id], [action_plan_id], [submitted_by_user_id], [type], [reported_progress_percent], [evaluated_status], [comment], [review_status], [reviewed_by_user_id], [submitted_at], [reviewed_at], [review_comment], [created_at], [updated_at], [deleted_at], [workflow_instance_id])
+ ON target.[id] = source.[id]
+ WHEN MATCHED THEN UPDATE SET target.[reported_progress_percent] = 20, target.[evaluated_status] = 'STARTED', target.[review_status] = 'APPROVED', target.[reviewed_by_user_id] = source.[reviewed_by_user_id], target.[deleted_at] = NULL, target.[updated_at] = SYSUTCDATETIME()
+ WHEN NOT MATCHED THEN INSERT ([id], [action_plan_id], [submitted_by_user_id], [type], [reported_progress_percent], [evaluated_status], [comment], [review_status], [reviewed_by_user_id], [submitted_at], [reviewed_at], [review_comment], [created_at], [updated_at], [deleted_at], [workflow_instance_id]) VALUES (source.[id], source.[action_plan_id], source.[submitted_by_user_id], source.[type], source.[reported_progress_percent], source.[evaluated_status], source.[comment], source.[review_status], source.[reviewed_by_user_id], source.[submitted_at], source.[reviewed_at], source.[review_comment], source.[created_at], source.[updated_at], source.[deleted_at], source.[workflow_instance_id]);
+`,
     [
       advanceEvaluationId,
       uuidv5("qa-action-plan:2", SEED_NAMESPACE),
@@ -3271,12 +3218,15 @@ const seedCanonicalQaFixture = async (
       comment: "Aprobado como avance inicial.",
     },
   ]) {
-    await connection.execute(
-      `INSERT INTO progress_review_history
-        (id, progress_evaluation_id, action, from_status, to_status, user_id, comment, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, NOW(3))
-       ON DUPLICATE KEY UPDATE action = VALUES(action), from_status = VALUES(from_status),
-         to_status = VALUES(to_status), user_id = VALUES(user_id), comment = VALUES(comment)`,
+    await executeSqlServer(
+      connection,
+      `
+MERGE [dbo].[progress_review_history] AS target
+ USING (VALUES (@P1, @P2, @P3, @P4, @P5, @P6, @P7, SYSUTCDATETIME())) AS source ([id], [progress_evaluation_id], [action], [from_status], [to_status], [user_id], [comment], [created_at])
+ ON target.[id] = source.[id]
+ WHEN MATCHED THEN UPDATE SET target.[action] = source.[action], target.[from_status] = source.[from_status], target.[to_status] = source.[to_status], target.[user_id] = source.[user_id], target.[comment] = source.[comment]
+ WHEN NOT MATCHED THEN INSERT ([id], [progress_evaluation_id], [action], [from_status], [to_status], [user_id], [comment], [created_at]) VALUES (source.[id], source.[progress_evaluation_id], source.[action], source.[from_status], source.[to_status], source.[user_id], source.[comment], source.[created_at]);
+`,
       [
         history.id,
         advanceEvaluationId,
@@ -3293,16 +3243,15 @@ const seedCanonicalQaFixture = async (
     "qa-progress-evaluation:3:closure",
     SEED_NAMESPACE,
   );
-  await connection.execute(
-    `INSERT INTO progress_evaluations
-      (id, action_plan_id, submitted_by_user_id, type, reported_progress_percent,
-       evaluated_status, comment, review_status, reviewed_by_user_id, submitted_at,
-       reviewed_at, review_comment, created_at, updated_at, deleted_at, workflow_instance_id)
-     VALUES (?, ?, ?, 'FINALIZATION', 100, 'CONCLUDED', ?, 'DRAFT', NULL, '2026-09-09 11:00:00',
-       NULL, NULL, NOW(3), NOW(3), NULL, NULL)
-     ON DUPLICATE KEY UPDATE reported_progress_percent = 100, evaluated_status = 'CONCLUDED',
-       review_status = 'DRAFT', reviewed_by_user_id = NULL, reviewed_at = NULL,
-       deleted_at = NULL, updated_at = NOW(3)`,
+  await executeSqlServer(
+    connection,
+    `
+MERGE [dbo].[progress_evaluations] AS target
+ USING (VALUES (@P1, @P2, @P3, 'FINALIZATION', 100, 'CONCLUDED', @P4, 'DRAFT', NULL, '2026-09-09 11:00:00', NULL, NULL, SYSUTCDATETIME(), SYSUTCDATETIME(), NULL, NULL)) AS source ([id], [action_plan_id], [submitted_by_user_id], [type], [reported_progress_percent], [evaluated_status], [comment], [review_status], [reviewed_by_user_id], [submitted_at], [reviewed_at], [review_comment], [created_at], [updated_at], [deleted_at], [workflow_instance_id])
+ ON target.[id] = source.[id]
+ WHEN MATCHED THEN UPDATE SET target.[reported_progress_percent] = 100, target.[evaluated_status] = 'CONCLUDED', target.[review_status] = 'DRAFT', target.[reviewed_by_user_id] = NULL, target.[reviewed_at] = NULL, target.[deleted_at] = NULL, target.[updated_at] = SYSUTCDATETIME()
+ WHEN NOT MATCHED THEN INSERT ([id], [action_plan_id], [submitted_by_user_id], [type], [reported_progress_percent], [evaluated_status], [comment], [review_status], [reviewed_by_user_id], [submitted_at], [reviewed_at], [review_comment], [created_at], [updated_at], [deleted_at], [workflow_instance_id]) VALUES (source.[id], source.[action_plan_id], source.[submitted_by_user_id], source.[type], source.[reported_progress_percent], source.[evaluated_status], source.[comment], source.[review_status], source.[reviewed_by_user_id], source.[submitted_at], source.[reviewed_at], source.[review_comment], source.[created_at], source.[updated_at], source.[deleted_at], source.[workflow_instance_id]);
+`,
     [
       closureEvaluationId,
       uuidv5("qa-action-plan:3", SEED_NAMESPACE),
@@ -3354,18 +3303,15 @@ const seedCanonicalQaFixture = async (
     );
     await mkdir(path.dirname(absolutePath), { recursive: true });
     await writeFile(absolutePath, contents);
-    await connection.execute(
-      `INSERT INTO evidence_files
-        (id, observation_id, observation_area_id, context, action_plan_id, progress_evaluation_id,
-         uploaded_by_user_id, original_name, stored_name, relative_path, mime_type, size_bytes,
-         checksum, description, review_status, submitted_at, reviewed_at, reviewed_by_user_id,
-         review_comment, workflow_instance_id, created_at, deleted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'text/plain', ?, ?, ?, 'DRAFT', NULL, NULL, NULL, NULL, NULL, NOW(3), NULL)
-       ON DUPLICATE KEY UPDATE original_name = VALUES(original_name), stored_name = VALUES(stored_name),
-         relative_path = VALUES(relative_path), size_bytes = VALUES(size_bytes), checksum = VALUES(checksum),
-         description = VALUES(description), review_status = 'DRAFT', submitted_at = NULL,
-         reviewed_at = NULL, reviewed_by_user_id = NULL, review_comment = NULL,
-         workflow_instance_id = NULL, deleted_at = NULL`,
+    await executeSqlServer(
+      connection,
+      `
+MERGE [dbo].[evidence_files] AS target
+ USING (VALUES (@P1, @P2, @P3, @P4, @P5, @P6, @P7, @P8, @P9, @P10, 'text/plain', @P11, @P12, @P13, 'DRAFT', NULL, NULL, NULL, NULL, NULL, SYSUTCDATETIME(), NULL)) AS source ([id], [observation_id], [observation_area_id], [context], [action_plan_id], [progress_evaluation_id], [uploaded_by_user_id], [original_name], [stored_name], [relative_path], [mime_type], [size_bytes], [checksum], [description], [review_status], [submitted_at], [reviewed_at], [reviewed_by_user_id], [review_comment], [workflow_instance_id], [created_at], [deleted_at])
+ ON target.[id] = source.[id]
+ WHEN MATCHED THEN UPDATE SET target.[original_name] = source.[original_name], target.[stored_name] = source.[stored_name], target.[relative_path] = source.[relative_path], target.[size_bytes] = source.[size_bytes], target.[checksum] = source.[checksum], target.[description] = source.[description], target.[review_status] = 'DRAFT', target.[submitted_at] = NULL, target.[reviewed_at] = NULL, target.[reviewed_by_user_id] = NULL, target.[review_comment] = NULL, target.[workflow_instance_id] = NULL, target.[deleted_at] = NULL
+ WHEN NOT MATCHED THEN INSERT ([id], [observation_id], [observation_area_id], [context], [action_plan_id], [progress_evaluation_id], [uploaded_by_user_id], [original_name], [stored_name], [relative_path], [mime_type], [size_bytes], [checksum], [description], [review_status], [submitted_at], [reviewed_at], [reviewed_by_user_id], [review_comment], [workflow_instance_id], [created_at], [deleted_at]) VALUES (source.[id], source.[observation_id], source.[observation_area_id], source.[context], source.[action_plan_id], source.[progress_evaluation_id], source.[uploaded_by_user_id], source.[original_name], source.[stored_name], source.[relative_path], source.[mime_type], source.[size_bytes], source.[checksum], source.[description], source.[review_status], source.[submitted_at], source.[reviewed_at], source.[reviewed_by_user_id], source.[review_comment], source.[workflow_instance_id], source.[created_at], source.[deleted_at]);
+`,
       [
         evidence.id,
         evidence.observationId,
@@ -3384,20 +3330,15 @@ const seedCanonicalQaFixture = async (
     );
   }
 
-  await connection.execute(
-    `INSERT INTO deadline_extension_requests
-      (id, target_type, observation_id, action_plan_id, observation_area_id, requested_by_user_id,
-       classification_id, previous_due_date, proposed_due_date, max_additional_days, max_allowed_date,
-       reason, status, manager_reviewer_id, manager_reviewed_at, manager_comment, final_approved_at,
-       created_at, updated_at, deleted_at, workflow_instance_id)
-       VALUES (?, 'ACTION_PLAN', NULL, ?, ?, ?, ?, '2026-08-15', '2026-08-30', 15, '2026-08-30',
-       ?, 'DRAFT', NULL, NULL, NULL, NULL, NOW(3), NOW(3), NULL, NULL)
-     ON DUPLICATE KEY UPDATE requested_by_user_id = VALUES(requested_by_user_id),
-       classification_id = VALUES(classification_id), previous_due_date = VALUES(previous_due_date),
-       proposed_due_date = VALUES(proposed_due_date), max_additional_days = VALUES(max_additional_days),
-       max_allowed_date = VALUES(max_allowed_date), reason = VALUES(reason), status = 'DRAFT',
-       manager_reviewer_id = NULL, manager_reviewed_at = NULL, manager_comment = NULL,
-       final_approved_at = NULL, deleted_at = NULL, workflow_instance_id = NULL, updated_at = NOW(3)`,
+  await executeSqlServer(
+    connection,
+    `
+MERGE [dbo].[deadline_extension_requests] AS target
+ USING (VALUES (@P1, 'ACTION_PLAN', NULL, @P2, @P3, @P4, @P5, '2026-08-15', '2026-08-30', 15, '2026-08-30', @P6, 'DRAFT', NULL, NULL, NULL, NULL, SYSUTCDATETIME(), SYSUTCDATETIME(), NULL, NULL)) AS source ([id], [target_type], [observation_id], [action_plan_id], [observation_area_id], [requested_by_user_id], [classification_id], [previous_due_date], [proposed_due_date], [max_additional_days], [max_allowed_date], [reason], [status], [manager_reviewer_id], [manager_reviewed_at], [manager_comment], [final_approved_at], [created_at], [updated_at], [deleted_at], [workflow_instance_id])
+ ON target.[action_plan_id] = source.[action_plan_id]
+ WHEN MATCHED THEN UPDATE SET target.[requested_by_user_id] = source.[requested_by_user_id], target.[classification_id] = source.[classification_id], target.[previous_due_date] = source.[previous_due_date], target.[proposed_due_date] = source.[proposed_due_date], target.[max_additional_days] = source.[max_additional_days], target.[max_allowed_date] = source.[max_allowed_date], target.[reason] = source.[reason], target.[status] = 'DRAFT', target.[manager_reviewer_id] = NULL, target.[manager_reviewed_at] = NULL, target.[manager_comment] = NULL, target.[final_approved_at] = NULL, target.[deleted_at] = NULL, target.[workflow_instance_id] = NULL, target.[updated_at] = SYSUTCDATETIME()
+ WHEN NOT MATCHED THEN INSERT ([id], [target_type], [observation_id], [action_plan_id], [observation_area_id], [requested_by_user_id], [classification_id], [previous_due_date], [proposed_due_date], [max_additional_days], [max_allowed_date], [reason], [status], [manager_reviewer_id], [manager_reviewed_at], [manager_comment], [final_approved_at], [created_at], [updated_at], [deleted_at], [workflow_instance_id]) VALUES (source.[id], source.[target_type], source.[observation_id], source.[action_plan_id], source.[observation_area_id], source.[requested_by_user_id], source.[classification_id], source.[previous_due_date], source.[proposed_due_date], source.[max_additional_days], source.[max_allowed_date], source.[reason], source.[status], source.[manager_reviewer_id], source.[manager_reviewed_at], source.[manager_comment], source.[final_approved_at], source.[created_at], source.[updated_at], source.[deleted_at], source.[workflow_instance_id]);
+`,
     [
       uuidv5("qa-extension:action-plan-2", SEED_NAMESPACE),
       uuidv5("qa-action-plan:2", SEED_NAMESPACE),
@@ -3407,21 +3348,15 @@ const seedCanonicalQaFixture = async (
       "Se requiere una ventana adicional para completar pruebas y documentar controles.",
     ],
   );
-  await connection.execute(
-    `INSERT INTO deadline_extension_requests
-      (id, target_type, observation_id, action_plan_id, observation_area_id, requested_by_user_id,
-       classification_id, previous_due_date, proposed_due_date, max_additional_days, max_allowed_date,
-       reason, status, manager_reviewer_id, manager_reviewed_at, manager_comment, final_approved_at,
-       created_at, updated_at, deleted_at, workflow_instance_id)
-     VALUES (?, 'ACTION_PLAN', NULL, ?, ?, ?, ?, '2026-08-01', '2026-08-16', 15, '2026-08-16',
-       ?, 'MANAGER_APPROVED', ?, '2026-09-08 12:00:00', ?, '2026-09-08 12:00:00', NOW(3), NOW(3), NULL, NULL)
-     ON DUPLICATE KEY UPDATE requested_by_user_id = VALUES(requested_by_user_id),
-       classification_id = VALUES(classification_id), previous_due_date = VALUES(previous_due_date),
-       proposed_due_date = VALUES(proposed_due_date), max_additional_days = VALUES(max_additional_days),
-       max_allowed_date = VALUES(max_allowed_date), reason = VALUES(reason), status = 'MANAGER_APPROVED',
-       manager_reviewer_id = VALUES(manager_reviewer_id), manager_reviewed_at = VALUES(manager_reviewed_at),
-       manager_comment = VALUES(manager_comment), final_approved_at = VALUES(final_approved_at),
-       deleted_at = NULL, workflow_instance_id = NULL, updated_at = NOW(3)`,
+  await executeSqlServer(
+    connection,
+    `
+MERGE [dbo].[deadline_extension_requests] AS target
+ USING (VALUES (@P1, 'ACTION_PLAN', NULL, @P2, @P3, @P4, @P5, '2026-08-01', '2026-08-16', 15, '2026-08-16', @P6, 'MANAGER_APPROVED', @P7, '2026-09-08 12:00:00', @P8, '2026-09-08 12:00:00', SYSUTCDATETIME(), SYSUTCDATETIME(), NULL, NULL)) AS source ([id], [target_type], [observation_id], [action_plan_id], [observation_area_id], [requested_by_user_id], [classification_id], [previous_due_date], [proposed_due_date], [max_additional_days], [max_allowed_date], [reason], [status], [manager_reviewer_id], [manager_reviewed_at], [manager_comment], [final_approved_at], [created_at], [updated_at], [deleted_at], [workflow_instance_id])
+ ON target.[action_plan_id] = source.[action_plan_id]
+ WHEN MATCHED THEN UPDATE SET target.[requested_by_user_id] = source.[requested_by_user_id], target.[classification_id] = source.[classification_id], target.[previous_due_date] = source.[previous_due_date], target.[proposed_due_date] = source.[proposed_due_date], target.[max_additional_days] = source.[max_additional_days], target.[max_allowed_date] = source.[max_allowed_date], target.[reason] = source.[reason], target.[status] = 'MANAGER_APPROVED', target.[manager_reviewer_id] = source.[manager_reviewer_id], target.[manager_reviewed_at] = source.[manager_reviewed_at], target.[manager_comment] = source.[manager_comment], target.[final_approved_at] = source.[final_approved_at], target.[deleted_at] = NULL, target.[workflow_instance_id] = NULL, target.[updated_at] = SYSUTCDATETIME()
+ WHEN NOT MATCHED THEN INSERT ([id], [target_type], [observation_id], [action_plan_id], [observation_area_id], [requested_by_user_id], [classification_id], [previous_due_date], [proposed_due_date], [max_additional_days], [max_allowed_date], [reason], [status], [manager_reviewer_id], [manager_reviewed_at], [manager_comment], [final_approved_at], [created_at], [updated_at], [deleted_at], [workflow_instance_id]) VALUES (source.[id], source.[target_type], source.[observation_id], source.[action_plan_id], source.[observation_area_id], source.[requested_by_user_id], source.[classification_id], source.[previous_due_date], source.[proposed_due_date], source.[max_additional_days], source.[max_allowed_date], source.[reason], source.[status], source.[manager_reviewer_id], source.[manager_reviewed_at], source.[manager_comment], source.[final_approved_at], source.[created_at], source.[updated_at], source.[deleted_at], source.[workflow_instance_id]);
+`,
     [
       uuidv5("qa-extension:action-plan-4", SEED_NAMESPACE),
       uuidv5("qa-action-plan:4", SEED_NAMESPACE),
@@ -3433,21 +3368,15 @@ const seedCanonicalQaFixture = async (
       "Aprobada para probar la fecha efectiva independiente del estado de avance.",
     ],
   );
-  await connection.execute(
-    `INSERT INTO deadline_extension_requests
-      (id, target_type, observation_id, action_plan_id, observation_area_id, requested_by_user_id,
-       classification_id, previous_due_date, proposed_due_date, max_additional_days, max_allowed_date,
-       reason, status, manager_reviewer_id, manager_reviewed_at, manager_comment, final_approved_at,
-       created_at, updated_at, deleted_at, workflow_instance_id)
-     VALUES (?, 'ACTION_PLAN', NULL, ?, ?, ?, ?, '2026-09-01', '2026-09-15', 30, '2026-09-15',
-       ?, 'MANAGER_APPROVED', ?, '2026-09-08 12:00:00', ?, '2026-09-08 12:00:00', NOW(3), NOW(3), NULL, NULL)
-     ON DUPLICATE KEY UPDATE requested_by_user_id = VALUES(requested_by_user_id),
-       classification_id = VALUES(classification_id), previous_due_date = VALUES(previous_due_date),
-       proposed_due_date = VALUES(proposed_due_date), max_additional_days = VALUES(max_additional_days),
-       max_allowed_date = VALUES(max_allowed_date), reason = VALUES(reason), status = 'MANAGER_APPROVED',
-       manager_reviewer_id = VALUES(manager_reviewer_id), manager_reviewed_at = VALUES(manager_reviewed_at),
-       manager_comment = VALUES(manager_comment), final_approved_at = VALUES(final_approved_at),
-       deleted_at = NULL, workflow_instance_id = NULL, updated_at = NOW(3)`,
+  await executeSqlServer(
+    connection,
+    `
+MERGE [dbo].[deadline_extension_requests] AS target
+ USING (VALUES (@P1, 'ACTION_PLAN', NULL, @P2, @P3, @P4, @P5, '2026-09-01', '2026-09-15', 30, '2026-09-15', @P6, 'MANAGER_APPROVED', @P7, '2026-09-08 12:00:00', @P8, '2026-09-08 12:00:00', SYSUTCDATETIME(), SYSUTCDATETIME(), NULL, NULL)) AS source ([id], [target_type], [observation_id], [action_plan_id], [observation_area_id], [requested_by_user_id], [classification_id], [previous_due_date], [proposed_due_date], [max_additional_days], [max_allowed_date], [reason], [status], [manager_reviewer_id], [manager_reviewed_at], [manager_comment], [final_approved_at], [created_at], [updated_at], [deleted_at], [workflow_instance_id])
+ ON target.[action_plan_id] = source.[action_plan_id]
+ WHEN MATCHED THEN UPDATE SET target.[requested_by_user_id] = source.[requested_by_user_id], target.[classification_id] = source.[classification_id], target.[previous_due_date] = source.[previous_due_date], target.[proposed_due_date] = source.[proposed_due_date], target.[max_additional_days] = source.[max_additional_days], target.[max_allowed_date] = source.[max_allowed_date], target.[reason] = source.[reason], target.[status] = 'MANAGER_APPROVED', target.[manager_reviewer_id] = source.[manager_reviewer_id], target.[manager_reviewed_at] = source.[manager_reviewed_at], target.[manager_comment] = source.[manager_comment], target.[final_approved_at] = source.[final_approved_at], target.[deleted_at] = NULL, target.[workflow_instance_id] = NULL, target.[updated_at] = SYSUTCDATETIME()
+ WHEN NOT MATCHED THEN INSERT ([id], [target_type], [observation_id], [action_plan_id], [observation_area_id], [requested_by_user_id], [classification_id], [previous_due_date], [proposed_due_date], [max_additional_days], [max_allowed_date], [reason], [status], [manager_reviewer_id], [manager_reviewed_at], [manager_comment], [final_approved_at], [created_at], [updated_at], [deleted_at], [workflow_instance_id]) VALUES (source.[id], source.[target_type], source.[observation_id], source.[action_plan_id], source.[observation_area_id], source.[requested_by_user_id], source.[classification_id], source.[previous_due_date], source.[proposed_due_date], source.[max_additional_days], source.[max_allowed_date], source.[reason], source.[status], source.[manager_reviewer_id], source.[manager_reviewed_at], source.[manager_comment], source.[final_approved_at], source.[created_at], source.[updated_at], source.[deleted_at], source.[workflow_instance_id]);
+`,
     [
       uuidv5("qa-extension:action-plan-5", SEED_NAMESPACE),
       uuidv5("qa-action-plan:5", SEED_NAMESPACE),
@@ -3459,13 +3388,15 @@ const seedCanonicalQaFixture = async (
       "Aprobada para probar una fecha efectiva futura.",
     ],
   );
-  await connection.execute(
-    `INSERT INTO observation_comments
-      (id, observation_id, remediation_plan_id, action_plan_id, progress_evaluation_id,
-       author_user_id, visibility, body, created_at, updated_at, deleted_at)
-     VALUES (?, ?, NULL, ?, NULL, ?, 'AREA_VISIBLE', ?, NOW(3), NOW(3), NULL)
-     ON DUPLICATE KEY UPDATE body = VALUES(body), author_user_id = VALUES(author_user_id),
-       deleted_at = NULL, updated_at = NOW(3)`,
+  await executeSqlServer(
+    connection,
+    `
+MERGE [dbo].[observation_comments] AS target
+ USING (VALUES (@P1, @P2, NULL, @P3, NULL, @P4, 'AREA_VISIBLE', @P5, SYSUTCDATETIME(), SYSUTCDATETIME(), NULL)) AS source ([id], [observation_id], [remediation_plan_id], [action_plan_id], [progress_evaluation_id], [author_user_id], [visibility], [body], [created_at], [updated_at], [deleted_at])
+ ON target.[id] = source.[id]
+ WHEN MATCHED THEN UPDATE SET target.[body] = source.[body], target.[author_user_id] = source.[author_user_id], target.[deleted_at] = NULL, target.[updated_at] = SYSUTCDATETIME()
+ WHEN NOT MATCHED THEN INSERT ([id], [observation_id], [remediation_plan_id], [action_plan_id], [progress_evaluation_id], [author_user_id], [visibility], [body], [created_at], [updated_at], [deleted_at]) VALUES (source.[id], source.[observation_id], source.[remediation_plan_id], source.[action_plan_id], source.[progress_evaluation_id], source.[author_user_id], source.[visibility], source.[body], source.[created_at], source.[updated_at], source.[deleted_at]);
+`,
     [
       uuidv5("qa-comment:action-plan-2", SEED_NAMESPACE),
       observations[1]!.id,
@@ -3478,83 +3409,86 @@ const seedCanonicalQaFixture = async (
 };
 
 const main = async (): Promise<void> => {
-  const connection = await createConnection(env.DATABASE_URL);
-
   try {
-    await assertTablesExist(connection);
-    await connection.beginTransaction();
-
-    await seedRoles(connection);
-    await seedPermissions(connection);
-    await seedRiskLevels(connection);
-    await seedExtensionClassifications(connection);
-    await seedObservationStatuses(connection);
-    await seedSystemParameters(connection);
-    await seedCatalogs(connection);
-
-    const roleMap = await getRoleMap(connection);
-    const permissionMap = await getPermissionMap(connection);
-    const riskLevelMap = await getRiskLevelMap(connection);
-    const statusMap = await getObservationStatusMap(connection);
-
-    await syncRolePermissions(connection, roleMap, permissionMap);
-
-    const seededAdmins: Array<{ email: string; userId: string }> = [];
-
-    for (const adminSeed of adminSeeds) {
-      const adminUserId = await seedAdminUser(connection, adminSeed);
-      await seedAdminAccount(connection, adminUserId, adminSeed);
-      await seedAdminUserRole(connection, adminUserId, roleMap);
-      seededAdmins.push({
-        email: adminSeed.email,
-        userId: adminUserId,
-      });
+    if (includeDemo && process.env.NODE_ENV === "production") {
+      throw new Error("Demo data may only be seeded outside production.");
     }
 
-    const primaryAdminUserId =
-      seededAdmins.find((admin) => admin.email === primaryAdminSeed.email)
-        ?.userId ?? seededAdmins[0]?.userId;
+    const summary = await prisma.$transaction(
+      async (connection) => {
+        await assertTablesExist(connection);
+        await seedRoles(connection);
+        await seedPermissions(connection);
+        await seedRiskLevels(connection);
+        await seedExtensionClassifications(connection);
+        await seedObservationStatuses(connection);
+        await seedSystemParameters(connection);
+        await seedCatalogs(connection);
 
-    if (!primaryAdminUserId) {
-      throw new Error("No admin users were seeded.");
-    }
+        const roleMap = await getRoleMap(connection);
+        const permissionMap = await getPermissionMap(connection);
+        const riskLevelMap = await getRiskLevelMap(connection);
+        const statusMap = await getObservationStatusMap(connection);
 
-    const demoUserIds = await seedDemoUsers(connection, roleMap);
-    await seedDefaultSettings(connection);
-    await seedAreas(connection, primaryAdminUserId);
+        await syncRolePermissions(connection, roleMap, permissionMap);
 
-    const areaMap = await getAreaMap(connection);
-    const seededWorkflows = await seedCanonicalWorkflows(
-      connection,
-      roleMap,
-      primaryAdminUserId,
-    );
-    const seededObservations = await seedSampleObservationsIfEmpty(connection, {
-      adminUserId: primaryAdminUserId,
-      areaMap,
-      demoUserIds,
-      riskLevelMap,
-      statusMap,
-    });
-    const seededQaObservations = await seedCanonicalQaFixture(connection, {
-      adminUserId: primaryAdminUserId,
-      areaMap,
-      demoUserIds,
-      riskLevelMap,
-      statusMap,
-    });
+        const seededAdmins: Array<{ email: string; userId: string }> = [];
 
-    await connection.commit();
+        for (const adminSeed of adminSeeds) {
+          const adminUserId = await seedAdminUser(connection, adminSeed);
+          await seedAdminAccount(connection, adminUserId, adminSeed);
+          await seedAdminUserRole(connection, adminUserId, roleMap);
+          seededAdmins.push({
+            email: adminSeed.email,
+            userId: adminUserId,
+          });
+        }
 
-    console.info("Database seed completed.");
-    console.info(
-      JSON.stringify(
-        {
+        const primaryAdminUserId =
+          seededAdmins.find((admin) => admin.email === primaryAdminSeed.email)
+            ?.userId ?? seededAdmins[0]?.userId;
+
+        if (!primaryAdminUserId) {
+          throw new Error("No admin users were seeded.");
+        }
+
+        const demoUserIds = includeDemo
+          ? await seedDemoUsers(connection, roleMap)
+          : null;
+        await seedDefaultSettings(connection);
+        await seedAreas(connection, primaryAdminUserId);
+
+        const areaMap = await getAreaMap(connection);
+        const seededWorkflows = await seedCanonicalWorkflows(
+          connection,
+          roleMap,
+          primaryAdminUserId,
+        );
+        const seededObservations = demoUserIds
+          ? await seedSampleObservationsIfEmpty(connection, {
+              adminUserId: primaryAdminUserId,
+              areaMap,
+              demoUserIds,
+              riskLevelMap,
+              statusMap,
+            })
+          : 0;
+        const seededQaObservations = demoUserIds
+          ? await seedCanonicalQaFixture(connection, {
+              adminUserId: primaryAdminUserId,
+              areaMap,
+              demoUserIds,
+              riskLevelMap,
+              statusMap,
+            })
+          : 0;
+
+        return {
           roles: roles.length,
           permissions: permissions.length,
           rolePermissions: permissions.length,
           adminUsers: seededAdmins.length,
-          demoUsers: Object.keys(demoUserIds).length,
+          demoUsers: demoUserIds ? Object.keys(demoUserIds).length : 0,
           adminEmails: seededAdmins.map((admin) => admin.email),
           accounts: seededAdmins.length,
           userRoles: seededAdmins.length,
@@ -3568,21 +3502,20 @@ const main = async (): Promise<void> => {
           canonicalQaObservations: seededQaObservations,
           sampleAuditReports: 2,
           sampleObservations: seededObservations,
-        },
-        null,
-        2,
-      ),
+        };
+      },
+      { maxWait: 10_000, timeout: 120_000 },
     );
-  } catch (error) {
-    await connection.rollback();
-    throw error;
+
+    console.info("Database seed completed.");
+    console.info(JSON.stringify(summary, null, 2));
   } finally {
-    await connection.end();
+    await prisma.$disconnect();
   }
 };
 
 void main().catch((error: unknown) => {
   console.error("Database seed failed.");
   console.error(error);
-  process.exit(1);
+  process.exitCode = 1;
 });

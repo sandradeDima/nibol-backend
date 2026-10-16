@@ -1,38 +1,31 @@
-ALTER TABLE `roles`
-    ADD COLUMN `code` VARCHAR(64) NULL;
+ALTER TABLE [dbo].[roles] ADD [code] NVARCHAR(64) NULL;
 
-UPDATE `roles`
-SET `code` = CASE
-    WHEN `name` IN ('Admin', 'Administrador del sistema') THEN 'SYSTEM_ADMIN'
-    WHEN `name` IN ('Auditoría', 'Auditor') THEN 'AUDITOR'
-    WHEN `name` IN ('Non Admin', 'Ejecutor') THEN 'EXECUTOR'
-    WHEN `name` = 'Dueño del proceso' THEN 'PROCESS_OWNER'
-    WHEN `name` = 'Responsable de área' THEN 'AREA_RESPONSIBLE'
-    ELSE CONCAT('LEGACY_', `id`)
+-- Defer binding the new code column until after ALTER TABLE has run.
+EXEC sys.sp_executesql N'
+UPDATE [dbo].[roles]
+SET [code] = CASE
+    WHEN [name] IN (N''Admin'', N''Administrador del sistema'') THEN ''SYSTEM_ADMIN''
+    WHEN [name] IN (N''Auditoría'', N''Auditor'') THEN ''AUDITOR''
+    WHEN [name] IN (N''Non Admin'', N''Ejecutor'') THEN ''EXECUTOR''
+    WHEN [name] = N''Dueño del proceso'' THEN ''PROCESS_OWNER''
+    WHEN [name] = N''Responsable de área'' THEN ''AREA_RESPONSIBLE''
+    ELSE CONCAT(''LEGACY_'', [id])
 END
-WHERE `code` IS NULL;
+WHERE [code] IS NULL;
 
-UPDATE `roles` SET `name` = 'Administrador del sistema' WHERE `code` = 'SYSTEM_ADMIN';
-UPDATE `roles` SET `name` = 'Auditor' WHERE `code` = 'AUDITOR';
-UPDATE `roles` SET `name` = 'Ejecutor' WHERE `code` = 'EXECUTOR';
+UPDATE [dbo].[roles] SET [name] = N''Administrador del sistema'' WHERE [code] = ''SYSTEM_ADMIN'';
+UPDATE [dbo].[roles] SET [name] = N''Auditor'' WHERE [code] = ''AUDITOR'';
+UPDATE [dbo].[roles] SET [name] = N''Ejecutor'' WHERE [code] = ''EXECUTOR'';
 
-INSERT INTO `roles` (`id`, `code`, `name`, `description`, `created_at`, `updated_at`, `deleted_at`)
-SELECT UUID(), 'PROCESS_OWNER', 'Dueño del proceso', 'Seguimiento de observaciones y planes del proceso.', CURRENT_TIMESTAMP(3), CURRENT_TIMESTAMP(3), NULL
-WHERE NOT EXISTS (SELECT 1 FROM `roles` WHERE `code` = 'PROCESS_OWNER');
+';
 
-INSERT INTO `roles` (`id`, `code`, `name`, `description`, `created_at`, `updated_at`, `deleted_at`)
-SELECT UUID(), 'AREA_RESPONSIBLE', 'Responsable de área', 'Gestión y seguimiento de los planes del área.', CURRENT_TIMESTAMP(3), CURRENT_TIMESTAMP(3), NULL
-WHERE NOT EXISTS (SELECT 1 FROM `roles` WHERE `code` = 'AREA_RESPONSIBLE');
-
-ALTER TABLE `roles`
-    MODIFY `code` VARCHAR(64) NOT NULL,
-    ADD UNIQUE INDEX `roles_code_key`(`code`);
+ALTER TABLE [dbo].[roles] ALTER COLUMN [code] NVARCHAR(64) NOT NULL;
+CREATE UNIQUE NONCLUSTERED INDEX [roles_code_key] ON [dbo].[roles]([code]);
 
 DELETE duplicate_role
-FROM `user_roles` duplicate_role
-JOIN `user_roles` kept_role
-  ON kept_role.`user_id` = duplicate_role.`user_id`
- AND kept_role.`id` < duplicate_role.`id`;
+FROM [dbo].[user_roles] AS duplicate_role
+INNER JOIN [dbo].[user_roles] AS kept_role
+  ON kept_role.[user_id] = duplicate_role.[user_id]
+ AND kept_role.[id] < duplicate_role.[id];
 
-ALTER TABLE `user_roles`
-    ADD UNIQUE INDEX `user_roles_user_id_key`(`user_id`);
+CREATE UNIQUE NONCLUSTERED INDEX [user_roles_user_id_key] ON [dbo].[user_roles]([user_id]);

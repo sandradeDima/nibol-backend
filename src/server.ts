@@ -5,19 +5,23 @@ import { env } from "./utils/env.js";
 import { logger } from "./utils/logger.js";
 import { workflowTimerScheduler } from "./jobs/workflow-timer-scheduler.js";
 import { deadlineReminderScheduler } from "./jobs/deadline-monitor/deadline-reminder-scheduler.js";
+import { prisma } from "./utils/prisma.js";
 
 const server = createServer(app);
 
 const shutdown = (signal: NodeJS.Signals): void => {
   logger.info(`Received ${signal}. Shutting down server.`);
 
-  server.close(async (error) => {
-    if (error) {
-      logger.error("Server shutdown failed.", { message: error.message });
-      process.exit(1);
-    }
+  server.close((error) => {
+    void prisma.$disconnect().finally(() => {
+      if (error) {
+        logger.error("Server shutdown failed.", { message: error.message });
+        process.exitCode = 1;
+        return;
+      }
 
-    process.exit(0);
+      process.exitCode = 0;
+    });
   });
 };
 

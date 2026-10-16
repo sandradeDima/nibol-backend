@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { v5 as uuidv5 } from "uuid";
+import type { Prisma } from "../generated/prisma/client.js";
 import { SEED_NAMESPACE } from "../prisma/admin-seed-config.js";
 import {
   CANONICAL_OBSERVATION_STATUSES,
@@ -21,6 +22,40 @@ import { officialProgressByStatus } from "../src/modules/progress/progress.const
 import { prisma } from "../src/utils/prisma.js";
 
 type Row = { _row: number; [key: string]: string | number };
+
+const deleteObservationWithDatabaseSemantics = async (
+  tx: Prisma.TransactionClient,
+  observationId: string,
+): Promise<void> => {
+  const plans = await tx.actionPlan.findMany({
+    where: { observationId },
+    select: { id: true },
+  });
+  const actionPlanIds = plans.map((plan) => plan.id);
+
+  await tx.observationComment.updateMany({
+    where: { observationId },
+    data: {
+      actionPlanId: null,
+      progressEvaluationId: null,
+      remediationPlanId: null,
+    },
+  });
+  await tx.evidenceFile.deleteMany({ where: { observationId } });
+  await tx.deadlineExtensionRequest.deleteMany({
+    where: {
+      OR: [
+        { observationId },
+        ...(actionPlanIds.length > 0
+          ? [{ actionPlanId: { in: actionPlanIds } }]
+          : []),
+      ],
+    },
+  });
+  await tx.actionPlan.deleteMany({ where: { observationId } });
+  await tx.observation.delete({ where: { id: observationId } });
+};
+
 type Workbook = Record<string, Row[]>;
 type Override = {
   observations?: Record<
@@ -982,7 +1017,9 @@ export const reconcileDatabase = async (
   try {
     return await reader();
   } catch (error) {
-    throw new Error(`IMPORT ABORTED: DATABASE UNAVAILABLE: ${String(error)}`);
+    throw new Error(`IMPORT ABORTED: DATABASE UNAVAILABLE: ${String(error)}`, {
+      cause: error,
+    });
   }
 };
 
@@ -2258,8 +2295,7 @@ export const writePlan = async (plan: Plan, report: ImportReport) => {
     }
   for (const item of plan.extraObservations) {
     await prisma.$transaction(async (tx) => {
-      await tx.actionPlan.deleteMany({ where: { observationId: item.id } });
-      await tx.observation.delete({ where: { id: item.id } });
+      await deleteObservationWithDatabaseSemantics(tx, item.id!);
     });
     saved("Observation", item.identity, item.id);
   }
@@ -2268,8 +2304,7 @@ export const writePlan = async (plan: Plan, report: ImportReport) => {
     const committed = await prisma.$transaction(async (tx) => {
       const ids: { kind: string; identity: string; id: string }[] = [];
       if (item.decision === "UPDATE") {
-        await tx.actionPlan.deleteMany({ where: { observationId: item.id } });
-        await tx.observation.delete({ where: { id: item.id } });
+        await deleteObservationWithDatabaseSemantics(tx, item.id!);
       }
       const observation =
         item.decision === "CREATE" || item.decision === "UPDATE"

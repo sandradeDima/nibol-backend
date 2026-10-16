@@ -4,14 +4,19 @@ import {
   NotificationDeliveryStatus,
   NotificationPriority,
   ScheduledJobExecutionStatus,
-  type Prisma,
-} from "../../../generated/prisma/client.js";
-import type { ScheduledJobTrigger } from "../../../generated/prisma/client.js";
+  type ScheduledJobTrigger,
+} from "../../types/database-enums.js";
+import type { Prisma } from "../../../generated/prisma/client.js";
 
 import { AppError } from "../../utils/app-error.js";
 import { ADMIN_ROLE_CODE } from "../../permissions/role-codes.js";
 import { logger } from "../../utils/logger.js";
 import { prisma } from "../../utils/prisma.js";
+import {
+  parseDatabaseJson,
+  parseDatabaseJsonArray,
+  toDatabaseJson,
+} from "../../services/logging-utils.js";
 import { env } from "../../utils/env.js";
 import {
   WORKFLOW_DEFAULT_DUE_SOON_HOURS,
@@ -81,13 +86,15 @@ export type WorkflowTimerProcessorSummary = {
   lockSkipped: boolean;
 };
 
-const asJson = (value: unknown): Prisma.InputJsonValue =>
-  (value === null || value === undefined ? {} : value) as Prisma.InputJsonValue;
+const asJson = (value: unknown): string => toDatabaseJson(value ?? {});
 
 const isTimerType = (value: string): value is WorkflowTimerType =>
   (WORKFLOW_TIMER_TYPES as readonly string[]).includes(value);
 
 const configRecord = (value: unknown): WorkflowTimerConfiguration => {
+  if (typeof value === "string") {
+    value = parseDatabaseJson(value, "workflow_timers.configuration_json");
+  }
   if (typeof value !== "object" || value === null || Array.isArray(value))
     return {};
   return value as WorkflowTimerConfiguration;
@@ -404,8 +411,8 @@ type TimerTaskRecord = {
   assignedAreaId: string | null;
   assignedRoleId: string | null;
   assignedUserId: string | null;
-  assignmentHistoryJson: Prisma.JsonValue | null;
-  assignmentSnapshotJson: Prisma.JsonValue | null;
+  assignmentHistoryJson: string | null;
+  assignmentSnapshotJson: string | null;
   comments: string | null;
   entrySequence: number;
   id: string;
@@ -414,7 +421,7 @@ type TimerTaskRecord = {
     name: string;
     nodeKey: string;
     type: string;
-    configurationJson: Prisma.JsonValue;
+    configurationJson: string;
   };
   status: string;
   workflowInstanceId: string;
@@ -480,7 +487,7 @@ const executeEscalation = async ({
   context: WorkflowRuntimeContext;
   db: Prisma.TransactionClient;
   instance: {
-    contextJson: Prisma.JsonValue;
+    contextJson: string;
     id: string;
     processType: string;
     workflowVersionId: string;
@@ -591,9 +598,10 @@ const executeEscalation = async ({
             assignedUserId: null,
           };
     const history = [
-      ...(Array.isArray(task.assignmentHistoryJson)
-        ? task.assignmentHistoryJson
-        : []),
+      ...parseDatabaseJsonArray(
+        task.assignmentHistoryJson,
+        "workflow_tasks.assignment_history_json",
+      ),
       {
         actorType: "SYSTEM",
         date: now.toISOString(),

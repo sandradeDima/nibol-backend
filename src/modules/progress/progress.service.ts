@@ -4,9 +4,11 @@ import path from "node:path";
 
 import type { Prisma } from "../../../generated/prisma/client.js";
 import {
+  ActionPlanStatus,
   NotificationDeliveryChannel,
   NotificationDeliveryStatus,
-} from "../../../generated/prisma/client.js";
+  parseDatabaseEnum,
+} from "../../types/database-enums.js";
 
 import {
   authorizationService,
@@ -874,7 +876,11 @@ export const progressService = {
     if (
       action === "approve" &&
       !isOfficialProgressStatusTransitionAllowed(
-        previous.actionPlan.status,
+        parseDatabaseEnum(
+          ActionPlanStatus,
+          previous.actionPlan.status,
+          "action_plans.status",
+        ),
         input.officialStatus,
       )
     )

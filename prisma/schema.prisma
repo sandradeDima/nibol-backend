@@ -1,230 +1,35 @@
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider        = "prisma-client"
+  output          = "../generated/prisma"
+  previewFeatures = ["partialIndexes"]
 }
 
 datasource db {
-  provider = "mysql"
-}
-
-enum NotificationType {
-  INFO    @map("info")
-  SUCCESS @map("success")
-  WARNING @map("warning")
-  ERROR   @map("error")
-}
-
-enum NotificationPriority {
-  LOW
-  NORMAL
-  HIGH
-  CRITICAL
-}
-
-enum NotificationDeliveryChannel {
-  IN_APP
-  EMAIL
-}
-
-enum NotificationDeliveryStatus {
-  PENDING
-  SENT
-  FAILED
-  SKIPPED
-}
-
-enum ScheduledJobExecutionStatus {
-  RUNNING
-  SUCCESS
-  PARTIAL
-  FAILED
-}
-
-enum ScheduledJobTrigger {
-  CRON
-  USER
-  SYSTEM
-}
-
-enum RemediationPlanStatus {
-  DRAFT
-  SENT_TO_AUDIT
-  APPROVED
-  RETURNED
-  CLOSED
-}
-
-enum ActionPlanStatus {
-  NOT_STARTED
-  STARTED
-  WITH_PROGRESS
-  CONCLUDED
-}
-
-enum ProgressEvaluationType {
-  ADVANCE
-  FINALIZATION
-}
-
-enum ProgressEvaluationReviewStatus {
-  DRAFT
-  SENT_TO_AUDIT
-  APPROVED
-  RETURNED
-}
-
-enum CommentVisibility {
-  INTERNAL_AUDIT
-  AREA_VISIBLE
-  SYSTEM
-}
-
-enum ProgressReviewAction {
-  SENT
-  APPROVED
-  RETURNED
-}
-
-enum DeadlineExtensionStatus {
-  DRAFT
-  SENT_TO_MANAGER
-  MANAGER_APPROVED
-  MANAGER_REJECTED
-  CANCELLED
-}
-
-enum DeadlineExtensionTarget {
-  OBSERVATION
-  ACTION_PLAN
+  provider = "sqlserver"
 }
 
 model DeadlineExtensionClassification {
-  id                  String                        @id @default(uuid()) @db.Char(36)
-  code                String                        @unique @db.VarChar(64)
-  name                String                        @unique @db.VarChar(191)
-  description         String                        @db.VarChar(500)
-  maxAdditionalDays   Int                           @map("max_additional_days")
-  active              Boolean                       @default(true)
-  createdAt           DateTime                      @default(now()) @map("created_at")
-  updatedAt           DateTime                      @updatedAt @map("updated_at")
-  requests            DeadlineExtensionRequest[]
+  id                String                     @id @default(uuid()) @db.Char(36)
+  code              String                     @unique @db.NVarChar(64)
+  name              String                     @unique @db.NVarChar(191)
+  description       String                     @db.NVarChar(500)
+  maxAdditionalDays Int                        @map("max_additional_days")
+  active            Boolean                    @default(true)
+  createdAt         DateTime                   @default(now()) @map("created_at")
+  updatedAt         DateTime                   @updatedAt @map("updated_at")
+  requests          DeadlineExtensionRequest[]
 
   @@index([active])
   @@map("deadline_extension_classifications")
 }
 
-enum EvidenceContext {
-  FINDING
-  ACTION_PLAN
-  PROGRESS_EVALUATION
-  CLOSURE
-}
-
-enum EvidenceReviewStatus {
-  DRAFT
-  PENDING
-  APPROVED
-  RETURNED
-  REJECTED
-}
-
-enum WorkflowDefinitionStatus {
-  DRAFT
-  PUBLISHED
-  INACTIVE
-  ARCHIVED
-}
-
-enum WorkflowVersionStatus {
-  DRAFT
-  PUBLISHED
-  INACTIVE
-  ARCHIVED
-}
-
-enum WorkflowNodeType {
-  START
-  STAGE
-  APPROVAL
-  SUBFLOW
-  REJECTION
-  CONDITION
-  SLA
-  ESCALATION
-  NOTIFICATION
-  END
-}
-
-enum WorkflowInstanceStatus {
-  PENDING
-  ACTIVE
-  WAITING
-  COMPLETED
-  REJECTED
-  CANCELLED
-  FAILED
-}
-
-enum WorkflowTaskStatus {
-  PENDING
-  IN_PROGRESS
-  APPROVED
-  REJECTED
-  OBSERVED
-  CORRECTION_REQUESTED
-  CANCELLED
-  EXPIRED
-}
-
-enum WorkflowTimerStatus {
-  PENDING
-  PROCESSING
-  COMPLETED
-  FAILED
-  CANCELLED
-}
-
-enum WorkflowAssignmentStrategy {
-  FIXED_USER
-  ROLE
-  AREA
-  MANAGEMENT
-  RECORD_OWNER
-  OBSERVATION_RESPONSIBLE
-  REQUESTER
-  SUPERVISOR
-  FIELD_REFERENCE
-}
-
-enum WorkflowConditionLogicOperator {
-  AND
-  OR
-}
-
-enum WorkflowConditionOperator {
-  EQUALS
-  NOT_EQUALS
-  GREATER_THAN
-  LESS_THAN
-  GREATER_THAN_OR_EQUAL
-  LESS_THAN_OR_EQUAL
-  CONTAINS
-  NOT_CONTAINS
-  IS_EMPTY
-  IS_NOT_EMPTY
-  IN
-  NOT_IN
-  IS_OVERDUE
-  DUE_WITHIN
-}
-
 model User {
   id                                String                     @id @default(uuid()) @db.Char(36)
-  name                              String                     @db.VarChar(191)
-  email                             String                     @unique @db.VarChar(191)
-  password                          String?                    @db.VarChar(255)
-  avatar                            String?                    @db.VarChar(255)
-  jobTitle                          String?                    @map("job_title") @db.VarChar(191)
+  name                              String                     @db.NVarChar(191)
+  email                             String                     @unique @db.NVarChar(191)
+  password                          String?                    @db.NVarChar(255)
+  avatar                            String?                    @db.NVarChar(255)
+  jobTitle                          String?                    @map("job_title") @db.NVarChar(191)
   isActive                          Boolean                    @default(true) @map("is_active")
   emailVerified                     Boolean                    @default(false) @map("email_verified")
   lastLoginAt                       DateTime?                  @map("last_login_at")
@@ -274,9 +79,9 @@ model User {
 
 model Role {
   id                    String           @id @default(uuid()) @db.Char(36)
-  code                  String           @unique @db.VarChar(64)
-  name                  String           @unique @db.VarChar(191)
-  description           String?          @db.VarChar(255)
+  code                  String           @unique @db.NVarChar(64)
+  name                  String           @unique @db.NVarChar(191)
+  description           String?          @db.NVarChar(255)
   createdAt             DateTime         @default(now()) @map("created_at")
   updatedAt             DateTime         @updatedAt @map("updated_at")
   deletedAt             DateTime?        @map("deleted_at")
@@ -291,8 +96,8 @@ model Role {
 
 model Permission {
   id              String           @id @default(uuid()) @db.Char(36)
-  name            String           @unique @db.VarChar(191)
-  description     String?          @db.VarChar(255)
+  name            String           @unique @db.NVarChar(191)
+  description     String?          @db.NVarChar(255)
   createdAt       DateTime         @default(now()) @map("created_at")
   updatedAt       DateTime         @updatedAt @map("updated_at")
   deletedAt       DateTime?        @map("deleted_at")
@@ -308,8 +113,8 @@ model UserRole {
   roleId    String   @map("role_id") @db.Char(36)
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([userId, roleId])
   @@unique([userId])
@@ -323,8 +128,8 @@ model RolePermission {
   permissionId String     @map("permission_id") @db.Char(36)
   createdAt    DateTime   @default(now()) @map("created_at")
   updatedAt    DateTime   @updatedAt @map("updated_at")
-  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([roleId, permissionId])
   @@index([permissionId])
@@ -333,8 +138,8 @@ model RolePermission {
 
 model Invitation {
   id          String    @id @default(uuid()) @db.Char(36)
-  email       String    @db.VarChar(191)
-  token       String    @unique @db.VarChar(191)
+  email       String    @db.NVarChar(191)
+  token       String    @unique @db.NVarChar(191)
   roleId      String    @map("role_id") @db.Char(36)
   expiresAt   DateTime  @map("expires_at")
   acceptedAt  DateTime? @map("accepted_at")
@@ -342,8 +147,8 @@ model Invitation {
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
   deletedAt   DateTime? @map("deleted_at")
-  role        Role      @relation(fields: [roleId], references: [id], onDelete: Restrict)
-  createdBy   User      @relation("InvitationCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  role        Role      @relation(fields: [roleId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  createdBy   User      @relation("InvitationCreatedBy", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([email])
   @@index([roleId])
@@ -354,14 +159,14 @@ model Invitation {
 
 model Setting {
   id           String    @id @default(uuid()) @db.Char(36)
-  appName      String    @map("app_name") @db.VarChar(191)
-  logo         String?   @db.VarChar(255)
-  primaryColor String?   @map("primary_color") @db.VarChar(32)
-  supportEmail String    @map("support_email") @db.VarChar(191)
-  timezone     String    @db.VarChar(100)
-  dateFormat   String    @map("date_format") @db.VarChar(50)
-  senderName   String    @map("sender_name") @db.VarChar(191)
-  senderEmail  String    @map("sender_email") @db.VarChar(191)
+  appName      String    @map("app_name") @db.NVarChar(191)
+  logo         String?   @db.NVarChar(255)
+  primaryColor String?   @map("primary_color") @db.NVarChar(32)
+  supportEmail String    @map("support_email") @db.NVarChar(191)
+  timezone     String    @db.NVarChar(100)
+  dateFormat   String    @map("date_format") @db.NVarChar(50)
+  senderName   String    @map("sender_name") @db.NVarChar(191)
+  senderEmail  String    @map("sender_email") @db.NVarChar(191)
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
   deletedAt    DateTime? @map("deleted_at")
@@ -373,23 +178,24 @@ model Setting {
 model Notification {
   id         String                 @id @default(uuid()) @db.Char(36)
   userId     String                 @map("user_id") @db.Char(36)
-  title      String                 @db.VarChar(191)
-  message    String                 @db.Text
-  type       NotificationType       @default(INFO)
-  priority   NotificationPriority   @default(NORMAL)
-  eventType  String?                @map("event_type") @db.VarChar(100)
-  entityType String?                @map("entity_type") @db.VarChar(100)
+  title      String                 @db.NVarChar(191)
+  message    String                 @db.NVarChar(Max)
+  type       String                 @default("info") @db.NVarChar(64)
+  priority   String                 @default("NORMAL") @db.NVarChar(64)
+  eventType  String?                @map("event_type") @db.NVarChar(100)
+  entityType String?                @map("entity_type") @db.NVarChar(100)
   entityId   String?                @map("entity_id") @db.Char(36)
-  targetUrl  String?                @map("target_url") @db.VarChar(500)
-  dedupeKey  String?                @unique @map("dedupe_key") @db.VarChar(255)
+  targetUrl  String?                @map("target_url") @db.NVarChar(500)
+  dedupeKey  String?                @map("dedupe_key") @db.NVarChar(255)
   isRead     Boolean                @default(false) @map("is_read")
   readAt     DateTime?              @map("read_at")
   createdAt  DateTime               @default(now()) @map("created_at")
   updatedAt  DateTime               @updatedAt @map("updated_at")
   deletedAt  DateTime?              @map("deleted_at")
-  user       User                   @relation(fields: [userId], references: [id], onDelete: Restrict)
+  user       User                   @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   deliveries NotificationDelivery[]
 
+  @@unique([dedupeKey], where: raw("[dedupe_key] IS NOT NULL"), map: "notifications_dedupe_key_key")
   @@index([userId, isRead])
   @@index([userId, createdAt])
   @@index([eventType, entityType, entityId])
@@ -399,23 +205,24 @@ model Notification {
 }
 
 model NotificationDelivery {
-  id              String                      @id @default(uuid()) @db.Char(36)
-  notificationId  String?                     @map("notification_id") @db.Char(36)
-  dedupeKey       String?                     @unique @map("dedupe_key") @db.VarChar(255)
-  channel         NotificationDeliveryChannel
-  recipientUserId String?                     @map("recipient_user_id") @db.Char(36)
-  recipientEmail  String?                     @map("recipient_email") @db.VarChar(191)
-  payloadJson     Json?                       @map("payload_json")
-  status          NotificationDeliveryStatus  @default(PENDING)
-  attempts        Int                         @default(0)
-  lastAttemptAt   DateTime?                   @map("last_attempt_at")
-  sentAt          DateTime?                   @map("sent_at")
-  errorMessage    String?                     @map("error_message") @db.Text
-  createdAt       DateTime                    @default(now()) @map("created_at")
-  updatedAt       DateTime                    @updatedAt @map("updated_at")
-  notification    Notification?               @relation(fields: [notificationId], references: [id], onDelete: Cascade)
-  recipientUser   User?                       @relation("NotificationDeliveryRecipient", fields: [recipientUserId], references: [id], onDelete: SetNull)
+  id              String        @id @default(uuid()) @db.Char(36)
+  notificationId  String?       @map("notification_id") @db.Char(36)
+  dedupeKey       String?       @map("dedupe_key") @db.NVarChar(255)
+  channel         String        @db.NVarChar(64)
+  recipientUserId String?       @map("recipient_user_id") @db.Char(36)
+  recipientEmail  String?       @map("recipient_email") @db.NVarChar(191)
+  payloadJson     String?       @map("payload_json") @db.NVarChar(Max)
+  status          String        @default("PENDING") @db.NVarChar(64)
+  attempts        Int           @default(0)
+  lastAttemptAt   DateTime?     @map("last_attempt_at")
+  sentAt          DateTime?     @map("sent_at")
+  errorMessage    String?       @map("error_message") @db.NVarChar(Max)
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  notification    Notification? @relation(fields: [notificationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  recipientUser   User?         @relation("NotificationDeliveryRecipient", fields: [recipientUserId], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
+  @@unique([dedupeKey], where: raw("[dedupe_key] IS NOT NULL"), map: "notification_deliveries_dedupe_key_key")
   @@index([notificationId, channel])
   @@index([recipientUserId, channel, status])
   @@index([status, lastAttemptAt])
@@ -425,25 +232,26 @@ model NotificationDelivery {
 model EntityActivity {
   id                String       @id @default(uuid()) @db.Char(36)
   observationId     String?      @map("observation_id") @db.Char(36)
-  entityType        String       @map("entity_type") @db.VarChar(64)
-  entityId          String       @map("entity_id") @db.VarChar(191)
-  activityType      String       @map("activity_type") @db.VarChar(100)
-  action            String       @db.VarChar(100)
+  entityType        String       @map("entity_type") @db.NVarChar(64)
+  entityId          String       @map("entity_id") @db.NVarChar(191)
+  activityType      String       @map("activity_type") @db.NVarChar(100)
+  action            String       @db.NVarChar(100)
   actorUserId       String?      @map("actor_user_id") @db.Char(36)
-  actorType         String       @default("USER") @map("actor_type") @db.VarChar(32)
-  title             String       @db.VarChar(191)
-  description       String?      @db.Text
-  previousDataJson  Json?        @map("previous_data_json")
-  newDataJson       Json?        @map("new_data_json")
-  metadataJson      Json?        @map("metadata_json")
-  visibility        String       @default("ALL_AUTHORIZED") @db.VarChar(32)
-  targetUrl         String?      @map("target_url") @db.VarChar(500)
-  dedupeKey         String?      @unique @map("dedupe_key") @db.VarChar(255)
+  actorType         String       @default("USER") @map("actor_type") @db.NVarChar(32)
+  title             String       @db.NVarChar(191)
+  description       String?      @db.NVarChar(Max)
+  previousDataJson  String?      @map("previous_data_json") @db.NVarChar(Max)
+  newDataJson       String?      @map("new_data_json") @db.NVarChar(Max)
+  metadataJson      String?      @map("metadata_json") @db.NVarChar(Max)
+  visibility        String       @default("ALL_AUTHORIZED") @db.NVarChar(32)
+  targetUrl         String?      @map("target_url") @db.NVarChar(500)
+  dedupeKey         String?      @map("dedupe_key") @db.NVarChar(255)
   relatedAuditLogId String?      @map("related_audit_log_id") @db.Char(36)
   createdAt         DateTime     @default(now()) @map("created_at")
-  observation       Observation? @relation(fields: [observationId], references: [id], onDelete: Cascade)
-  actorUser         User?        @relation("EntityActivityActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  observation       Observation? @relation(fields: [observationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  actorUser         User?        @relation("EntityActivityActor", fields: [actorUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
+  @@unique([dedupeKey], where: raw("[dedupe_key] IS NOT NULL"), map: "entity_activities_dedupe_key_key")
   @@index([observationId])
   @@index([entityType, entityId])
   @@index([actorUserId])
@@ -454,27 +262,28 @@ model EntityActivity {
 }
 
 model ScheduledJobExecution {
-  id                   String                      @id @default(uuid()) @db.Char(36)
-  jobName              String                      @map("job_name") @db.VarChar(100)
-  runType              String?                     @map("run_type") @db.VarChar(16)
-  cadenceKey           String?                     @map("cadence_key") @db.VarChar(32)
-  periodKey            String?                     @map("period_key") @db.VarChar(16)
-  dedupeKey            String?                     @unique @map("dedupe_key") @db.VarChar(255)
-  scheduledFor         DateTime?                   @map("scheduled_for")
-  startedAt            DateTime                    @map("started_at")
-  finishedAt           DateTime?                   @map("finished_at")
-  status               ScheduledJobExecutionStatus
-  processedCount       Int                         @default(0) @map("processed_count")
-  notificationsCreated Int                         @default(0) @map("notifications_created")
-  emailsSent           Int                         @default(0) @map("emails_sent")
-  failuresCount        Int                         @default(0) @map("failures_count")
-  detailsJson          Json?                       @map("details_json")
-  errorMessage         String?                     @map("error_message") @db.Text
-  triggeredBy          ScheduledJobTrigger         @map("triggered_by")
-  triggeredByUserId    String?                     @map("triggered_by_user_id") @db.Char(36)
-  createdAt            DateTime                    @default(now()) @map("created_at")
-  triggeredByUser      User?                       @relation("ScheduledJobExecutionTriggeredBy", fields: [triggeredByUserId], references: [id], onDelete: SetNull)
+  id                   String    @id @default(uuid()) @db.Char(36)
+  jobName              String    @map("job_name") @db.NVarChar(100)
+  runType              String?   @map("run_type") @db.NVarChar(16)
+  cadenceKey           String?   @map("cadence_key") @db.NVarChar(32)
+  periodKey            String?   @map("period_key") @db.NVarChar(16)
+  dedupeKey            String?   @map("dedupe_key") @db.NVarChar(255)
+  scheduledFor         DateTime? @map("scheduled_for")
+  startedAt            DateTime  @map("started_at")
+  finishedAt           DateTime? @map("finished_at")
+  status               String    @db.NVarChar(64)
+  processedCount       Int       @default(0) @map("processed_count")
+  notificationsCreated Int       @default(0) @map("notifications_created")
+  emailsSent           Int       @default(0) @map("emails_sent")
+  failuresCount        Int       @default(0) @map("failures_count")
+  detailsJson          String?   @map("details_json") @db.NVarChar(Max)
+  errorMessage         String?   @map("error_message") @db.NVarChar(Max)
+  triggeredBy          String    @map("triggered_by") @db.NVarChar(64)
+  triggeredByUserId    String?   @map("triggered_by_user_id") @db.Char(36)
+  createdAt            DateTime  @default(now()) @map("created_at")
+  triggeredByUser      User?     @relation("ScheduledJobExecutionTriggeredBy", fields: [triggeredByUserId], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
+  @@unique([dedupeKey], where: raw("[dedupe_key] IS NOT NULL"), map: "scheduled_job_executions_dedupe_key_key")
   @@index([jobName, startedAt])
   @@index([jobName, status])
   @@index([jobName, cadenceKey, periodKey])
@@ -483,7 +292,7 @@ model ScheduledJobExecution {
 }
 
 model ScheduledJobLock {
-  jobName    String   @id @map("job_name") @db.VarChar(100)
+  jobName    String   @id @map("job_name") @db.NVarChar(100)
   lockToken  String   @unique @map("lock_token") @db.Char(36)
   acquiredAt DateTime @map("acquired_at")
   expiresAt  DateTime @map("expires_at")
@@ -496,11 +305,11 @@ model ScheduledJobLock {
 
 model ModuleRecord {
   id          String    @id @default(uuid()) @db.Char(36)
-  moduleKey   String    @map("module_key") @db.VarChar(100)
-  name        String    @db.VarChar(191)
-  description String?   @db.Text
+  moduleKey   String    @map("module_key") @db.NVarChar(100)
+  name        String    @db.NVarChar(191)
+  description String?   @db.NVarChar(Max)
   isActive    Boolean   @default(true) @map("is_active")
-  metadata    Json?
+  metadata    String?   @db.NVarChar(Max)
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
   deletedAt   DateTime? @map("deleted_at")
@@ -514,14 +323,14 @@ model ModuleRecord {
 model ActivityLog {
   id         String   @id @default(uuid()) @db.Char(36)
   userId     String?  @map("user_id") @db.Char(36)
-  action     String   @db.VarChar(191)
-  entityType String   @map("entity_type") @db.VarChar(191)
+  action     String   @db.NVarChar(191)
+  entityType String   @map("entity_type") @db.NVarChar(191)
   entityId   String?  @map("entity_id") @db.Char(36)
-  metadata   Json?
-  ipAddress  String?  @map("ip_address") @db.VarChar(45)
+  metadata   String?  @db.NVarChar(Max)
+  ipAddress  String?  @map("ip_address") @db.NVarChar(45)
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
-  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([userId])
   @@index([entityType, entityId])
@@ -531,14 +340,14 @@ model ActivityLog {
 
 model AuditLog {
   id          String   @id @default(uuid()) @db.Char(36)
-  entityType  String   @map("entity_type") @db.VarChar(191)
+  entityType  String   @map("entity_type") @db.NVarChar(191)
   entityId    String?  @map("entity_id") @db.Char(36)
-  oldValues   Json?    @map("old_values")
-  newValues   Json?    @map("new_values")
+  oldValues   String?  @map("old_values") @db.NVarChar(Max)
+  newValues   String?  @map("new_values") @db.NVarChar(Max)
   changedById String?  @map("changed_by") @db.Char(36)
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
-  changedBy   User?    @relation("AuditLogChangedBy", fields: [changedById], references: [id], onDelete: SetNull)
+  changedBy   User?    @relation("AuditLogChangedBy", fields: [changedById], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([changedById])
   @@index([entityType, entityId])
@@ -547,18 +356,18 @@ model AuditLog {
 }
 
 model RiskLevel {
-  id                  String        @id @default(uuid()) @db.Char(36)
-  name                String        @unique @db.VarChar(100)
-  key                 String        @unique @db.VarChar(100)
-  description         String?       @db.VarChar(500)
-  colorToken          String?       @map("color_token") @db.VarChar(64)
-  severityOrder       Int           @map("severity_order")
-  maxRemediationDays  Int?          @map("max_remediation_days")
-  active              Boolean       @default(true)
-  createdAt           DateTime      @default(now()) @map("created_at")
-  updatedAt           DateTime      @updatedAt @map("updated_at")
-  deletedAt           DateTime?     @map("deleted_at")
-  observations        Observation[]
+  id                 String        @id @default(uuid()) @db.Char(36)
+  name               String        @unique @db.NVarChar(100)
+  key                String        @unique @db.NVarChar(100)
+  description        String?       @db.NVarChar(500)
+  colorToken         String?       @map("color_token") @db.NVarChar(64)
+  severityOrder      Int           @map("severity_order")
+  maxRemediationDays Int?          @map("max_remediation_days")
+  active             Boolean       @default(true)
+  createdAt          DateTime      @default(now()) @map("created_at")
+  updatedAt          DateTime      @updatedAt @map("updated_at")
+  deletedAt          DateTime?     @map("deleted_at")
+  observations       Observation[]
 
   @@index([active, deletedAt])
   @@index([deletedAt])
@@ -568,9 +377,9 @@ model RiskLevel {
 
 model ObservationStatus {
   id              String        @id @default(uuid()) @db.Char(36)
-  name            String        @db.VarChar(100)
-  key             String        @unique @db.VarChar(100)
-  description     String?       @db.VarChar(500)
+  name            String        @db.NVarChar(100)
+  key             String        @unique @db.NVarChar(100)
+  description     String?       @db.NVarChar(500)
   sortOrder       Int           @map("sort_order")
   isInitial       Boolean       @default(false) @map("is_initial")
   isFinal         Boolean       @default(false) @map("is_final")
@@ -590,19 +399,20 @@ model ObservationStatus {
 
 model Area {
   id                    String            @id @default(uuid()) @db.Char(36)
-  name                  String            @unique @db.VarChar(191)
-  code                  String?           @unique @db.VarChar(100)
-  description           String?           @db.VarChar(500)
+  name                  String            @unique @db.NVarChar(191)
+  code                  String?           @db.NVarChar(100)
+  description           String?           @db.NVarChar(500)
   managerUserId         String?           @map("manager_user_id") @db.Char(36)
   active                Boolean           @default(true)
   createdAt             DateTime          @default(now()) @map("created_at")
   updatedAt             DateTime          @updatedAt @map("updated_at")
   deletedAt             DateTime?         @map("deleted_at")
-  managerUser           User?             @relation("AreaManager", fields: [managerUserId], references: [id], onDelete: SetNull)
+  managerUser           User?             @relation("AreaManager", fields: [managerUserId], references: [id], onDelete: SetNull, onUpdate: NoAction)
   observationAreas      ObservationArea[] @relation("ObservationAreaArea")
   remediationPlans      RemediationPlan[]
   assignedWorkflowTasks WorkflowTask[]    @relation("WorkflowTaskAssignedArea")
 
+  @@unique([code], where: raw("[code] IS NOT NULL"), map: "areas_code_key")
   @@index([active, deletedAt])
   @@index([deletedAt])
   @@index([managerUserId])
@@ -611,16 +421,16 @@ model Area {
 
 model AuditReport {
   id              String            @id @default(uuid()) @db.Char(36)
-  reportNumber    String            @unique @map("report_number") @db.VarChar(64)
-  title           String            @db.VarChar(191)
+  reportNumber    String            @unique @map("report_number") @db.NVarChar(64)
+  title           String            @db.NVarChar(191)
   reportDate      DateTime          @map("report_date") @db.Date
   reportClassId   String?           @map("report_class_id") @db.Char(36)
   createdByUserId String            @map("created_by_user_id") @db.Char(36)
   createdAt       DateTime          @default(now()) @map("created_at")
   updatedAt       DateTime          @updatedAt @map("updated_at")
   deletedAt       DateTime?         @map("deleted_at")
-  createdByUser   User              @relation("AuditReportCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
-  reportClass     AuditReportClass? @relation(fields: [reportClassId], references: [id], onDelete: SetNull)
+  createdByUser   User              @relation("AuditReportCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  reportClass     AuditReportClass? @relation(fields: [reportClassId], references: [id], onDelete: SetNull, onUpdate: NoAction)
   observations    Observation[]
 
   @@index([createdByUserId])
@@ -632,8 +442,8 @@ model AuditReport {
 
 model AuditReportClass {
   id          String        @id @default(uuid()) @db.Char(36)
-  name        String        @unique @db.VarChar(191)
-  description String?       @db.VarChar(500)
+  name        String        @unique @db.NVarChar(191)
+  description String?       @db.NVarChar(500)
   active      Boolean       @default(true)
   createdAt   DateTime      @default(now()) @map("created_at")
   updatedAt   DateTime      @updatedAt @map("updated_at")
@@ -647,8 +457,8 @@ model AuditReportClass {
 
 model ObservationDictionary {
   id           String        @id @default(uuid()) @db.Char(36)
-  name         String        @unique @db.VarChar(191)
-  description  String?       @db.Text
+  name         String        @unique @db.NVarChar(191)
+  description  String?       @db.NVarChar(Max)
   isActive     Boolean       @default(true) @map("is_active")
   createdAt    DateTime      @default(now()) @map("created_at")
   updatedAt    DateTime      @updatedAt @map("updated_at")
@@ -660,8 +470,8 @@ model ObservationDictionary {
 
 model Risk {
   id               String            @id @default(uuid()) @db.Char(36)
-  name             String            @unique @db.VarChar(191)
-  description      String?           @db.Text
+  name             String            @unique @db.NVarChar(191)
+  description      String?           @db.NVarChar(Max)
   isActive         Boolean           @default(true) @map("is_active")
   createdAt        DateTime          @default(now()) @map("created_at")
   updatedAt        DateTime          @updatedAt @map("updated_at")
@@ -673,12 +483,12 @@ model Risk {
 
 model SystemParameter {
   id          String    @id @default(uuid()) @db.Char(36)
-  key         String    @unique @db.VarChar(191)
-  name        String    @db.VarChar(191)
-  value       String    @db.Text
-  valueType   String    @map("value_type") @db.VarChar(32)
-  group       String    @map("group_name") @db.VarChar(100)
-  description String?   @db.VarChar(500)
+  key         String    @unique @db.NVarChar(191)
+  name        String    @db.NVarChar(191)
+  value       String    @db.NVarChar(Max)
+  valueType   String    @map("value_type") @db.NVarChar(32)
+  group       String    @map("group_name") @db.NVarChar(100)
+  description String?   @db.NVarChar(500)
   editable    Boolean   @default(true)
   active      Boolean   @default(true)
   createdAt   DateTime  @default(now()) @map("created_at")
@@ -693,17 +503,17 @@ model SystemParameter {
 
 model Catalog {
   id          String    @id @default(uuid()) @db.Char(36)
-  type        String    @db.VarChar(100)
-  name        String    @db.VarChar(191)
-  key         String?   @db.VarChar(100)
-  description String?   @db.VarChar(500)
+  type        String    @db.NVarChar(100)
+  name        String    @db.NVarChar(191)
+  key         String?   @db.NVarChar(100)
+  description String?   @db.NVarChar(500)
   active      Boolean   @default(true)
   sortOrder   Int       @default(0) @map("sort_order")
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
   deletedAt   DateTime? @map("deleted_at")
 
-  @@unique([type, key])
+  @@unique([type, key], where: raw("[key] IS NOT NULL"), map: "catalogs_type_key_key")
   @@index([active, deletedAt])
   @@index([deletedAt])
   @@index([type, sortOrder])
@@ -717,30 +527,30 @@ model Observation {
   observationNumber         Int                        @map("observation_number")
   deletedObservationNumber  Int?                       @map("deleted_observation_number")
   mainObservationId         String                     @map("main_observation_id") @db.Char(36)
-  title                     String                     @db.VarChar(191)
-  description               String                     @db.Text
-  auditRecommendation       String                     @map("audit_recommendation") @db.Text
+  title                     String                     @db.NVarChar(191)
+  description               String                     @db.NVarChar(Max)
+  auditRecommendation       String                     @map("audit_recommendation") @db.NVarChar(Max)
   riskLevelId               String                     @map("risk_level_id") @db.Char(36)
   statusId                  String                     @map("status_id") @db.Char(36)
   auditorUserId             String?                    @map("auditor_user_id") @db.Char(36)
   originalDueDate           DateTime                   @map("original_due_date") @db.Date
   currentDueDate            DateTime                   @map("current_due_date") @db.Date
-  source                    String?                    @db.VarChar(191)
-  process                   String?                    @map("process_name") @db.VarChar(191)
-  category                  String?                    @db.VarChar(191)
+  source                    String?                    @db.NVarChar(191)
+  process                   String?                    @map("process_name") @db.NVarChar(191)
+  category                  String?                    @db.NVarChar(191)
   progressPercent           Int                        @default(0) @map("progress_percent")
-  currentStage              String?                    @map("current_stage") @db.VarChar(191)
+  currentStage              String?                    @map("current_stage") @db.NVarChar(191)
   sentAt                    DateTime?                  @map("sent_at")
   createdAt                 DateTime                   @default(now()) @map("created_at")
   updatedAt                 DateTime                   @updatedAt @map("updated_at")
   deletedAt                 DateTime?                  @map("deleted_at")
   deletedById               String?                    @map("deleted_by_id") @db.Char(36)
-  auditReport               AuditReport                @relation(fields: [auditReportId], references: [id], onDelete: Restrict)
-  mainObservation           ObservationDictionary      @relation(fields: [mainObservationId], references: [id], onDelete: Restrict)
-  riskLevel                 RiskLevel                  @relation(fields: [riskLevelId], references: [id], onDelete: Restrict)
-  status                    ObservationStatus          @relation(fields: [statusId], references: [id], onDelete: Restrict)
-  auditorUser               User?                      @relation("ObservationAuditor", fields: [auditorUserId], references: [id], onDelete: Restrict)
-  deletedBy                 User?                      @relation("ObservationDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
+  auditReport               AuditReport                @relation(fields: [auditReportId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  mainObservation           ObservationDictionary      @relation(fields: [mainObservationId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  riskLevel                 RiskLevel                  @relation(fields: [riskLevelId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  status                    ObservationStatus          @relation(fields: [statusId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  auditorUser               User?                      @relation("ObservationAuditor", fields: [auditorUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  deletedBy                 User?                      @relation("ObservationDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull, onUpdate: NoAction)
   risks                     ObservationRisk[]
   areaAssignments           ObservationArea[]
   remediationPlans          RemediationPlan[]
@@ -768,8 +578,8 @@ model ObservationRisk {
   observationId String      @map("observation_id") @db.Char(36)
   riskId        String      @map("risk_id") @db.Char(36)
   createdAt     DateTime    @default(now()) @map("created_at")
-  observation   Observation @relation(fields: [observationId], references: [id], onDelete: Cascade)
-  risk          Risk        @relation(fields: [riskId], references: [id], onDelete: Restrict)
+  observation   Observation @relation(fields: [observationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  risk          Risk        @relation(fields: [riskId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([observationId, riskId])
   @@index([riskId])
@@ -784,10 +594,10 @@ model ObservationArea {
   areaResponsibleUserId     String                     @map("area_responsible_user_id") @db.Char(36)
   createdAt                 DateTime                   @default(now()) @map("created_at")
   updatedAt                 DateTime                   @updatedAt @map("updated_at")
-  observation               Observation                @relation(fields: [observationId], references: [id], onDelete: Cascade)
-  area                      Area                       @relation("ObservationAreaArea", fields: [areaId], references: [id], onDelete: Restrict)
-  processOwner              User                       @relation("ObservationAreaProcessOwner", fields: [processOwnerUserId], references: [id], onDelete: Restrict)
-  areaResponsible           User                       @relation("ObservationAreaResponsible", fields: [areaResponsibleUserId], references: [id], onDelete: Restrict)
+  observation               Observation                @relation(fields: [observationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  area                      Area                       @relation("ObservationAreaArea", fields: [areaId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  processOwner              User                       @relation("ObservationAreaProcessOwner", fields: [processOwnerUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  areaResponsible           User                       @relation("ObservationAreaResponsible", fields: [areaResponsibleUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   actionPlans               ActionPlan[]
   deadlineExtensionRequests DeadlineExtensionRequest[]
   evidenceFiles             EvidenceFile[]
@@ -801,33 +611,33 @@ model ObservationArea {
 }
 
 model RemediationPlan {
-  id                 String                @id @default(uuid()) @db.Char(36)
-  observationId      String                @map("observation_id") @db.Char(36)
-  areaId             String                @map("area_id") @db.Char(36)
-  ownerUserId        String?               @map("owner_user_id") @db.Char(36)
-  strategyText       String                @map("strategy_text") @db.LongText
-  mitigationText     String?               @map("mitigation_text") @db.LongText
-  additionalComments String?               @map("additional_comments") @db.LongText
-  status             RemediationPlanStatus @default(DRAFT)
-  sentToAuditAt      DateTime?             @map("sent_to_audit_at")
-  approvedAt         DateTime?             @map("approved_at")
-  approvedByUserId   String?               @map("approved_by_user_id") @db.Char(36)
-  returnedAt         DateTime?             @map("returned_at")
-  returnedByUserId   String?               @map("returned_by_user_id") @db.Char(36)
-  returnReason       String?               @map("return_reason") @db.LongText
-  createdByUserId    String                @map("created_by_user_id") @db.Char(36)
-  createdAt          DateTime              @default(now()) @map("created_at")
-  updatedAt          DateTime              @updatedAt @map("updated_at")
-  deletedAt          DateTime?             @map("deleted_at")
-  deletedById        String?               @map("deleted_by_id") @db.Char(36)
-  workflowInstanceId String?               @map("workflow_instance_id") @db.Char(36)
-  observation        Observation           @relation(fields: [observationId], references: [id], onDelete: Cascade)
-  area               Area                  @relation(fields: [areaId], references: [id], onDelete: Restrict)
-  ownerUser          User?                 @relation("RemediationPlanOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
-  approvedByUser     User?                 @relation("RemediationPlanApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
-  returnedByUser     User?                 @relation("RemediationPlanReturnedBy", fields: [returnedByUserId], references: [id], onDelete: SetNull)
-  deletedBy          User?                 @relation("RemediationPlanDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
-  createdByUser      User                  @relation("RemediationPlanCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  id                 String               @id @default(uuid()) @db.Char(36)
+  observationId      String               @map("observation_id") @db.Char(36)
+  areaId             String               @map("area_id") @db.Char(36)
+  ownerUserId        String?              @map("owner_user_id") @db.Char(36)
+  strategyText       String               @map("strategy_text") @db.NVarChar(Max)
+  mitigationText     String?              @map("mitigation_text") @db.NVarChar(Max)
+  additionalComments String?              @map("additional_comments") @db.NVarChar(Max)
+  status             String               @default("DRAFT") @db.NVarChar(64)
+  sentToAuditAt      DateTime?            @map("sent_to_audit_at")
+  approvedAt         DateTime?            @map("approved_at")
+  approvedByUserId   String?              @map("approved_by_user_id") @db.Char(36)
+  returnedAt         DateTime?            @map("returned_at")
+  returnedByUserId   String?              @map("returned_by_user_id") @db.Char(36)
+  returnReason       String?              @map("return_reason") @db.NVarChar(Max)
+  createdByUserId    String               @map("created_by_user_id") @db.Char(36)
+  createdAt          DateTime             @default(now()) @map("created_at")
+  updatedAt          DateTime             @updatedAt @map("updated_at")
+  deletedAt          DateTime?            @map("deleted_at")
+  deletedById        String?              @map("deleted_by_id") @db.Char(36)
+  workflowInstanceId String?              @map("workflow_instance_id") @db.Char(36)
+  observation        Observation          @relation(fields: [observationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  area               Area                 @relation(fields: [areaId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  ownerUser          User?                @relation("RemediationPlanOwner", fields: [ownerUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  approvedByUser     User?                @relation("RemediationPlanApprovedBy", fields: [approvedByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  returnedByUser     User?                @relation("RemediationPlanReturnedBy", fields: [returnedByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  deletedBy          User?                @relation("RemediationPlanDeletedBy", fields: [deletedById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  createdByUser      User                 @relation("RemediationPlanCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   actionPlans        ActionPlan[]
   comments           ObservationComment[]
 
@@ -851,23 +661,23 @@ model ActionPlan {
   observationId             String                     @map("observation_id") @db.Char(36)
   observationAreaId         String                     @map("observation_area_id") @db.Char(36)
   responsibleUserId         String                     @map("responsible_user_id") @db.Char(36)
-  title                     String                     @db.VarChar(191)
-  description               String                     @db.Text
+  title                     String                     @db.NVarChar(191)
+  description               String                     @db.NVarChar(Max)
   originalDueDate           DateTime                   @map("original_due_date") @db.Date
   currentDueDate            DateTime                   @map("current_due_date") @db.Date
   completedAt               DateTime?                  @map("completed_at")
   progressPercent           Int                        @default(0) @map("progress_percent")
-  status                    ActionPlanStatus           @default(NOT_STARTED)
+  status                    String                     @default("NOT_STARTED") @db.NVarChar(64)
   sortOrder                 Int                        @default(0) @map("sort_order")
   createdAt                 DateTime                   @default(now()) @map("created_at")
   updatedAt                 DateTime                   @updatedAt @map("updated_at")
   deletedAt                 DateTime?                  @map("deleted_at")
   deletedById               String?                    @map("deleted_by_id") @db.Char(36)
-  remediationPlan           RemediationPlan?           @relation(fields: [remediationPlanId], references: [id], onDelete: SetNull)
-  observation               Observation                @relation(fields: [observationId], references: [id], onDelete: Cascade)
-  observationArea           ObservationArea            @relation(fields: [observationAreaId], references: [id], onDelete: Restrict)
-  responsibleUser           User                       @relation("ActionPlanResponsible", fields: [responsibleUserId], references: [id], onDelete: Restrict)
-  deletedBy                 User?                      @relation("ActionPlanDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
+  remediationPlan           RemediationPlan?           @relation(fields: [remediationPlanId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  observation               Observation                @relation(fields: [observationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  observationArea           ObservationArea            @relation(fields: [observationAreaId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  responsibleUser           User                       @relation("ActionPlanResponsible", fields: [responsibleUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  deletedBy                 User?                      @relation("ActionPlanDeletedBy", fields: [deletedById], references: [id], onDelete: NoAction, onUpdate: NoAction)
   progressEvaluations       ProgressEvaluation[]
   evidenceFiles             EvidenceFile[]
   comments                  ObservationComment[]
@@ -889,38 +699,38 @@ model ActionPlan {
 }
 
 model DeadlineExtensionRequest {
-  id                 String                        @id @default(uuid()) @db.Char(36)
-  targetType         DeadlineExtensionTarget       @map("target_type")
-  observationId      String?                       @map("observation_id") @db.Char(36)
-  actionPlanId       String?                       @map("action_plan_id") @db.Char(36)
-  observationAreaId  String?                       @map("observation_area_id") @db.Char(36)
-  requestedByUserId  String                        @map("requested_by_user_id") @db.Char(36)
-  classificationId   String?                       @map("classification_id") @db.Char(36)
-  previousDueDate    DateTime                      @map("previous_due_date") @db.Date
-  proposedDueDate    DateTime                      @map("proposed_due_date") @db.Date
-  maxAdditionalDays  Int?                          @map("max_additional_days")
-  maxAllowedDate     DateTime?                     @map("max_allowed_date") @db.Date
-  reason             String                        @db.LongText
-  status             DeadlineExtensionStatus       @default(DRAFT)
-  managerReviewerId  String?                       @map("manager_reviewer_id") @db.Char(36)
-  managerReviewedAt  DateTime?                     @map("manager_reviewed_at")
-  managerComment     String?                       @map("manager_comment") @db.LongText
-  finalApprovedAt    DateTime?                     @map("final_approved_at")
-  createdAt          DateTime                      @default(now()) @map("created_at")
-  updatedAt          DateTime                      @updatedAt @map("updated_at")
-  deletedAt          DateTime?                     @map("deleted_at")
-  workflowInstanceId String?                       @map("workflow_instance_id") @db.Char(36)
-  classification     DeadlineExtensionClassification? @relation(fields: [classificationId], references: [id], onDelete: Restrict)
-  observation        Observation?                  @relation(fields: [observationId], references: [id], onDelete: Cascade)
-  actionPlan         ActionPlan?                   @relation(fields: [actionPlanId], references: [id], onDelete: Cascade)
-  observationArea    ObservationArea?              @relation(fields: [observationAreaId], references: [id], onDelete: SetNull)
-  requestedByUser    User                          @relation("DeadlineExtensionRequestedBy", fields: [requestedByUserId], references: [id], onDelete: Restrict)
-  managerReviewer    User?                         @relation("DeadlineExtensionManagerReviewer", fields: [managerReviewerId], references: [id], onDelete: SetNull)
+  id                 String                           @id @default(uuid()) @db.Char(36)
+  targetType         String                           @map("target_type") @db.NVarChar(64)
+  observationId      String?                          @map("observation_id") @db.Char(36)
+  actionPlanId       String?                          @map("action_plan_id") @db.Char(36)
+  observationAreaId  String?                          @map("observation_area_id") @db.Char(36)
+  requestedByUserId  String                           @map("requested_by_user_id") @db.Char(36)
+  classificationId   String?                          @map("classification_id") @db.Char(36)
+  previousDueDate    DateTime                         @map("previous_due_date") @db.Date
+  proposedDueDate    DateTime                         @map("proposed_due_date") @db.Date
+  maxAdditionalDays  Int?                             @map("max_additional_days")
+  maxAllowedDate     DateTime?                        @map("max_allowed_date") @db.Date
+  reason             String                           @db.NVarChar(Max)
+  status             String                           @default("DRAFT") @db.NVarChar(64)
+  managerReviewerId  String?                          @map("manager_reviewer_id") @db.Char(36)
+  managerReviewedAt  DateTime?                        @map("manager_reviewed_at")
+  managerComment     String?                          @map("manager_comment") @db.NVarChar(Max)
+  finalApprovedAt    DateTime?                        @map("final_approved_at")
+  createdAt          DateTime                         @default(now()) @map("created_at")
+  updatedAt          DateTime                         @updatedAt @map("updated_at")
+  deletedAt          DateTime?                        @map("deleted_at")
+  workflowInstanceId String?                          @map("workflow_instance_id") @db.Char(36)
+  classification     DeadlineExtensionClassification? @relation(fields: [classificationId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  observation        Observation?                     @relation(fields: [observationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  actionPlan         ActionPlan?                      @relation(fields: [actionPlanId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  observationArea    ObservationArea?                 @relation(fields: [observationAreaId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  requestedByUser    User                             @relation("DeadlineExtensionRequestedBy", fields: [requestedByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  managerReviewer    User?                            @relation("DeadlineExtensionManagerReviewer", fields: [managerReviewerId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   attachments        DeadlineExtensionAttachment[]
 
+  @@unique([actionPlanId], where: raw("[action_plan_id] IS NOT NULL"), map: "deadline_extension_one_per_action_plan_key")
   @@index([observationAreaId])
   @@index([actionPlanId])
-  @@unique([actionPlanId], map: "deadline_extension_one_per_action_plan_key")
   @@index([classificationId])
   @@index([deletedAt])
   @@index([managerReviewerId])
@@ -936,8 +746,8 @@ model DeadlineExtensionAttachment {
   extensionRequestId String                   @map("extension_request_id") @db.Char(36)
   evidenceFileId     String                   @map("evidence_file_id") @db.Char(36)
   createdAt          DateTime                 @default(now()) @map("created_at")
-  extensionRequest   DeadlineExtensionRequest @relation(fields: [extensionRequestId], references: [id], onDelete: Cascade)
-  evidenceFile       EvidenceFile             @relation(fields: [evidenceFileId], references: [id], onDelete: Restrict)
+  extensionRequest   DeadlineExtensionRequest @relation(fields: [extensionRequestId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  evidenceFile       EvidenceFile             @relation(fields: [evidenceFileId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([extensionRequestId, evidenceFileId], map: "dea_extension_request_id_evidence_file_id_key")
   @@index([evidenceFileId])
@@ -947,13 +757,13 @@ model DeadlineExtensionAttachment {
 model Session {
   id        String   @id @default(uuid()) @db.Char(36)
   expiresAt DateTime @map("expires_at")
-  token     String   @unique @db.VarChar(255)
+  token     String   @unique @db.NVarChar(255)
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
-  ipAddress String?  @map("ip_address") @db.VarChar(45)
-  userAgent String?  @map("user_agent") @db.VarChar(255)
+  ipAddress String?  @map("ip_address") @db.NVarChar(45)
+  userAgent String?  @map("user_agent") @db.NVarChar(255)
   userId    String   @map("user_id") @db.Char(36)
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([userId])
   @@index([expiresAt])
@@ -962,19 +772,19 @@ model Session {
 
 model Account {
   id                    String    @id @default(uuid()) @db.Char(36)
-  accountId             String    @map("account_id") @db.VarChar(191)
-  providerId            String    @map("provider_id") @db.VarChar(191)
+  accountId             String    @map("account_id") @db.NVarChar(191)
+  providerId            String    @map("provider_id") @db.NVarChar(191)
   userId                String    @map("user_id") @db.Char(36)
-  accessToken           String?   @map("access_token") @db.Text
-  refreshToken          String?   @map("refresh_token") @db.Text
-  idToken               String?   @map("id_token") @db.Text
+  accessToken           String?   @map("access_token") @db.NVarChar(Max)
+  refreshToken          String?   @map("refresh_token") @db.NVarChar(Max)
+  idToken               String?   @map("id_token") @db.NVarChar(Max)
   accessTokenExpiresAt  DateTime? @map("access_token_expires_at")
   refreshTokenExpiresAt DateTime? @map("refresh_token_expires_at")
-  scope                 String?   @db.VarChar(255)
-  password              String?   @db.VarChar(255)
+  scope                 String?   @db.NVarChar(255)
+  password              String?   @db.NVarChar(255)
   createdAt             DateTime  @default(now()) @map("created_at")
   updatedAt             DateTime  @updatedAt @map("updated_at")
-  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([providerId, accountId])
   @@index([userId])
@@ -983,8 +793,8 @@ model Account {
 
 model Verification {
   id         String   @id @default(uuid()) @db.Char(36)
-  identifier String   @db.VarChar(255)
-  value      String   @db.Text
+  identifier String   @db.NVarChar(255)
+  value      String   @db.NVarChar(Max)
   expiresAt  DateTime @map("expires_at")
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
@@ -994,28 +804,28 @@ model Verification {
 }
 
 model ProgressEvaluation {
-  id                 String                         @id @default(uuid()) @db.Char(36)
-  actionPlanId       String                         @map("action_plan_id") @db.Char(36)
-  submittedByUserId  String                         @map("submitted_by_user_id") @db.Char(36)
-  type               ProgressEvaluationType         @default(ADVANCE)
-  reportedProgressPercent Int?                      @map("reported_progress_percent")
-  evaluatedStatus         ActionPlanStatus?         @map("evaluated_status")
-  comment            String                         @db.LongText
-  reviewStatus       ProgressEvaluationReviewStatus @default(DRAFT) @map("review_status")
-  reviewedByUserId   String?                        @map("reviewed_by_user_id") @db.Char(36)
-  submittedAt        DateTime                       @default(now()) @map("submitted_at")
-  reviewedAt         DateTime?                      @map("reviewed_at")
-  reviewComment      String?                        @map("review_comment") @db.LongText
-  createdAt          DateTime                       @default(now()) @map("created_at")
-  updatedAt          DateTime                       @updatedAt @map("updated_at")
-  deletedAt          DateTime?                      @map("deleted_at")
-  workflowInstanceId String?                        @map("workflow_instance_id") @db.Char(36)
-  actionPlan         ActionPlan                     @relation(fields: [actionPlanId], references: [id], onDelete: Cascade)
-  submittedByUser    User                           @relation("ProgressEvaluationSubmittedBy", fields: [submittedByUserId], references: [id], onDelete: Restrict)
-  reviewedByUser     User?                          @relation("ProgressEvaluationReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
-  evidenceFiles      EvidenceFile[]
-  comments           ObservationComment[]
-  reviewHistory      ProgressReviewHistory[]
+  id                      String                  @id @default(uuid()) @db.Char(36)
+  actionPlanId            String                  @map("action_plan_id") @db.Char(36)
+  submittedByUserId       String                  @map("submitted_by_user_id") @db.Char(36)
+  type                    String                  @default("ADVANCE") @db.NVarChar(64)
+  reportedProgressPercent Int?                    @map("reported_progress_percent")
+  evaluatedStatus         String?                 @map("evaluated_status") @db.NVarChar(64)
+  comment                 String                  @db.NVarChar(Max)
+  reviewStatus            String                  @default("DRAFT") @map("review_status") @db.NVarChar(64)
+  reviewedByUserId        String?                 @map("reviewed_by_user_id") @db.Char(36)
+  submittedAt             DateTime                @default(now()) @map("submitted_at")
+  reviewedAt              DateTime?               @map("reviewed_at")
+  reviewComment           String?                 @map("review_comment") @db.NVarChar(Max)
+  createdAt               DateTime                @default(now()) @map("created_at")
+  updatedAt               DateTime                @updatedAt @map("updated_at")
+  deletedAt               DateTime?               @map("deleted_at")
+  workflowInstanceId      String?                 @map("workflow_instance_id") @db.Char(36)
+  actionPlan              ActionPlan              @relation(fields: [actionPlanId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  submittedByUser         User                    @relation("ProgressEvaluationSubmittedBy", fields: [submittedByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  reviewedByUser          User?                   @relation("ProgressEvaluationReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  evidenceFiles           EvidenceFile[]
+  comments                ObservationComment[]
+  reviewHistory           ProgressReviewHistory[]
 
   @@index([actionPlanId, submittedAt])
   @@index([deletedAt])
@@ -1031,30 +841,30 @@ model EvidenceFile {
   id                           String                        @id @default(uuid()) @db.Char(36)
   observationId                String                        @map("observation_id") @db.Char(36)
   observationAreaId            String?                       @map("observation_area_id") @db.Char(36)
-  context                      EvidenceContext
+  context                      String                        @db.NVarChar(64)
   actionPlanId                 String?                       @map("action_plan_id") @db.Char(36)
   progressEvaluationId         String?                       @map("progress_evaluation_id") @db.Char(36)
   uploadedByUserId             String                        @map("uploaded_by_user_id") @db.Char(36)
-  originalName                 String                        @map("original_name") @db.VarChar(255)
-  storedName                   String                        @map("stored_name") @db.VarChar(255)
-  relativePath                 String                        @map("relative_path") @db.VarChar(500)
-  mimeType                     String                        @map("mime_type") @db.VarChar(191)
+  originalName                 String                        @map("original_name") @db.NVarChar(255)
+  storedName                   String                        @map("stored_name") @db.NVarChar(255)
+  relativePath                 String                        @map("relative_path") @db.NVarChar(500)
+  mimeType                     String                        @map("mime_type") @db.NVarChar(191)
   sizeBytes                    BigInt                        @map("size_bytes")
-  checksum                     String?                       @db.VarChar(128)
-  description                  String?                       @db.LongText
-  reviewStatus                 EvidenceReviewStatus          @default(DRAFT) @map("review_status")
+  checksum                     String?                       @db.NVarChar(128)
+  description                  String?                       @db.NVarChar(Max)
+  reviewStatus                 String                        @default("DRAFT") @map("review_status") @db.NVarChar(64)
   submittedAt                  DateTime?                     @map("submitted_at")
   reviewedAt                   DateTime?                     @map("reviewed_at")
   reviewedByUserId             String?                       @map("reviewed_by_user_id") @db.Char(36)
-  reviewComment                String?                       @map("review_comment") @db.LongText
+  reviewComment                String?                       @map("review_comment") @db.NVarChar(Max)
   workflowInstanceId           String?                       @map("workflow_instance_id") @db.Char(36)
   createdAt                    DateTime                      @default(now()) @map("created_at")
   deletedAt                    DateTime?                     @map("deleted_at")
-  observation                  Observation                   @relation(fields: [observationId], references: [id], onDelete: Cascade)
-  observationArea              ObservationArea?              @relation(fields: [observationAreaId], references: [id], onDelete: SetNull)
-  actionPlan                   ActionPlan?                   @relation(fields: [actionPlanId], references: [id], onDelete: Cascade)
-  progressEvaluation           ProgressEvaluation?           @relation(fields: [progressEvaluationId], references: [id], onDelete: Cascade)
-  uploadedByUser               User                          @relation("EvidenceUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+  observation                  Observation                   @relation(fields: [observationId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  observationArea              ObservationArea?              @relation(fields: [observationAreaId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  actionPlan                   ActionPlan?                   @relation(fields: [actionPlanId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  progressEvaluation           ProgressEvaluation?           @relation(fields: [progressEvaluationId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  uploadedByUser               User                          @relation("EvidenceUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   deadlineExtensionAttachments DeadlineExtensionAttachment[]
 
   @@index([actionPlanId])
@@ -1076,16 +886,16 @@ model ObservationComment {
   actionPlanId         String?             @map("action_plan_id") @db.Char(36)
   progressEvaluationId String?             @map("progress_evaluation_id") @db.Char(36)
   authorUserId         String              @map("author_user_id") @db.Char(36)
-  visibility           CommentVisibility   @default(AREA_VISIBLE)
-  body                 String              @db.LongText
+  visibility           String              @default("AREA_VISIBLE") @db.NVarChar(64)
+  body                 String              @db.NVarChar(Max)
   createdAt            DateTime            @default(now()) @map("created_at")
   updatedAt            DateTime            @updatedAt @map("updated_at")
   deletedAt            DateTime?           @map("deleted_at")
-  observation          Observation         @relation(fields: [observationId], references: [id], onDelete: Cascade)
-  remediationPlan      RemediationPlan?    @relation(fields: [remediationPlanId], references: [id], onDelete: SetNull)
-  actionPlan           ActionPlan?         @relation(fields: [actionPlanId], references: [id], onDelete: SetNull)
-  progressEvaluation   ProgressEvaluation? @relation(fields: [progressEvaluationId], references: [id], onDelete: SetNull)
-  authorUser           User                @relation("ObservationCommentAuthor", fields: [authorUserId], references: [id], onDelete: Restrict)
+  observation          Observation         @relation(fields: [observationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  remediationPlan      RemediationPlan?    @relation(fields: [remediationPlanId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  actionPlan           ActionPlan?         @relation(fields: [actionPlanId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  progressEvaluation   ProgressEvaluation? @relation(fields: [progressEvaluationId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  authorUser           User                @relation("ObservationCommentAuthor", fields: [authorUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([authorUserId])
   @@index([actionPlanId])
@@ -1098,16 +908,16 @@ model ObservationComment {
 }
 
 model ProgressReviewHistory {
-  id                   String                          @id @default(uuid()) @db.Char(36)
-  progressEvaluationId String                          @map("progress_evaluation_id") @db.Char(36)
-  action               ProgressReviewAction
-  fromStatus           ProgressEvaluationReviewStatus? @map("from_status")
-  toStatus             ProgressEvaluationReviewStatus  @map("to_status")
-  userId               String                          @map("user_id") @db.Char(36)
-  comment              String?                         @db.LongText
-  createdAt            DateTime                        @default(now()) @map("created_at")
-  progressEvaluation   ProgressEvaluation              @relation(fields: [progressEvaluationId], references: [id], onDelete: Cascade)
-  user                 User                            @relation("ProgressReviewHistoryActor", fields: [userId], references: [id], onDelete: Restrict)
+  id                   String             @id @default(uuid()) @db.Char(36)
+  progressEvaluationId String             @map("progress_evaluation_id") @db.Char(36)
+  action               String             @db.NVarChar(64)
+  fromStatus           String?            @map("from_status") @db.NVarChar(64)
+  toStatus             String             @map("to_status") @db.NVarChar(64)
+  userId               String             @map("user_id") @db.Char(36)
+  comment              String?            @db.NVarChar(Max)
+  createdAt            DateTime           @default(now()) @map("created_at")
+  progressEvaluation   ProgressEvaluation @relation(fields: [progressEvaluationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user                 User               @relation("ProgressReviewHistoryActor", fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([createdAt])
   @@index([progressEvaluationId, createdAt])
@@ -1116,22 +926,23 @@ model ProgressReviewHistory {
 }
 
 model WorkflowDefinition {
-  id              String                   @id @default(uuid()) @db.Char(36)
-  name            String                   @db.VarChar(191)
-  description     String?                  @db.Text
-  processType     String                   @map("process_type") @db.VarChar(100)
-  status          WorkflowDefinitionStatus @default(DRAFT)
-  activeVersionId String?                  @unique @map("active_version_id") @db.Char(36)
-  createdById     String                   @map("created_by_id") @db.Char(36)
-  createdAt       DateTime                 @default(now()) @map("created_at")
-  updatedAt       DateTime                 @updatedAt @map("updated_at")
-  archivedAt      DateTime?                @map("archived_at")
+  id              String    @id @default(uuid()) @db.Char(36)
+  name            String    @db.NVarChar(191)
+  description     String?   @db.NVarChar(Max)
+  processType     String    @map("process_type") @db.NVarChar(100)
+  status          String    @default("DRAFT") @db.NVarChar(64)
+  activeVersionId String?   @map("active_version_id") @db.Char(36)
+  createdById     String    @map("created_by_id") @db.Char(36)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  archivedAt      DateTime? @map("archived_at")
 
-  activeVersion WorkflowVersion?   @relation("WorkflowDefinitionActiveVersion", fields: [activeVersionId], references: [id], onDelete: SetNull)
-  createdBy     User               @relation("WorkflowDefinitionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  activeVersion WorkflowVersion?   @relation("WorkflowDefinitionActiveVersion", fields: [activeVersionId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  createdBy     User               @relation("WorkflowDefinitionCreatedBy", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: NoAction)
   versions      WorkflowVersion[]  @relation("WorkflowDefinitionVersions")
   instances     WorkflowInstance[]
 
+  @@unique([activeVersionId], where: raw("[active_version_id] IS NOT NULL"), map: "workflow_definitions_active_version_id_key")
   @@index([processType, status])
   @@index([status, updatedAt])
   @@index([createdById])
@@ -1139,20 +950,20 @@ model WorkflowDefinition {
 }
 
 model WorkflowVersion {
-  id                   String                @id @default(uuid()) @db.Char(36)
-  workflowDefinitionId String                @map("workflow_definition_id") @db.Char(36)
-  versionNumber        Int                   @map("version_number")
-  status               WorkflowVersionStatus @default(DRAFT)
-  changeDescription    String?               @map("change_description") @db.Text
-  createdById          String                @map("created_by_id") @db.Char(36)
-  publishedById        String?               @map("published_by_id") @db.Char(36)
-  createdAt            DateTime              @default(now()) @map("created_at")
-  publishedAt          DateTime?             @map("published_at")
+  id                   String    @id @default(uuid()) @db.Char(36)
+  workflowDefinitionId String    @map("workflow_definition_id") @db.Char(36)
+  versionNumber        Int       @map("version_number")
+  status               String    @default("DRAFT") @db.NVarChar(64)
+  changeDescription    String?   @map("change_description") @db.NVarChar(Max)
+  createdById          String    @map("created_by_id") @db.Char(36)
+  publishedById        String?   @map("published_by_id") @db.Char(36)
+  createdAt            DateTime  @default(now()) @map("created_at")
+  publishedAt          DateTime? @map("published_at")
 
-  definition          WorkflowDefinition       @relation("WorkflowDefinitionVersions", fields: [workflowDefinitionId], references: [id], onDelete: Restrict)
+  definition          WorkflowDefinition       @relation("WorkflowDefinitionVersions", fields: [workflowDefinitionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   activeForDefinition WorkflowDefinition?      @relation("WorkflowDefinitionActiveVersion")
-  createdBy           User                     @relation("WorkflowVersionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  publishedBy         User?                    @relation("WorkflowVersionPublishedBy", fields: [publishedById], references: [id], onDelete: SetNull)
+  createdBy           User                     @relation("WorkflowVersionCreatedBy", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  publishedBy         User?                    @relation("WorkflowVersionPublishedBy", fields: [publishedById], references: [id], onDelete: SetNull, onUpdate: NoAction)
   nodes               WorkflowNode[]
   transitions         WorkflowTransition[]
   conditionGroups     WorkflowConditionGroup[]
@@ -1167,20 +978,20 @@ model WorkflowVersion {
 }
 
 model WorkflowNode {
-  id                 String                      @id @default(uuid()) @db.Char(36)
-  workflowVersionId  String                      @map("workflow_version_id") @db.Char(36)
-  nodeKey            String                      @map("node_key") @db.VarChar(100)
-  name               String                      @db.VarChar(191)
-  description        String?                     @db.Text
-  type               WorkflowNodeType
-  assignmentStrategy WorkflowAssignmentStrategy? @map("assignment_strategy")
-  positionX          Float                       @map("position_x")
-  positionY          Float                       @map("position_y")
-  configurationJson  Json                        @map("configuration_json")
-  createdAt          DateTime                    @default(now()) @map("created_at")
-  updatedAt          DateTime                    @updatedAt @map("updated_at")
+  id                 String   @id @default(uuid()) @db.Char(36)
+  workflowVersionId  String   @map("workflow_version_id") @db.Char(36)
+  nodeKey            String   @map("node_key") @db.NVarChar(100)
+  name               String   @db.NVarChar(191)
+  description        String?  @db.NVarChar(Max)
+  type               String   @db.NVarChar(64)
+  assignmentStrategy String?  @map("assignment_strategy") @db.NVarChar(64)
+  positionX          Float    @map("position_x")
+  positionY          Float    @map("position_y")
+  configurationJson  String   @map("configuration_json") @db.NVarChar(Max)
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
 
-  version              WorkflowVersion         @relation(fields: [workflowVersionId], references: [id], onDelete: Cascade)
+  version              WorkflowVersion         @relation(fields: [workflowVersionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   sourceTransitions    WorkflowTransition[]    @relation("WorkflowTransitionSource")
   targetTransitions    WorkflowTransition[]    @relation("WorkflowTransitionTarget")
   currentInstances     WorkflowInstance[]      @relation("WorkflowInstanceCurrentNode")
@@ -1198,15 +1009,15 @@ model WorkflowTransition {
   workflowVersionId String  @map("workflow_version_id") @db.Char(36)
   sourceNodeId      String  @map("source_node_id") @db.Char(36)
   targetNodeId      String  @map("target_node_id") @db.Char(36)
-  label             String? @db.VarChar(191)
+  label             String? @db.NVarChar(191)
   priority          Int     @default(0)
-  transitionType    String? @map("transition_type") @db.VarChar(64)
+  transitionType    String? @map("transition_type") @db.NVarChar(64)
   conditionGroupId  String? @map("condition_group_id") @db.Char(36)
 
-  version        WorkflowVersion         @relation(fields: [workflowVersionId], references: [id], onDelete: Cascade)
-  sourceNode     WorkflowNode            @relation("WorkflowTransitionSource", fields: [sourceNodeId], references: [id], onDelete: Restrict)
-  targetNode     WorkflowNode            @relation("WorkflowTransitionTarget", fields: [targetNodeId], references: [id], onDelete: Restrict)
-  conditionGroup WorkflowConditionGroup? @relation(fields: [conditionGroupId], references: [id], onDelete: SetNull)
+  version        WorkflowVersion         @relation(fields: [workflowVersionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  sourceNode     WorkflowNode            @relation("WorkflowTransitionSource", fields: [sourceNodeId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  targetNode     WorkflowNode            @relation("WorkflowTransitionTarget", fields: [targetNodeId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  conditionGroup WorkflowConditionGroup? @relation(fields: [conditionGroupId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([workflowVersionId, priority])
   @@index([sourceNodeId, priority])
@@ -1216,12 +1027,12 @@ model WorkflowTransition {
 }
 
 model WorkflowConditionGroup {
-  id                String                         @id @default(uuid()) @db.Char(36)
-  workflowVersionId String                         @map("workflow_version_id") @db.Char(36)
-  logicOperator     WorkflowConditionLogicOperator @map("logic_operator")
-  description       String?                        @db.Text
+  id                String  @id @default(uuid()) @db.Char(36)
+  workflowVersionId String  @map("workflow_version_id") @db.Char(36)
+  logicOperator     String  @map("logic_operator") @db.NVarChar(64)
+  description       String? @db.NVarChar(Max)
 
-  version     WorkflowVersion      @relation(fields: [workflowVersionId], references: [id], onDelete: Cascade)
+  version     WorkflowVersion      @relation(fields: [workflowVersionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   conditions  WorkflowCondition[]
   transitions WorkflowTransition[]
 
@@ -1230,15 +1041,15 @@ model WorkflowConditionGroup {
 }
 
 model WorkflowCondition {
-  id               String                    @id @default(uuid()) @db.Char(36)
-  conditionGroupId String                    @map("condition_group_id") @db.Char(36)
-  field            String                    @db.VarChar(100)
-  operator         WorkflowConditionOperator
-  valueJson        Json?                     @map("value_json")
+  id               String  @id @default(uuid()) @db.Char(36)
+  conditionGroupId String  @map("condition_group_id") @db.Char(36)
+  field            String  @db.NVarChar(100)
+  operator         String  @db.NVarChar(64)
+  valueJson        String? @map("value_json") @db.NVarChar(Max)
   sequence         Int
-  description      String?                   @db.Text
+  description      String? @db.NVarChar(Max)
 
-  group WorkflowConditionGroup @relation(fields: [conditionGroupId], references: [id], onDelete: Cascade)
+  group WorkflowConditionGroup @relation(fields: [conditionGroupId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([conditionGroupId, sequence])
   @@index([conditionGroupId, sequence])
@@ -1246,27 +1057,27 @@ model WorkflowCondition {
 }
 
 model WorkflowInstance {
-  id                   String                 @id @default(uuid()) @db.Char(36)
-  workflowDefinitionId String                 @map("workflow_definition_id") @db.Char(36)
-  workflowVersionId    String                 @map("workflow_version_id") @db.Char(36)
-  processType          String                 @map("process_type") @db.VarChar(100)
-  entityType           String                 @map("entity_type") @db.VarChar(100)
-  entityId             String                 @map("entity_id") @db.VarChar(191)
-  currentNodeId        String?                @map("current_node_id") @db.Char(36)
-  status               WorkflowInstanceStatus @default(PENDING)
-  startedById          String                 @map("started_by_id") @db.Char(36)
-  startedAt            DateTime               @default(now()) @map("started_at")
-  completedAt          DateTime?              @map("completed_at")
-  finalResult          String?                @map("final_result") @db.VarChar(64)
-  runtimeErrorCode     String?                @map("runtime_error_code") @db.VarChar(100)
-  runtimeErrorMessage  String?                @map("runtime_error_message") @db.Text
-  lastExecutionAt      DateTime?              @map("last_execution_at")
-  contextJson          Json                   @map("context_json")
+  id                   String    @id @default(uuid()) @db.Char(36)
+  workflowDefinitionId String    @map("workflow_definition_id") @db.Char(36)
+  workflowVersionId    String    @map("workflow_version_id") @db.Char(36)
+  processType          String    @map("process_type") @db.NVarChar(100)
+  entityType           String    @map("entity_type") @db.NVarChar(100)
+  entityId             String    @map("entity_id") @db.NVarChar(191)
+  currentNodeId        String?   @map("current_node_id") @db.Char(36)
+  status               String    @default("PENDING") @db.NVarChar(64)
+  startedById          String    @map("started_by_id") @db.Char(36)
+  startedAt            DateTime  @default(now()) @map("started_at")
+  completedAt          DateTime? @map("completed_at")
+  finalResult          String?   @map("final_result") @db.NVarChar(64)
+  runtimeErrorCode     String?   @map("runtime_error_code") @db.NVarChar(100)
+  runtimeErrorMessage  String?   @map("runtime_error_message") @db.NVarChar(Max)
+  lastExecutionAt      DateTime? @map("last_execution_at")
+  contextJson          String    @map("context_json") @db.NVarChar(Max)
 
-  definition  WorkflowDefinition      @relation(fields: [workflowDefinitionId], references: [id], onDelete: Restrict)
-  version     WorkflowVersion         @relation(fields: [workflowVersionId], references: [id], onDelete: Restrict)
-  currentNode WorkflowNode?           @relation("WorkflowInstanceCurrentNode", fields: [currentNodeId], references: [id], onDelete: SetNull)
-  startedBy   User                    @relation("WorkflowInstanceStartedBy", fields: [startedById], references: [id], onDelete: Restrict)
+  definition  WorkflowDefinition      @relation(fields: [workflowDefinitionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  version     WorkflowVersion         @relation(fields: [workflowVersionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  currentNode WorkflowNode?           @relation("WorkflowInstanceCurrentNode", fields: [currentNodeId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  startedBy   User                    @relation("WorkflowInstanceStartedBy", fields: [startedById], references: [id], onDelete: NoAction, onUpdate: NoAction)
   tasks       WorkflowTask[]
   transitions WorkflowTransitionLog[]
   timers      WorkflowTimer[]
@@ -1281,28 +1092,28 @@ model WorkflowInstance {
 }
 
 model WorkflowTask {
-  id                     String             @id @default(uuid()) @db.Char(36)
-  workflowInstanceId     String             @map("workflow_instance_id") @db.Char(36)
-  nodeId                 String             @map("node_id") @db.Char(36)
-  assignedUserId         String?            @map("assigned_user_id") @db.Char(36)
-  assignedRoleId         String?            @map("assigned_role_id") @db.Char(36)
-  assignedAreaId         String?            @map("assigned_area_id") @db.Char(36)
-  status                 WorkflowTaskStatus @default(PENDING)
-  entrySequence          Int                @default(1) @map("entry_sequence")
-  dueAt                  DateTime?          @map("due_at")
-  completedAt            DateTime?          @map("completed_at")
-  decision               String?            @db.VarChar(100)
-  comments               String?            @db.LongText
-  assignmentSnapshotJson Json?              @map("assignment_snapshot_json")
-  assignmentHistoryJson  Json?              @map("assignment_history_json")
-  evidenceReferencesJson Json?              @map("evidence_references_json")
-  createdAt              DateTime           @default(now()) @map("created_at")
+  id                     String    @id @default(uuid()) @db.Char(36)
+  workflowInstanceId     String    @map("workflow_instance_id") @db.Char(36)
+  nodeId                 String    @map("node_id") @db.Char(36)
+  assignedUserId         String?   @map("assigned_user_id") @db.Char(36)
+  assignedRoleId         String?   @map("assigned_role_id") @db.Char(36)
+  assignedAreaId         String?   @map("assigned_area_id") @db.Char(36)
+  status                 String    @default("PENDING") @db.NVarChar(64)
+  entrySequence          Int       @default(1) @map("entry_sequence")
+  dueAt                  DateTime? @map("due_at")
+  completedAt            DateTime? @map("completed_at")
+  decision               String?   @db.NVarChar(100)
+  comments               String?   @db.NVarChar(Max)
+  assignmentSnapshotJson String?   @map("assignment_snapshot_json") @db.NVarChar(Max)
+  assignmentHistoryJson  String?   @map("assignment_history_json") @db.NVarChar(Max)
+  evidenceReferencesJson String?   @map("evidence_references_json") @db.NVarChar(Max)
+  createdAt              DateTime  @default(now()) @map("created_at")
 
-  instance     WorkflowInstance @relation(fields: [workflowInstanceId], references: [id], onDelete: Restrict)
-  node         WorkflowNode     @relation(fields: [nodeId], references: [id], onDelete: Restrict)
-  assignedUser User?            @relation("WorkflowTaskAssignedUser", fields: [assignedUserId], references: [id], onDelete: SetNull)
-  assignedRole Role?            @relation("WorkflowTaskAssignedRole", fields: [assignedRoleId], references: [id], onDelete: SetNull)
-  assignedArea Area?            @relation("WorkflowTaskAssignedArea", fields: [assignedAreaId], references: [id], onDelete: SetNull)
+  instance     WorkflowInstance @relation(fields: [workflowInstanceId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  node         WorkflowNode     @relation(fields: [nodeId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  assignedUser User?            @relation("WorkflowTaskAssignedUser", fields: [assignedUserId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  assignedRole Role?            @relation("WorkflowTaskAssignedRole", fields: [assignedRoleId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  assignedArea Area?            @relation("WorkflowTaskAssignedArea", fields: [assignedAreaId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   timers       WorkflowTimer[]
 
   @@unique([workflowInstanceId, nodeId, entrySequence], map: "workflow_tasks_instance_node_entry_key")
@@ -1320,46 +1131,46 @@ model WorkflowTransitionLog {
   workflowInstanceId  String   @map("workflow_instance_id") @db.Char(36)
   sourceNodeId        String?  @map("source_node_id") @db.Char(36)
   targetNodeId        String?  @map("target_node_id") @db.Char(36)
-  triggerType         String   @map("trigger_type") @db.VarChar(64)
+  triggerType         String   @map("trigger_type") @db.NVarChar(64)
   performedById       String?  @map("performed_by_id") @db.Char(36)
-  decision            String?  @db.VarChar(100)
-  eventType           String?  @map("event_type") @db.VarChar(64)
-  detailsJson         Json?    @map("details_json")
-  contextSnapshotJson Json     @map("context_snapshot_json")
+  decision            String?  @db.NVarChar(100)
+  eventType           String?  @map("event_type") @db.NVarChar(64)
+  detailsJson         String?  @map("details_json") @db.NVarChar(Max)
+  contextSnapshotJson String   @map("context_snapshot_json") @db.NVarChar(Max)
   createdAt           DateTime @default(now()) @map("created_at")
 
-  instance    WorkflowInstance @relation(fields: [workflowInstanceId], references: [id], onDelete: Restrict)
-  sourceNode  WorkflowNode?    @relation("WorkflowTransitionLogSource", fields: [sourceNodeId], references: [id], onDelete: SetNull)
-  targetNode  WorkflowNode?    @relation("WorkflowTransitionLogTarget", fields: [targetNodeId], references: [id], onDelete: SetNull)
-  performedBy User?            @relation("WorkflowTransitionPerformedBy", fields: [performedById], references: [id], onDelete: SetNull)
+  instance    WorkflowInstance @relation(fields: [workflowInstanceId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  sourceNode  WorkflowNode?    @relation("WorkflowTransitionLogSource", fields: [sourceNodeId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  targetNode  WorkflowNode?    @relation("WorkflowTransitionLogTarget", fields: [targetNodeId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  performedBy User?            @relation("WorkflowTransitionPerformedBy", fields: [performedById], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([workflowInstanceId, createdAt])
   @@index([sourceNodeId])
   @@index([targetNodeId])
   @@index([performedById])
-  @@index([workflowInstanceId, eventType, createdAt])
+  @@index([workflowInstanceId, eventType, createdAt], map: "workflow_transition_logs_workflow_instance_id_event_type_cre_idx")
   @@map("workflow_transition_logs")
 }
 
 model WorkflowTimer {
-  id                 String              @id @default(uuid()) @db.Char(36)
-  workflowInstanceId String              @map("workflow_instance_id") @db.Char(36)
-  workflowTaskId     String?             @map("workflow_task_id") @db.Char(36)
-  timerType          String              @map("timer_type") @db.VarChar(64)
-  executeAt          DateTime            @map("execute_at")
-  status             WorkflowTimerStatus @default(PENDING)
-  executedAt         DateTime?           @map("executed_at")
-  configurationJson  Json                @map("configuration_json")
-  attempts           Int                 @default(0)
-  lastError          String?             @map("last_error") @db.Text
-  lastAttemptAt      DateTime?           @map("last_attempt_at")
-  createdAt          DateTime            @default(now()) @map("created_at")
-  updatedAt          DateTime            @updatedAt @map("updated_at")
+  id                 String    @id @default(uuid()) @db.Char(36)
+  workflowInstanceId String    @map("workflow_instance_id") @db.Char(36)
+  workflowTaskId     String?   @map("workflow_task_id") @db.Char(36)
+  timerType          String    @map("timer_type") @db.NVarChar(64)
+  executeAt          DateTime  @map("execute_at")
+  status             String    @default("PENDING") @db.NVarChar(64)
+  executedAt         DateTime? @map("executed_at")
+  configurationJson  String    @map("configuration_json") @db.NVarChar(Max)
+  attempts           Int       @default(0)
+  lastError          String?   @map("last_error") @db.NVarChar(Max)
+  lastAttemptAt      DateTime? @map("last_attempt_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
 
-  instance WorkflowInstance @relation(fields: [workflowInstanceId], references: [id], onDelete: Restrict)
-  task     WorkflowTask?    @relation(fields: [workflowTaskId], references: [id], onDelete: SetNull)
+  instance WorkflowInstance @relation(fields: [workflowInstanceId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  task     WorkflowTask?    @relation(fields: [workflowTaskId], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
-  @@unique([workflowTaskId, timerType], map: "workflow_timers_task_type_key")
+  @@unique([workflowTaskId, timerType], where: raw("[workflow_task_id] IS NOT NULL"), map: "workflow_timers_task_type_key")
   @@index([status, executeAt])
   @@index([workflowInstanceId, status])
   @@index([workflowTaskId, status])

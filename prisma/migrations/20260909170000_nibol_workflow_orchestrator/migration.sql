@@ -1,2 +1,1 @@
-ALTER TABLE `workflow_nodes`
-  MODIFY COLUMN `type` ENUM('START', 'STAGE', 'APPROVAL', 'SUBFLOW', 'REJECTION', 'CONDITION', 'SLA', 'ESCALATION', 'NOTIFICATION', 'END') NOT NULL;
+-- Workflow node types are NVARCHAR(64) in SQL Server; the application enum now also accepts SUBFLOW.

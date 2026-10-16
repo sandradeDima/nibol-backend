@@ -1,4 +1,5 @@
-import { Prisma } from "../../generated/prisma/client.js";
+import type { Prisma } from "../../generated/prisma/client.js";
+import { parseDatabaseJson, toDatabaseJson } from "./logging-utils.js";
 
 import type { AuthorizationSummary } from "./authorization-service.js";
 import { buildObservationScopeWhere } from "./authorization-service.js";
@@ -102,10 +103,7 @@ export const sanitizeActivityData = (
   value: unknown,
 ): Prisma.InputJsonValue | null => safeValue(value);
 
-const asJson = (
-  value: unknown,
-): Prisma.InputJsonValue | typeof Prisma.JsonNull =>
-  safeValue(value) ?? Prisma.JsonNull;
+const asJson = (value: unknown): string => toDatabaseJson(safeValue(value));
 
 const isSystemOperator = (access: AuthorizationSummary): boolean => {
   return access.dataScope === "ALL";
@@ -349,15 +347,24 @@ const mapActivity = (
   entityId: includeTechnicalDetails ? activity.entityId : null,
   entityType: activity.entityType,
   id: includeTechnicalDetails ? activity.id : undefined,
-  metadata: activity.metadataJson,
-  newData: activity.newDataJson,
+  metadata: parseDatabaseJson(
+    activity.metadataJson,
+    "entity_activities.metadata_json",
+  ),
+  newData: parseDatabaseJson(
+    activity.newDataJson,
+    "entity_activities.new_data_json",
+  ),
   observation: activity.observation
     ? {
         code: `${activity.observation.auditReport.reportNumber} / OBS-${String(activity.observation.observationNumber).padStart(3, "0")}`,
         title: activity.observation.title,
       }
     : null,
-  previousData: activity.previousDataJson,
+  previousData: parseDatabaseJson(
+    activity.previousDataJson,
+    "entity_activities.previous_data_json",
+  ),
   relatedAuditLogId: includeTechnicalDetails
     ? activity.relatedAuditLogId
     : null,

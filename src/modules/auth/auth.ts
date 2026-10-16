@@ -83,7 +83,7 @@ export const auth = betterAuth({
   basePath: "/api/auth",
   baseURL: env.BETTER_AUTH_URL,
   database: prismaAdapter(prisma, {
-    provider: "mysql",
+    provider: "sqlserver",
     transaction: true,
   }),
   account: {

@@ -16,7 +16,7 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> => {
   return prototype === Object.prototype || prototype === null;
 };
 
-export const toLogJsonValue = (
+const toJsonCompatibleValue = (
   value: unknown,
 ): Prisma.InputJsonValue | null => {
   if (value === null) {
@@ -29,14 +29,14 @@ export const toLogJsonValue = (
 
   if (Array.isArray(value)) {
     return value
-      .map((item) => toLogJsonValue(item))
+      .map((item) => toJsonCompatibleValue(item))
       .filter((item) => item !== undefined) as Prisma.InputJsonArray;
   }
 
   if (isPlainObject(value)) {
     return Object.entries(value).reduce<JsonObject>(
       (result, [key, entryValue]) => {
-        const serializedValue = toLogJsonValue(entryValue);
+        const serializedValue = toJsonCompatibleValue(entryValue);
 
         if (serializedValue !== undefined) {
           result[key] = serializedValue;
@@ -61,6 +61,42 @@ export const toLogJsonValue = (
   }
 
   return String(value);
+};
+
+export const toDatabaseJson = (value: unknown): string => {
+  const serialized = JSON.stringify(toJsonCompatibleValue(value));
+  if (serialized === undefined) {
+    throw new TypeError("Value cannot be serialized as JSON.");
+  }
+  return serialized;
+};
+
+export const parseDatabaseJson = <T = unknown>(
+  serialized: string | null | undefined,
+  field: string,
+  validate?: (value: unknown) => T,
+): T | null => {
+  if (serialized === null || serialized === undefined) return null;
+
+  let value: unknown;
+  try {
+    value = JSON.parse(serialized);
+  } catch (cause) {
+    throw new Error(`Invalid JSON stored in ${field}.`, { cause });
+  }
+
+  return validate ? validate(value) : (value as T);
+};
+
+export const parseDatabaseJsonArray = (
+  serialized: string | null | undefined,
+  field: string,
+): unknown[] => {
+  const value = parseDatabaseJson(serialized, field);
+  if (value === null) return [];
+  if (!Array.isArray(value))
+    throw new Error(`Invalid array stored in ${field}.`);
+  return value;
 };
 
 export const normalizeStringArray = (values: string[]): string[] => {

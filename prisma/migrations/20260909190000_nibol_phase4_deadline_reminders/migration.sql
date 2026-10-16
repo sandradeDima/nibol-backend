@@ -1,15 +1,11 @@
-ALTER TABLE `notification_deliveries`
-  ADD COLUMN `payload_json` JSON NULL;
+ALTER TABLE [dbo].[notification_deliveries] ADD [payload_json] NVARCHAR(MAX) NULL;
 
-ALTER TABLE `scheduled_job_executions`
-  ADD COLUMN `run_type` VARCHAR(16) NULL,
-  ADD COLUMN `cadence_key` VARCHAR(32) NULL,
-  ADD COLUMN `period_key` VARCHAR(16) NULL,
-  ADD COLUMN `dedupe_key` VARCHAR(255) NULL,
-  ADD COLUMN `scheduled_for` DATETIME(3) NULL;
+ALTER TABLE [dbo].[scheduled_job_executions]
+  ADD [run_type] NVARCHAR(16) NULL,
+      [cadence_key] NVARCHAR(32) NULL,
+      [period_key] NVARCHAR(16) NULL,
+      [dedupe_key] NVARCHAR(255) NULL,
+      [scheduled_for] DATETIME2 NULL;
 
-CREATE UNIQUE INDEX `scheduled_job_executions_dedupe_key_key`
-  ON `scheduled_job_executions`(`dedupe_key`);
-
-CREATE INDEX `scheduled_job_executions_job_name_cadence_key_period_key_idx`
-  ON `scheduled_job_executions`(`job_name`, `cadence_key`, `period_key`);
+EXEC sys.sp_executesql N'CREATE UNIQUE NONCLUSTERED INDEX [scheduled_job_executions_dedupe_key_key] ON [dbo].[scheduled_job_executions]([dedupe_key]) WHERE ([dedupe_key] IS NOT NULL);';
+CREATE NONCLUSTERED INDEX [scheduled_job_executions_job_name_cadence_key_period_key_idx] ON [dbo].[scheduled_job_executions]([job_name], [cadence_key], [period_key]);

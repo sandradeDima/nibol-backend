@@ -1,13 +1,10 @@
-ALTER TABLE `evidence_files`
-  ADD COLUMN `review_status` ENUM('DRAFT', 'PENDING', 'APPROVED', 'RETURNED', 'REJECTED') NOT NULL DEFAULT 'DRAFT',
-  ADD COLUMN `submitted_at` DATETIME(3) NULL,
-  ADD COLUMN `reviewed_at` DATETIME(3) NULL,
-  ADD COLUMN `reviewed_by_user_id` CHAR(36) NULL,
-  ADD COLUMN `review_comment` LONGTEXT NULL,
-  ADD COLUMN `workflow_instance_id` CHAR(36) NULL;
+ALTER TABLE [dbo].[evidence_files]
+  ADD [review_status] NVARCHAR(64) NOT NULL CONSTRAINT [evidence_files_review_status_df] DEFAULT 'DRAFT',
+      [submitted_at] DATETIME2 NULL,
+      [reviewed_at] DATETIME2 NULL,
+      [reviewed_by_user_id] CHAR(36) NULL,
+      [review_comment] NVARCHAR(MAX) NULL,
+      [workflow_instance_id] CHAR(36) NULL;
 
-CREATE INDEX `evidence_files_review_status_idx`
-  ON `evidence_files`(`review_status`);
-
-CREATE INDEX `evidence_files_workflow_instance_id_idx`
-  ON `evidence_files`(`workflow_instance_id`);
+CREATE NONCLUSTERED INDEX [evidence_files_review_status_idx] ON [dbo].[evidence_files]([review_status]);
+CREATE NONCLUSTERED INDEX [evidence_files_workflow_instance_id_idx] ON [dbo].[evidence_files]([workflow_instance_id]);

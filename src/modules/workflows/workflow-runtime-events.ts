@@ -2,7 +2,7 @@ import type { Prisma } from "../../../generated/prisma/client.js";
 
 import { activityLogService } from "../../services/activity-log-service.js";
 import { auditLogService } from "../../services/audit-log-service.js";
-import { toLogJsonValue } from "../../services/logging-utils.js";
+import { toDatabaseJson } from "../../services/logging-utils.js";
 import type { WorkflowRuntimeContext } from "./workflow-runtime-context.js";
 import { getSafeRuntimeContextSummary } from "./workflow-runtime-context.js";
 
@@ -13,8 +13,7 @@ export type RuntimeEventActor = {
   userId?: string | null;
 };
 
-const asJson = (value: unknown): Prisma.InputJsonValue =>
-  toLogJsonValue(value) ?? {};
+const asJson = (value: unknown): string => toDatabaseJson(value);
 
 export const writeRuntimeTransitionLog = async ({
   context,

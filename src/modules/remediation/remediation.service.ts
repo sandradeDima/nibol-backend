@@ -1,4 +1,9 @@
 import type { Prisma } from "../../../generated/prisma/client.js";
+import {
+  ActionPlanStatus,
+  parseDatabaseEnum,
+  type ActionPlanStatus as ActionPlanStatusValue,
+} from "../../types/database-enums.js";
 
 import {
   authorizationService,
@@ -71,7 +76,7 @@ type ActionPlanRecord = Prisma.ActionPlanGetPayload<{
   include: typeof include;
 }>;
 
-const labels = {
+const labels: Record<ActionPlanStatusValue, string> = {
   CONCLUDED: "Concluido",
   NOT_STARTED: "No iniciado",
   STARTED: "Iniciado",
@@ -167,8 +172,19 @@ const format = (record: ActionPlanRecord): ActionPlanDetail => {
     ),
     responsibleUser: record.responsibleUser,
     sortOrder: record.sortOrder,
-    status: record.status,
-    statusLabel: labels[record.status],
+    status: parseDatabaseEnum(
+      ActionPlanStatus,
+      record.status,
+      "action_plans.status",
+    ),
+    statusLabel:
+      labels[
+        parseDatabaseEnum(
+          ActionPlanStatus,
+          record.status,
+          "action_plans.status",
+        )
+      ],
     updatedAt: record.updatedAt.toISOString(),
   };
 };

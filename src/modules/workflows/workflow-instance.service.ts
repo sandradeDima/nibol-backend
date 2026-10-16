@@ -1,5 +1,3 @@
-import type { Prisma } from "../../../generated/prisma/client.js";
-
 import { AppError } from "../../utils/app-error.js";
 import type { WorkflowActorContext } from "./workflows.types.js";
 import type { WorkflowInstanceStartInput } from "./workflow-runtime.validators.js";
@@ -24,15 +22,17 @@ import {
   WorkflowRuntimeError,
 } from "./workflow-runtime-errors.js";
 import { prisma } from "../../utils/prisma.js";
+import {
+  parseDatabaseJson,
+  parseDatabaseJsonArray,
+  toDatabaseJson,
+} from "../../services/logging-utils.js";
 import { cancelWorkflowInstanceTimers } from "./workflow-timer.service.js";
 import { deliverWorkflowNotificationsForInstance } from "./workflow-notification.service.js";
 import { getWorkflowEntityAdapter } from "./workflow-entity-adapters.js";
 import { WORKFLOW_INSTANCE_PERMISSIONS } from "./workflows.permissions.js";
 
-const asJson = (value: unknown): Prisma.InputJsonValue => {
-  if (value === null || value === undefined) return {};
-  return value as Prisma.InputJsonValue;
-};
+const asJson = (value: unknown): string => toDatabaseJson(value ?? {});
 
 const runtimeActor = (access: WorkflowActorContext): RuntimeExecutionActor => ({
   ipAddress: access.ipAddress ?? null,
@@ -131,9 +131,6 @@ const getInstanceForDetail = async (db: RuntimeDatabase, instanceId: string) =>
     where: { id: instanceId },
   });
 
-const parseArrayJson = (value: unknown): unknown[] =>
-  Array.isArray(value) ? value : [];
-
 const buildTimeline = (
   record: Awaited<ReturnType<typeof getInstanceForDetail>>,
 ) => {
@@ -168,7 +165,10 @@ const buildTimeline = (
       actor: transition.performedBy,
       date: transition.createdAt.toISOString(),
       decision: transition.decision,
-      details: transition.detailsJson,
+      details: parseDatabaseJson(
+        transition.detailsJson,
+        "workflow_transition_logs.details_json",
+      ),
       eventType: transition.eventType ?? transition.triggerType,
       fromNode: transition.sourceNode,
       node: transition.targetNode,
@@ -188,7 +188,10 @@ const buildTimeline = (
         taskId: task.id,
       });
     }
-    for (const assignment of parseArrayJson(task.assignmentHistoryJson)) {
+    for (const assignment of parseDatabaseJsonArray(
+      task.assignmentHistoryJson,
+      "workflow_tasks.assignment_history_json",
+    )) {
       if (typeof assignment !== "object" || assignment === null) continue;
       const entry = assignment as Record<string, unknown>;
       if (typeof entry.date !== "string") continue;
@@ -268,7 +271,10 @@ const mapInstance = (
       assignedArea: task.assignedArea,
       assignedRole: task.assignedRole,
       assignedUser: task.assignedUser,
-      assignmentSnapshot: task.assignmentSnapshotJson,
+      assignmentSnapshot: parseDatabaseJson(
+        task.assignmentSnapshotJson,
+        "workflow_tasks.assignment_snapshot_json",
+      ),
       comments: task.comments,
       completedAt: task.completedAt?.toISOString() ?? null,
       createdAt: task.createdAt.toISOString(),
@@ -497,7 +503,8 @@ export const workflowInstanceService = {
     access: WorkflowActorContext,
     options?: { internal?: boolean },
   ) {
-    if (!options?.internal) assertPermission(access, "workflow_instances.cancel");
+    if (!options?.internal)
+      assertPermission(access, "workflow_instances.cancel");
     const actor = runtimeActor(access);
     return prisma.$transaction(async (db) => {
       const instance = await db.workflowInstance.findUnique({

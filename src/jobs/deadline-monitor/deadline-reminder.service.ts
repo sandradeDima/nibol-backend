@@ -2,15 +2,20 @@
 
 import { randomUUID } from "node:crypto";
 
+import { type Prisma } from "../../../generated/prisma/client.js";
+import {
+  parseDatabaseJson,
+  toDatabaseJson,
+} from "../../services/logging-utils.js";
 import {
   NotificationDeliveryChannel,
   NotificationDeliveryStatus,
   NotificationPriority,
   NotificationType,
   ScheduledJobExecutionStatus,
-  type Prisma,
-} from "../../../generated/prisma/client.js";
-import type { ScheduledJobTrigger } from "../../../generated/prisma/client.js";
+  parseDatabaseEnum,
+  type ScheduledJobTrigger,
+} from "../../types/database-enums.js";
 
 import { emailService } from "../../emails/EmailService.js";
 import {
@@ -241,9 +246,6 @@ const monthLabel = (dateKey: string): string =>
 
 const errorMessage = (error: unknown): string =>
   (error instanceof Error ? error.message : "Error desconocido").slice(0, 500);
-
-const toJson = (value: unknown): Prisma.InputJsonValue =>
-  value as Prisma.InputJsonValue;
 
 const buildAccess = (
   userId: string,
@@ -675,11 +677,19 @@ const deliverReminderEmailDelivery = async (
     },
     where: { id: deliveryId },
   });
-  if (!delivery || delivery.status === NotificationDeliveryStatus.SENT) {
+  if (!delivery) {
     return {
       attempted: false,
-      status: delivery?.status ?? NotificationDeliveryStatus.SKIPPED,
+      status: NotificationDeliveryStatus.SKIPPED,
     };
+  }
+  const deliveryStatus = parseDatabaseEnum(
+    NotificationDeliveryStatus,
+    delivery.status,
+    "notification_deliveries.status",
+  );
+  if (deliveryStatus === NotificationDeliveryStatus.SENT) {
+    return { attempted: false, status: deliveryStatus };
   }
   if (!delivery.payloadJson || !delivery.recipientEmail) {
     await prisma.notificationDelivery.update({
@@ -691,7 +701,24 @@ const deliverReminderEmailDelivery = async (
     });
     return { attempted: false, status: NotificationDeliveryStatus.SKIPPED };
   }
-  const payload = delivery.payloadJson as unknown as ReminderPayload;
+  const payload = parseDatabaseJson<ReminderPayload>(
+    delivery.payloadJson,
+    "notification_deliveries.payload_json",
+    (value) => {
+      if (
+        typeof value !== "object" ||
+        value === null ||
+        !Array.isArray((value as ReminderPayload).plans) ||
+        typeof (value as ReminderPayload).platformLink !== "string"
+      ) {
+        throw new Error("Reminder payload has an invalid shape.");
+      }
+      return value as ReminderPayload;
+    },
+  );
+  if (!payload) {
+    throw new Error("Reminder payload is missing.");
+  }
   const plans = payload.plans.filter((plan) =>
     isReminderBucketEnabled(plan.bucket, alertSettings),
   );
@@ -712,7 +739,13 @@ const deliverReminderEmailDelivery = async (
     });
     return {
       attempted: false,
-      status: current?.status ?? NotificationDeliveryStatus.SKIPPED,
+      status: current
+        ? parseDatabaseEnum(
+            NotificationDeliveryStatus,
+            current.status,
+            "notification_deliveries.status",
+          )
+        : NotificationDeliveryStatus.SKIPPED,
     };
   }
   const filteredPayload = {
@@ -957,7 +990,7 @@ const notifyDigest = async (input: {
       channel: NotificationDeliveryChannel.IN_APP,
       dedupeKey: inAppKey,
       notificationId: notificationResult.notification.id,
-      payloadJson: toJson(payload),
+      payloadJson: payload,
       recipientEmail: input.digest.recipient.email,
       recipientUserId: input.digest.recipient.id,
       status: NotificationDeliveryStatus.SENT,
@@ -968,7 +1001,7 @@ const notifyDigest = async (input: {
     const emailDelivery = await notificationService.createDelivery({
       channel: NotificationDeliveryChannel.EMAIL,
       dedupeKey: `${baseKey}:EMAIL`,
-      payloadJson: toJson(payload),
+      payloadJson: payload,
       recipientEmail: input.digest.recipient.email,
       recipientUserId: input.digest.recipient.id,
     });
@@ -1064,7 +1097,7 @@ const executePeriod = async (input: {
     summary.finishedAt = new Date().toISOString();
     await prisma.scheduledJobExecution.update({
       data: {
-        detailsJson: toJson({
+        detailsJson: toDatabaseJson({
           cadenceKey: input.cadenceKey,
           cutoffDate: input.cutoffDateKey,
           failures: summary.failures.slice(0, 100),
@@ -1097,7 +1130,7 @@ const executePeriod = async (input: {
     summary.finishedAt = new Date().toISOString();
     await prisma.scheduledJobExecution.update({
       data: {
-        detailsJson: toJson({ failures: summary.failures }),
+        detailsJson: toDatabaseJson({ failures: summary.failures }),
         errorMessage: errorMessage(error),
         failuresCount: summary.failuresCount,
         finishedAt: new Date(),
@@ -1215,6 +1248,10 @@ export const deadlineReminderService = {
           lastExecution: lastExecution
             ? {
                 ...lastExecution,
+                detailsJson: parseDatabaseJson(
+                  lastExecution.detailsJson,
+                  "scheduled_job_executions.details_json",
+                ),
                 finishedAt: lastExecution.finishedAt?.toISOString() ?? null,
               }
             : null,

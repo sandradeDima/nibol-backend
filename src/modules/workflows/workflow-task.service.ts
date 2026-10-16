@@ -1,6 +1,11 @@
 import type { Prisma } from "../../../generated/prisma/client.js";
 
 import { AppError } from "../../utils/app-error.js";
+import {
+  parseDatabaseJson,
+  parseDatabaseJsonArray,
+  toDatabaseJson,
+} from "../../services/logging-utils.js";
 import { prisma } from "../../utils/prisma.js";
 import type { WorkflowActorContext } from "./workflows.types.js";
 import {
@@ -41,8 +46,7 @@ import { workflowNodeConfigurationSchema } from "./workflows.validators.js";
 
 type TaskAction = keyof typeof workflowTaskActionPermissions;
 
-const asJson = (value: unknown): Prisma.InputJsonValue =>
-  (value as Prisma.InputJsonValue) ?? {};
+const asJson = (value: unknown): string => toDatabaseJson(value ?? {});
 
 const assertPermission = (access: WorkflowActorContext, permission: string) => {
   if (!access.permissions.includes(permission)) {
@@ -110,6 +114,12 @@ const getTaskRecord = async (db: RuntimeDatabase, taskId: string) =>
   });
 
 const getNodeConfiguration = (configurationJson: unknown) => {
+  if (typeof configurationJson === "string") {
+    configurationJson = parseDatabaseJson(
+      configurationJson,
+      "workflow_nodes.configuration_json",
+    );
+  }
   const parsed = workflowNodeConfigurationSchema.safeParse(configurationJson);
   if (!parsed.success) {
     throw new WorkflowRuntimeError(
@@ -156,8 +166,8 @@ const getAllowedActions = (
   configuration: ReturnType<typeof getNodeConfiguration>,
 ) =>
   configuration.nodeType === "STAGE" || configuration.nodeType === "APPROVAL"
-      ? configuration.allowedActions
-      : [];
+    ? configuration.allowedActions
+    : [];
 
 export type ActiveWorkflowTaskSummary = {
   allowedActions: string[];
@@ -307,7 +317,10 @@ const mapTask = (
     assignedArea: task.assignedArea,
     assignedRole: task.assignedRole,
     assignedUser: task.assignedUser,
-    assignmentSnapshot: task.assignmentSnapshotJson,
+    assignmentSnapshot: parseDatabaseJson(
+      task.assignmentSnapshotJson,
+      "workflow_tasks.assignment_snapshot_json",
+    ),
     canAct,
     comments: task.comments,
     completedAt: task.completedAt?.toISOString() ?? null,
@@ -316,7 +329,10 @@ const mapTask = (
     dueAt: task.dueAt?.toISOString() ?? null,
     dueState: getTaskDueState(task.dueAt, task.timers),
     entrySequence: task.entrySequence,
-    evidenceReferences: task.evidenceReferencesJson,
+    evidenceReferences: parseDatabaseJson(
+      task.evidenceReferencesJson,
+      "workflow_tasks.evidence_references_json",
+    ),
     id: task.id,
     instance: {
       entityId: task.instance.entityId,
@@ -519,7 +535,10 @@ export const workflowTaskService = {
           task.instance.processType,
           task.instance.contextJson,
         );
-        const assignment = task.assignmentSnapshotJson;
+        const assignment = parseDatabaseJson(
+          task.assignmentSnapshotJson,
+          "workflow_tasks.assignment_snapshot_json",
+        );
         const assignmentRecord =
           assignment &&
           typeof assignment === "object" &&
@@ -872,9 +891,10 @@ export const workflowTaskService = {
         assignedUserId: task.assignedUserId,
       };
       const history = [
-        ...(Array.isArray(task.assignmentHistoryJson)
-          ? task.assignmentHistoryJson
-          : []),
+        ...parseDatabaseJsonArray(
+          task.assignmentHistoryJson,
+          "workflow_tasks.assignment_history_json",
+        ),
         {
           actorUserId: access.userId,
           comment: input.comment?.trim() || null,

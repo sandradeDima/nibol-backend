@@ -1,7 +1,5 @@
-import {
-  NotificationPriority,
-  type Prisma,
-} from "../../../generated/prisma/client.js";
+import { NotificationPriority } from "../../types/database-enums.js";
+import type { Prisma } from "../../../generated/prisma/client.js";
 
 import { AppError } from "../../utils/app-error.js";
 
@@ -32,7 +30,7 @@ import {
   summarizeConditionEvaluations,
 } from "./workflow-transition-resolver.js";
 import { WORKFLOW_GRAPH_LIMITS } from "./workflows.constants.js";
-import { toLogJsonValue } from "../../services/logging-utils.js";
+import { toDatabaseJson } from "../../services/logging-utils.js";
 import { getWorkflowEntityAdapter } from "./workflow-entity-adapters.js";
 import {
   buildWorkflowInstanceUrl,
@@ -57,8 +55,7 @@ export type RuntimeExecutionInput = {
   now?: Date;
 };
 
-const asJson = (value: unknown): Prisma.InputJsonValue =>
-  toLogJsonValue(value) ?? {};
+const asJson = (value: unknown): string => toDatabaseJson(value);
 
 const getAssignmentSnapshot = (
   resolution: AssignmentResolution,

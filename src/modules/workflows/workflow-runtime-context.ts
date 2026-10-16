@@ -3,6 +3,7 @@ import {
   type WorkflowSimulationContext,
 } from "./workflow-rule-fields.js";
 import type { WorkflowInstanceStartInput } from "./workflow-runtime.validators.js";
+import { parseDatabaseJson } from "../../services/logging-utils.js";
 
 export type WorkflowRuntimeContext = WorkflowSimulationContext & {
   custom: Record<string, unknown>;
@@ -80,6 +81,9 @@ export const restoreWorkflowRuntimeContext = (
   processType: string,
   value: unknown,
 ): WorkflowRuntimeContext => {
+  if (typeof value === "string") {
+    value = parseDatabaseJson(value, "workflow_instances.context_json");
+  }
   const raw = isRecord(value) ? value : {};
   const normalized = normalizeWorkflowSimulationContext({
     ...raw,

@@ -18,7 +18,9 @@ const envSchema = z.object({
   BETTER_AUTH_SECRET: z.string().min(32).default(DEVELOPMENT_AUTH_SECRET),
   BETTER_AUTH_URL: z.string().url().default("http://localhost:4000"),
   CRON_SECRET: z.string().min(32).optional(),
-  DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
+  DATABASE_URL: z
+    .string()
+    .startsWith("sqlserver://", "DATABASE_URL must use sqlserver://"),
   DEADLINE_REMINDER_INTERVAL_MS: z.coerce
     .number()
     .int()
@@ -39,10 +41,7 @@ const envSchema = z.object({
   SMTP_PASSWORD: z.string().min(1).optional(),
   SMTP_PASS: z.string().min(1).optional(),
   SMTP_PORT: z.coerce.number().int().positive().optional(),
-  SMTP_SECURE: z.preprocess(
-    parseBooleanEnvValue,
-    z.boolean().default(false),
-  ),
+  SMTP_SECURE: z.preprocess(parseBooleanEnvValue, z.boolean().default(false)),
   SMTP_USER: z.string().min(1).optional(),
   WORKFLOW_TIMER_BATCH_SIZE: z.coerce
     .number()
@@ -59,6 +58,31 @@ const envSchema = z.object({
 
 const parsedEnv = envSchema
   .superRefine((value, context) => {
+    const encrypt = /(?:^|;)encrypt=(true|false)(?:;|$)/i
+      .exec(value.DATABASE_URL)?.[1]
+      ?.toLowerCase();
+    const trustServerCertificate =
+      /(?:^|;)trustServerCertificate=(true|false)(?:;|$)/i
+        .exec(value.DATABASE_URL)?.[1]
+        ?.toLowerCase();
+
+    if (value.NODE_ENV === "production" && encrypt !== "true") {
+      context.addIssue({
+        code: "custom",
+        message: "DATABASE_URL must explicitly set encrypt=true in production.",
+        path: ["DATABASE_URL"],
+      });
+    }
+
+    if (value.NODE_ENV === "production" && trustServerCertificate === "true") {
+      context.addIssue({
+        code: "custom",
+        message:
+          "DATABASE_URL must not set trustServerCertificate=true in production.",
+        path: ["DATABASE_URL"],
+      });
+    }
+
     if (
       Boolean(value.MICROSOFT_CLIENT_ID) !==
       Boolean(value.MICROSOFT_CLIENT_SECRET)

@@ -1,86 +1,70 @@
-ALTER TABLE `risk_levels`
-  CHANGE COLUMN `default_deadline_days` `max_remediation_days` INTEGER NULL;
+EXEC sp_rename N'dbo.risk_levels.default_deadline_days', N'max_remediation_days', N'COLUMN';
+ALTER TABLE [dbo].[risk_levels] ALTER COLUMN [max_remediation_days] INT NULL;
 
-ALTER TABLE `observations`
-  ADD COLUMN `deleted_observation_number` INTEGER NULL,
-  ADD COLUMN `sent_at` DATETIME(3) NULL;
+ALTER TABLE [dbo].[observations]
+  ADD [deleted_observation_number] INT NULL,
+      [sent_at] DATETIME2 NULL;
+ALTER TABLE [dbo].[observations] ALTER COLUMN [auditor_user_id] CHAR(36) NULL;
 
-ALTER TABLE `observations`
-  MODIFY COLUMN `auditor_user_id` CHAR(36) NULL;
+CREATE TABLE [dbo].[deadline_extension_classifications] (
+  [id] CHAR(36) NOT NULL,
+  [code] NVARCHAR(64) NOT NULL,
+  [name] NVARCHAR(191) NOT NULL,
+  [description] NVARCHAR(500) NOT NULL,
+  [max_additional_days] INT NOT NULL,
+  [active] BIT NOT NULL CONSTRAINT [deadline_extension_classifications_active_df] DEFAULT 1,
+  [created_at] DATETIME2 NOT NULL CONSTRAINT [deadline_extension_classifications_created_at_df] DEFAULT CURRENT_TIMESTAMP,
+  [updated_at] DATETIME2 NOT NULL,
+  CONSTRAINT [deadline_extension_classifications_pkey] PRIMARY KEY CLUSTERED ([id]),
+  CONSTRAINT [deadline_extension_classifications_code_key] UNIQUE NONCLUSTERED ([code]),
+  CONSTRAINT [deadline_extension_classifications_name_key] UNIQUE NONCLUSTERED ([name])
+);
+CREATE NONCLUSTERED INDEX [deadline_extension_classifications_active_idx] ON [dbo].[deadline_extension_classifications]([active]);
 
-CREATE TABLE `deadline_extension_classifications` (
-  `id` CHAR(36) NOT NULL,
-  `code` VARCHAR(64) NOT NULL,
-  `name` VARCHAR(191) NOT NULL,
-  `description` VARCHAR(500) NOT NULL,
-  `max_additional_days` INTEGER NOT NULL,
-  `active` BOOLEAN NOT NULL DEFAULT true,
-  `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  `updated_at` DATETIME(3) NOT NULL,
-  UNIQUE INDEX `deadline_extension_classifications_code_key`(`code`),
-  UNIQUE INDEX `deadline_extension_classifications_name_key`(`name`),
-  INDEX `deadline_extension_classifications_active_idx`(`active`),
-  PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE [dbo].[deadline_extension_requests]
+  ADD [classification_id] CHAR(36) NULL,
+      [max_additional_days] INT NULL,
+      [max_allowed_date] DATE NULL;
 
-ALTER TABLE `deadline_extension_requests`
-  ADD COLUMN `classification_id` CHAR(36) NULL,
-  ADD COLUMN `max_additional_days` INTEGER NULL,
-  ADD COLUMN `max_allowed_date` DATE NULL;
-
-UPDATE `deadline_extension_requests`
-SET `status` = CASE `status`
+UPDATE [dbo].[deadline_extension_requests]
+SET [status] = CASE [status]
   WHEN 'SENT_TO_AUDIT' THEN 'SENT_TO_MANAGER'
   WHEN 'AUDIT_APPROVED' THEN 'MANAGER_APPROVED'
   WHEN 'AUDIT_REJECTED' THEN 'MANAGER_REJECTED'
-  ELSE `status`
+  ELSE [status]
 END;
 
-ALTER TABLE `deadline_extension_requests`
-  DROP FOREIGN KEY `deadline_extension_requests_audit_reviewer_id_fkey`,
-  DROP INDEX `deadline_extension_requests_audit_reviewer_id_idx`,
-  DROP COLUMN `audit_reviewer_id`,
-  DROP COLUMN `audit_reviewed_at`,
-  DROP COLUMN `audit_comment`,
-  MODIFY COLUMN `status` ENUM('DRAFT', 'SENT_TO_MANAGER', 'MANAGER_APPROVED', 'MANAGER_REJECTED', 'CANCELLED') NOT NULL DEFAULT 'DRAFT';
+ALTER TABLE [dbo].[deadline_extension_requests] DROP CONSTRAINT [deadline_extension_requests_audit_reviewer_id_fkey];
+DROP INDEX [deadline_extension_requests_audit_reviewer_id_idx] ON [dbo].[deadline_extension_requests];
+ALTER TABLE [dbo].[deadline_extension_requests]
+  DROP COLUMN [audit_reviewer_id],
+              [audit_reviewed_at],
+              [audit_comment];
+ALTER TABLE [dbo].[deadline_extension_requests] ALTER COLUMN [status] NVARCHAR(64) NOT NULL;
 
-UPDATE `progress_evaluations`
-SET `type` = 'ADVANCE'
-WHERE `type` = 'CORRECTION';
+UPDATE [dbo].[progress_evaluations] SET [type] = 'ADVANCE' WHERE [type] = 'CORRECTION';
+UPDATE [dbo].[progress_evaluations] SET [review_status] = 'RETURNED' WHERE [review_status] = 'REJECTED';
+UPDATE [dbo].[progress_review_history] SET [action] = 'RETURNED' WHERE [action] = 'REJECTED';
+UPDATE [dbo].[progress_review_history] SET [from_status] = 'RETURNED' WHERE [from_status] = 'REJECTED';
+UPDATE [dbo].[progress_review_history] SET [to_status] = 'RETURNED' WHERE [to_status] = 'REJECTED';
 
-UPDATE `progress_evaluations`
-SET `review_status` = 'RETURNED'
-WHERE `review_status` = 'REJECTED';
+ALTER TABLE [dbo].[progress_evaluations]
+  ALTER COLUMN [type] NVARCHAR(64) NOT NULL;
+ALTER TABLE [dbo].[progress_evaluations]
+  ALTER COLUMN [review_status] NVARCHAR(64) NOT NULL;
+ALTER TABLE [dbo].[progress_review_history]
+  ALTER COLUMN [action] NVARCHAR(64) NOT NULL;
+ALTER TABLE [dbo].[progress_review_history]
+  ALTER COLUMN [from_status] NVARCHAR(64) NULL;
+ALTER TABLE [dbo].[progress_review_history]
+  ALTER COLUMN [to_status] NVARCHAR(64) NOT NULL;
 
-UPDATE `progress_review_history`
-SET `action` = 'RETURNED'
-WHERE `action` = 'REJECTED';
+EXEC sp_rename N'dbo.progress_evaluations.progress_percent', N'reported_progress_percent', N'COLUMN';
+ALTER TABLE [dbo].[progress_evaluations] ALTER COLUMN [reported_progress_percent] INT NULL;
+ALTER TABLE [dbo].[progress_evaluations]
+  ADD [evaluated_status] NVARCHAR(64) NULL;
+ALTER TABLE [dbo].[progress_evaluations] DROP COLUMN [action_plan_status];
 
-UPDATE `progress_review_history`
-SET `from_status` = 'RETURNED'
-WHERE `from_status` = 'REJECTED';
-
-UPDATE `progress_review_history`
-SET `to_status` = 'RETURNED'
-WHERE `to_status` = 'REJECTED';
-
-ALTER TABLE `progress_evaluations`
-  MODIFY COLUMN `type` ENUM('ADVANCE', 'FINALIZATION') NOT NULL DEFAULT 'ADVANCE',
-  MODIFY COLUMN `review_status` ENUM('DRAFT', 'SENT_TO_AUDIT', 'APPROVED', 'RETURNED') NOT NULL DEFAULT 'DRAFT';
-
-ALTER TABLE `progress_review_history`
-  MODIFY COLUMN `action` ENUM('SENT', 'APPROVED', 'RETURNED') NOT NULL,
-  MODIFY COLUMN `from_status` ENUM('DRAFT', 'SENT_TO_AUDIT', 'APPROVED', 'RETURNED') NULL,
-  MODIFY COLUMN `to_status` ENUM('DRAFT', 'SENT_TO_AUDIT', 'APPROVED', 'RETURNED') NOT NULL;
-
-ALTER TABLE `progress_evaluations`
-  CHANGE COLUMN `progress_percent` `reported_progress_percent` INTEGER NULL,
-  ADD COLUMN `evaluated_status` ENUM('NOT_STARTED', 'STARTED', 'WITH_PROGRESS', 'CONCLUDED') NULL,
-  DROP COLUMN `action_plan_status`;
-
-ALTER TABLE `deadline_extension_requests`
-  ADD UNIQUE INDEX `deadline_extension_one_per_action_plan_key`(`action_plan_id`),
-  ADD INDEX `deadline_extension_requests_classification_id_idx`(`classification_id`),
-  ADD CONSTRAINT `deadline_extension_requests_classification_id_fkey`
-    FOREIGN KEY (`classification_id`) REFERENCES `deadline_extension_classifications`(`id`)
-    ON DELETE RESTRICT ON UPDATE CASCADE;
+CREATE UNIQUE NONCLUSTERED INDEX [deadline_extension_one_per_action_plan_key] ON [dbo].[deadline_extension_requests]([action_plan_id]) WHERE ([action_plan_id] IS NOT NULL);
+CREATE NONCLUSTERED INDEX [deadline_extension_requests_classification_id_idx] ON [dbo].[deadline_extension_requests]([classification_id]);
+ALTER TABLE [dbo].[deadline_extension_requests] ADD CONSTRAINT [deadline_extension_requests_classification_id_fkey] FOREIGN KEY ([classification_id]) REFERENCES [dbo].[deadline_extension_classifications]([id]) ON DELETE NO ACTION ON UPDATE NO ACTION;

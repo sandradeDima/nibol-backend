@@ -225,7 +225,7 @@ test("el cierre por workflow concluye la observación al terminar todos sus plan
   let observationLocked = false;
   const db = {
     $queryRaw: async (query: TemplateStringsArray) => {
-      assert.match(query.join("?"), /FOR UPDATE/);
+      assert.match(query.join("?"), /WITH \(UPDLOCK, HOLDLOCK, ROWLOCK\)/);
       if (query[0]?.includes("FROM observations")) {
         observationLocked = true;
         return [{ id: "observation-1" }];

@@ -1,12 +1,16 @@
+import { type Prisma } from "../../generated/prisma/client.js";
 import {
   NotificationDeliveryChannel,
   NotificationDeliveryStatus,
+  NotificationPriority as DatabaseNotificationPriority,
   NotificationPriority as PrismaNotificationPriority,
+  NotificationType as DatabaseNotificationType,
   NotificationType as PrismaNotificationType,
-  type Prisma,
-} from "../../generated/prisma/client.js";
+  parseDatabaseEnum,
+} from "../types/database-enums.js";
 
 import { AppError } from "../utils/app-error.js";
+import { toDatabaseJson } from "./logging-utils.js";
 import { resolveNotificationTarget } from "../utils/notification-links.js";
 import { prisma } from "../utils/prisma.js";
 import type {
@@ -38,7 +42,7 @@ export type CreateNotificationDeliveryInput = {
   channel: NotificationDeliveryChannel;
   dedupeKey: string;
   notificationId?: string;
-  payloadJson?: Prisma.InputJsonValue;
+  payloadJson?: unknown;
   recipientEmail?: string | null;
   recipientUserId?: string | null;
   status?: NotificationDeliveryStatus;
@@ -56,11 +60,11 @@ type NotificationRecord = {
   id: string;
   isRead: boolean;
   message: string;
-  priority: PrismaNotificationPriority;
+  priority: string;
   readAt: Date | null;
   targetUrl: string | null;
   title: string;
-  type: PrismaNotificationType;
+  type: string;
 };
 
 type CreateManyNotificationInput = {
@@ -96,27 +100,38 @@ const toPrismaNotificationPriority = (
   value: NotificationPriority | undefined,
 ): PrismaNotificationPriority => notificationPriorityMap[value ?? "NORMAL"];
 
-const mapNotificationRecord = (notification: NotificationRecord) => ({
-  createdAt: notification.createdAt.toISOString(),
-  entityId: notification.entityId,
-  entityType: notification.entityType,
-  eventType: notification.eventType,
-  id: notification.id,
-  isRead: notification.isRead,
-  message: notification.message,
-  priority: notification.priority,
-  readAt: notification.readAt?.toISOString() ?? null,
-  targetUrl: notification.targetUrl,
-  title: notification.title,
-  type:
-    notification.type === PrismaNotificationType.ERROR
-      ? "error"
-      : notification.type === PrismaNotificationType.SUCCESS
-        ? "success"
-        : notification.type === PrismaNotificationType.WARNING
-          ? "warning"
-          : "info",
-});
+const mapNotificationRecord = (notification: NotificationRecord) => {
+  const type = parseDatabaseEnum(
+    DatabaseNotificationType,
+    notification.type,
+    "notifications.type",
+  );
+  return {
+    createdAt: notification.createdAt.toISOString(),
+    entityId: notification.entityId,
+    entityType: notification.entityType,
+    eventType: notification.eventType,
+    id: notification.id,
+    isRead: notification.isRead,
+    message: notification.message,
+    priority: parseDatabaseEnum(
+      DatabaseNotificationPriority,
+      notification.priority,
+      "notifications.priority",
+    ),
+    readAt: notification.readAt?.toISOString() ?? null,
+    targetUrl: notification.targetUrl,
+    title: notification.title,
+    type:
+      type === PrismaNotificationType.ERROR
+        ? "error"
+        : type === PrismaNotificationType.SUCCESS
+          ? "success"
+          : type === PrismaNotificationType.WARNING
+            ? "warning"
+            : "info",
+  };
+};
 
 const buildWhereClause = (
   userId: string,
@@ -255,7 +270,7 @@ export const notificationService = {
           ? { notificationId: input.notificationId }
           : {}),
         ...(input.payloadJson !== undefined
-          ? { payloadJson: input.payloadJson }
+          ? { payloadJson: toDatabaseJson(input.payloadJson) }
           : {}),
         ...(input.recipientEmail !== undefined
           ? { recipientEmail: input.recipientEmail }

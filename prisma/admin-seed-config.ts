@@ -11,6 +11,9 @@ export const DEFAULT_ADMIN_SEED = {
 } as const;
 
 const adminSeedEnvSchema = z.object({
+  NODE_ENV: z
+    .enum(["development", "test", "production"])
+    .default("development"),
   SEED_ADMIN_NAME: z.string().min(1).optional(),
   SEED_ADMIN_EMAIL: z.email().optional(),
   SEED_ADMIN_PASSWORD: z.string().min(8).optional(),
@@ -29,7 +32,28 @@ export const resolveAdminSeedConfigs = (
   rawEnv: NodeJS.ProcessEnv,
 ): AdminSeedConfig[] => {
   const env = adminSeedEnvSchema.parse(rawEnv);
-  const adminSeeds: AdminSeedConfig[] = [DEFAULT_ADMIN_SEED];
+  if (env.NODE_ENV === "production") {
+    if (!env.SEED_ADMIN_EMAIL || !env.SEED_ADMIN_PASSWORD) {
+      throw new Error(
+        "Set SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD explicitly before production seeding.",
+      );
+    }
+    return [
+      {
+        email: env.SEED_ADMIN_EMAIL,
+        name: env.SEED_ADMIN_NAME ?? DEFAULT_ADMIN_SEED.name,
+        password: env.SEED_ADMIN_PASSWORD,
+        source: "env",
+      },
+    ];
+  }
+
+  const defaultSeed = {
+    ...DEFAULT_ADMIN_SEED,
+    ...(env.SEED_ADMIN_NAME ? { name: env.SEED_ADMIN_NAME } : {}),
+    ...(env.SEED_ADMIN_PASSWORD ? { password: env.SEED_ADMIN_PASSWORD } : {}),
+  };
+  const adminSeeds: AdminSeedConfig[] = [defaultSeed];
 
   if (!env.SEED_ADMIN_EMAIL) {
     return adminSeeds;

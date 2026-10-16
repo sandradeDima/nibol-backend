@@ -1,13 +1,14 @@
-import type {
-  ActionPlanStatus,
-  Prisma,
-} from "../../../generated/prisma/client.js";
+import type { Prisma } from "../../../generated/prisma/client.js";
 
+import {
+  ActionPlanStatus,
+  parseDatabaseEnum,
+} from "../../types/database-enums.js";
 import { AppError } from "../../utils/app-error.js";
 
 export type ActionPlanAggregationInput = {
   progressPercent: number;
-  status: ActionPlanStatus;
+  status: string;
 };
 
 export type WorkflowTaskCount = {
@@ -36,8 +37,18 @@ export type ObservationBusinessStatus =
   | "CON_AVANCE"
   | "CONCLUIDO";
 
+const actionPlanStatuses = (actionPlans: ActionPlanAggregationInput[]) =>
+  actionPlans.map((actionPlan) =>
+    parseDatabaseEnum(
+      ActionPlanStatus,
+      actionPlan.status,
+      "action_plans.status",
+    ),
+  );
+
 export const observationAggregationService = {
   calculateProgress(actionPlans: ActionPlanAggregationInput[]): number {
+    actionPlanStatuses(actionPlans);
     if (actionPlans.length === 0) return 0;
     const total = actionPlans.reduce(
       (sum, actionPlan) => sum + actionPlan.progressPercent,
@@ -49,18 +60,17 @@ export const observationAggregationService = {
   calculateStatus(
     actionPlans: ActionPlanAggregationInput[],
   ): ObservationBusinessStatus {
+    const statuses = actionPlanStatuses(actionPlans);
     if (
       actionPlans.length === 0 ||
-      actionPlans.every((actionPlan) => actionPlan.status === "NOT_STARTED")
+      statuses.every((status) => status === ActionPlanStatus.NOT_STARTED)
     ) {
       return "NO_INICIADO";
     }
-    if (actionPlans.every((actionPlan) => actionPlan.status === "CONCLUDED")) {
+    if (statuses.every((status) => status === ActionPlanStatus.CONCLUDED)) {
       return "CONCLUIDO";
     }
-    if (
-      actionPlans.some((actionPlan) => actionPlan.status === "WITH_PROGRESS")
-    ) {
+    if (statuses.some((status) => status === ActionPlanStatus.WITH_PROGRESS)) {
       return "CON_AVANCE";
     }
     return "INICIADO";
@@ -71,7 +81,7 @@ export const lockObservationForActionPlanUpdate = async (
   tx: Prisma.TransactionClient,
   observationId: string,
 ) => {
-  await tx.$queryRaw`SELECT id FROM observations WHERE id = ${observationId} FOR UPDATE`;
+  await tx.$queryRaw`SELECT id FROM observations WITH (UPDLOCK, HOLDLOCK, ROWLOCK) WHERE id = ${observationId}`;
 };
 
 export const recalculateObservationFromActionPlans = async (
@@ -85,9 +95,8 @@ export const recalculateObservationFromActionPlans = async (
   if (!observation) return;
   const actionPlans = await tx.$queryRaw<ActionPlanAggregationInput[]>`
     SELECT progress_percent AS progressPercent, status
-    FROM action_plans
+    FROM action_plans WITH (UPDLOCK, HOLDLOCK, ROWLOCK)
     WHERE deleted_at IS NULL AND observation_id = ${observationId}
-    FOR UPDATE
   `;
   const progressPercent =
     observationAggregationService.calculateProgress(actionPlans);

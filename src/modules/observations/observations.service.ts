@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 
+import { type Prisma } from "../../../generated/prisma/client.js";
+
 import {
   NotificationDeliveryChannel,
   NotificationDeliveryStatus,
-  type Prisma,
-} from "../../../generated/prisma/client.js";
-
+} from "../../types/database-enums.js";
 import {
   authorizationService,
   buildActionPlanScopeWhere,
@@ -1547,12 +1547,27 @@ export const observationsService = {
         }
 
         if (input.areaAssignments) {
-          await tx.observationArea.deleteMany({
+          const removedAreas = await tx.observationArea.findMany({
             where: {
               observationId: id,
               areaId: { notIn: input.areaAssignments.map((row) => row.areaId) },
             },
+            select: { id: true },
           });
+          const removedAreaIds = removedAreas.map((area) => area.id);
+          if (removedAreaIds.length > 0) {
+            await tx.evidenceFile.updateMany({
+              where: { observationAreaId: { in: removedAreaIds } },
+              data: { observationAreaId: null },
+            });
+            await tx.deadlineExtensionRequest.updateMany({
+              where: { observationAreaId: { in: removedAreaIds } },
+              data: { observationAreaId: null },
+            });
+            await tx.observationArea.deleteMany({
+              where: { id: { in: removedAreaIds } },
+            });
+          }
           for (const row of input.areaAssignments) {
             await tx.observationArea.upsert({
               create: { observationId: id, ...row },

@@ -1,4 +1,5 @@
 import type { Prisma } from "../../../generated/prisma/client.js";
+import { parseDatabaseJson } from "../../services/logging-utils.js";
 
 import {
   workflowNodeConfigurationSchema,
@@ -67,7 +68,7 @@ type RuntimeVersionRecord = {
   id: string;
   nodes: Array<{
     assignmentStrategy: string | null;
-    configurationJson: Prisma.JsonValue;
+    configurationJson: string;
     description: string | null;
     id: string;
     name: string;
@@ -86,7 +87,7 @@ type RuntimeVersionRecord = {
         id: string;
         operator: string;
         sequence: number;
-        valueJson: Prisma.JsonValue | null;
+        valueJson: string | null;
       }>;
       description: string | null;
       id: string;
@@ -106,7 +107,10 @@ const parseNodeConfiguration = (
   node: RuntimeVersionRecord["nodes"][number],
 ): WorkflowNodeConfiguration => {
   const parsed = workflowNodeConfigurationSchema.safeParse(
-    node.configurationJson,
+    parseDatabaseJson(
+      node.configurationJson,
+      "workflow_nodes.configuration_json",
+    ),
   );
   if (!parsed.success || parsed.data.nodeType !== node.type) {
     throw new WorkflowRuntimeError(
@@ -130,7 +134,10 @@ const toGraphConditionGroup = (
     operator: condition.operator,
     resultLabel: null,
     sequence: condition.sequence,
-    value: condition.valueJson,
+    value: parseDatabaseJson(
+      condition.valueJson,
+      "workflow_condition_rules.value_json",
+    ),
   })) as NonNullable<RuntimeTransition["conditionGroup"]>["conditions"],
   description: group.description,
   id: group.id,

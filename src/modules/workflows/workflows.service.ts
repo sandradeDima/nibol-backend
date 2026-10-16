@@ -1,10 +1,20 @@
-import { Prisma } from "../../../generated/prisma/client.js";
+import type { Prisma } from "../../../generated/prisma/client.js";
 
 import { emailTemplateNames } from "../../emails/templates/index.js";
 import { activityLogService } from "../../services/activity-log-service.js";
 import type { AuthorizationSummary } from "../../services/authorization-service.js";
 import { auditLogService } from "../../services/audit-log-service.js";
-import { toLogJsonValue } from "../../services/logging-utils.js";
+import {
+  parseDatabaseJson,
+  toDatabaseJson,
+} from "../../services/logging-utils.js";
+import {
+  WorkflowAssignmentStrategy,
+  WorkflowConditionLogicOperator,
+  WorkflowConditionOperator,
+  WorkflowNodeType,
+  parseDatabaseEnum,
+} from "../../types/database-enums.js";
 import { AppError } from "../../utils/app-error.js";
 import { prisma } from "../../utils/prisma.js";
 import {
@@ -279,6 +289,40 @@ type WorkflowVersionDetailSelected = Prisma.WorkflowVersionGetPayload<{
 const mapWorkflowVersionDetail = (version: WorkflowVersionDetailSelected) => ({
   ...version,
   counts: version._count,
+  nodes: version.nodes.map((node) => ({
+    ...node,
+    configurationJson: workflowNodeConfigurationSchema.parse(
+      parseDatabaseJson(
+        node.configurationJson,
+        "workflow_nodes.configuration_json",
+      ),
+    ),
+  })),
+  transitions: version.transitions.map((transition) => ({
+    ...transition,
+    conditionGroup: transition.conditionGroup
+      ? {
+          ...transition.conditionGroup,
+          logicOperator: parseDatabaseEnum(
+            WorkflowConditionLogicOperator,
+            transition.conditionGroup.logicOperator,
+            "workflow_condition_groups.logic_operator",
+          ),
+          conditions: transition.conditionGroup.conditions.map((condition) => ({
+            ...condition,
+            operator: parseDatabaseEnum(
+              WorkflowConditionOperator,
+              condition.operator,
+              "workflow_condition_rules.operator",
+            ),
+            valueJson: parseDatabaseJson(
+              condition.valueJson,
+              "workflow_condition_rules.value_json",
+            ),
+          })),
+        }
+      : null,
+  })),
 });
 
 const workflowCloneSelect = {
@@ -324,15 +368,7 @@ const normalizeOptionalText = (
   return trimmed.length > 0 ? trimmed : null;
 };
 
-const toInputJsonValue = (value: Prisma.JsonValue): Prisma.InputJsonValue => {
-  const serialized = toLogJsonValue(value);
-
-  if (serialized === null) {
-    return {};
-  }
-
-  return serialized;
-};
+const toInputJsonValue = (value: unknown): string => toDatabaseJson(value);
 
 const assertPermission = (
   access: AuthorizationSummary,
@@ -760,7 +796,12 @@ const cloneVersionContents = async (
   for (const sourceNode of source.nodes) {
     const node = await db.workflowNode.create({
       data: {
-        configurationJson: toInputJsonValue(sourceNode.configurationJson),
+        configurationJson: toInputJsonValue(
+          parseDatabaseJson(
+            sourceNode.configurationJson,
+            "workflow_nodes.configuration_json",
+          ),
+        ),
         description: sourceNode.description,
         name: sourceNode.name,
         nodeKey: sourceNode.nodeKey,
@@ -795,10 +836,15 @@ const cloneVersionContents = async (
             sequence: condition.sequence,
             ...(condition.valueJson === null
               ? {
-                  valueJson: Prisma.JsonNull,
+                  valueJson: toDatabaseJson(null),
                 }
               : {
-                  valueJson: toInputJsonValue(condition.valueJson),
+                  valueJson: toInputJsonValue(
+                    parseDatabaseJson(
+                      condition.valueJson,
+                      "workflow_condition_rules.value_json",
+                    ),
+                  ),
                 }),
           })),
         },
@@ -971,7 +1017,10 @@ const mapPersistedDesignerInput = (
 
   for (const node of version.nodes) {
     const parsedConfiguration = workflowNodeConfigurationSchema.safeParse(
-      node.configurationJson,
+      parseDatabaseJson(
+        node.configurationJson,
+        "workflow_nodes.configuration_json",
+      ),
     );
 
     if (!parsedConfiguration.success) {
@@ -983,9 +1032,17 @@ const mapPersistedDesignerInput = (
 
     nodes.push({
       assignmentStrategy:
+        node.assignmentStrategy === null ||
         node.assignmentStrategy === "MANAGEMENT"
           ? null
-          : node.assignmentStrategy,
+          : (parseDatabaseEnum(
+              WorkflowAssignmentStrategy,
+              node.assignmentStrategy,
+              "workflow_nodes.assignment_strategy",
+            ) as Exclude<
+              WorkflowDesignerSaveInput["nodes"][number]["assignmentStrategy"],
+              null | undefined
+            >),
       configurationJson: parsedConfiguration.data,
       description: node.description,
       id: node.id,
@@ -993,7 +1050,11 @@ const mapPersistedDesignerInput = (
       nodeKey: node.nodeKey,
       positionX: node.positionX,
       positionY: node.positionY,
-      type: node.type,
+      type: parseDatabaseEnum(
+        WorkflowNodeType,
+        node.type,
+        "workflow_nodes.type",
+      ),
     });
   }
 
@@ -1041,16 +1102,26 @@ const mapPersistedDesignerInput = (
                     field:
                       canonicalizeWorkflowConditionField(condition.field) ??
                       (condition.field as (typeof WORKFLOW_CONDITION_FIELD_VALUES)[number]),
-                    operator:
-                      condition.operator as (typeof WORKFLOW_CONDITION_OPERATOR_VALUES)[number],
+                    operator: parseDatabaseEnum(
+                      WorkflowConditionOperator,
+                      condition.operator,
+                      "workflow_condition_rules.operator",
+                    ) as (typeof WORKFLOW_CONDITION_OPERATOR_VALUES)[number],
                     resultLabel: null,
                     sequence: condition.sequence,
-                    value: condition.valueJson as never,
+                    value: parseDatabaseJson(
+                      condition.valueJson,
+                      "workflow_condition_rules.value_json",
+                    ) as never,
                   }),
                 ),
                 description: transition.conditionGroup.description,
                 id: transition.conditionGroup.id,
-                logicOperator: transition.conditionGroup.logicOperator,
+                logicOperator: parseDatabaseEnum(
+                  WorkflowConditionLogicOperator,
+                  transition.conditionGroup.logicOperator,
+                  "workflow_condition_groups.logic_operator",
+                ),
               },
         conditionGroupId: transition.conditionGroupId,
         id: transition.id,
@@ -1218,7 +1289,7 @@ const copyConditionGroupData = (
       sequence: condition.sequence ?? index,
       valueJson:
         condition.value === undefined || condition.value === null
-          ? Prisma.JsonNull
+          ? toDatabaseJson(null)
           : toInputJsonValue(condition.value as Prisma.JsonValue),
     })),
   },
@@ -1236,7 +1307,7 @@ const getConditionGroupForTransition = (
         field: string;
         operator: string;
         sequence: number;
-        valueJson: Prisma.JsonValue | null;
+        valueJson: string | null;
       }>;
       description: string | null;
       id: string;
@@ -1266,11 +1337,18 @@ const getConditionGroupForTransition = (
           condition.operator as (typeof WORKFLOW_CONDITION_OPERATOR_VALUES)[number],
         resultLabel: null,
         sequence: condition.sequence,
-        value: condition.valueJson as never,
+        value: parseDatabaseJson(
+          condition.valueJson,
+          "workflow_condition_rules.value_json",
+        ) as never,
       })),
       description: existingGroup.description,
       id: existingGroup.id,
-      logicOperator: existingGroup.logicOperator as "AND" | "OR",
+      logicOperator: parseDatabaseEnum(
+        WorkflowConditionLogicOperator,
+        existingGroup.logicOperator,
+        "workflow_condition_groups.logic_operator",
+      ),
     };
   }
 
@@ -1456,6 +1534,14 @@ const persistDesignerGraph = async (
     .map((node) => node.id)
     .filter((nodeId) => !persistedNodeIds.has(nodeId));
   if (removedNodeIds.length > 0) {
+    await db.workflowTransitionLog.updateMany({
+      where: { sourceNodeId: { in: removedNodeIds } },
+      data: { sourceNodeId: null },
+    });
+    await db.workflowTransitionLog.updateMany({
+      where: { targetNodeId: { in: removedNodeIds } },
+      data: { targetNodeId: null },
+    });
     await db.workflowNode.deleteMany({
       where: {
         id: {
@@ -2030,18 +2116,19 @@ export const workflowService = {
         throw new AppError("No se pudo cargar la versión recién creada.", 500);
       }
 
+      const mappedVersion = mapWorkflowVersionDetail(result);
       await writeWorkflowAudit({
         access,
         action: WORKFLOW_ACTIVITY_ACTIONS.createVersion,
         db,
         entityId: result.id,
         entityType: WORKFLOW_VERSION_ENTITY_TYPE,
-        newValues: result,
+        newValues: mappedVersion,
         oldValues: null,
         summary: `Se creó la versión ${result.versionNumber} del workflow.`,
       });
 
-      return mapWorkflowVersionDetail(result);
+      return mappedVersion;
     });
   },
 

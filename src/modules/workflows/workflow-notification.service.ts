@@ -3,8 +3,9 @@ import {
   NotificationDeliveryStatus,
   NotificationPriority,
   NotificationType,
-  type Prisma,
-} from "../../../generated/prisma/client.js";
+  parseDatabaseEnum,
+} from "../../types/database-enums.js";
+import type { Prisma } from "../../../generated/prisma/client.js";
 
 import { emailService } from "../../emails/EmailService.js";
 import { logger } from "../../utils/logger.js";
@@ -13,7 +14,7 @@ import {
   resolveNotificationTarget,
 } from "../../utils/notification-links.js";
 import { prisma } from "../../utils/prisma.js";
-import { toLogJsonValue } from "../../services/logging-utils.js";
+import { toDatabaseJson } from "../../services/logging-utils.js";
 import type { WorkflowRuntimeContext } from "./workflow-runtime-context.js";
 import { restoreWorkflowRuntimeContext } from "./workflow-runtime-context.js";
 import {
@@ -59,8 +60,7 @@ const WORKFLOW_NOTIFICATION_MAX_ATTEMPTS = 3;
 const WORKFLOW_NOTIFICATION_RETRY_DELAY_MS = 5 * 60_000;
 const WORKFLOW_NOTIFICATION_CLAIM_LEASE_MS = 15 * 60_000;
 
-const asJson = (value: unknown): Prisma.InputJsonValue =>
-  toLogJsonValue(value) ?? {};
+const asJson = (value: unknown): string => toDatabaseJson(value);
 
 const dedupePrefix = (event: WorkflowNotificationEvent): string =>
   [
@@ -512,17 +512,22 @@ export const deliverWorkflowNotificationDelivery = async (
       status: NotificationDeliveryStatus.SKIPPED,
     };
   }
-  if (delivery.status === NotificationDeliveryStatus.SENT) {
-    return { attempted: false, deliveryId, status: delivery.status };
+  const deliveryStatus = parseDatabaseEnum(
+    NotificationDeliveryStatus,
+    delivery.status,
+    "notification_deliveries.status",
+  );
+  if (deliveryStatus === NotificationDeliveryStatus.SENT) {
+    return { attempted: false, deliveryId, status: deliveryStatus };
   }
   if (
-    delivery.status === NotificationDeliveryStatus.FAILED &&
+    deliveryStatus === NotificationDeliveryStatus.FAILED &&
     delivery.attempts >= WORKFLOW_NOTIFICATION_MAX_ATTEMPTS
   ) {
-    return { attempted: false, deliveryId, status: delivery.status };
+    return { attempted: false, deliveryId, status: deliveryStatus };
   }
   if (delivery.channel !== NotificationDeliveryChannel.EMAIL) {
-    return { attempted: false, deliveryId, status: delivery.status };
+    return { attempted: false, deliveryId, status: deliveryStatus };
   }
   if (!delivery.recipientUser?.isActive || !delivery.recipientUser.email) {
     await prisma.notificationDelivery.update({
@@ -582,7 +587,13 @@ export const deliverWorkflowNotificationDelivery = async (
     return {
       attempted: false,
       deliveryId,
-      status: current?.status ?? NotificationDeliveryStatus.SKIPPED,
+      status: current
+        ? parseDatabaseEnum(
+            NotificationDeliveryStatus,
+            current.status,
+            "notification_deliveries.status",
+          )
+        : NotificationDeliveryStatus.SKIPPED,
     };
   }
 

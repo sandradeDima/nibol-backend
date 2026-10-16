@@ -5,8 +5,9 @@ import {
   NotificationDeliveryStatus,
   NotificationPriority,
   ScheduledJobExecutionStatus,
-} from "../../../generated/prisma/client.js";
-import type { ScheduledJobTrigger } from "../../../generated/prisma/client.js";
+  type ScheduledJobTrigger,
+} from "../../types/database-enums.js";
+import { toDatabaseJson } from "../../services/logging-utils.js";
 
 import { emailService } from "../../emails/EmailService.js";
 import { prisma } from "../../utils/prisma.js";
@@ -842,11 +843,11 @@ const finalizeExecution = async (
 ): Promise<void> => {
   await prisma.scheduledJobExecution.update({
     data: {
-      detailsJson: {
+      detailsJson: toDatabaseJson({
         failures: context.summary.failures.slice(0, 100),
         processedActionPlans: context.summary.processedActionPlans,
         processedObservations: context.summary.processedObservations,
-      },
+      }),
       errorMessage: error ?? null,
       emailsSent: context.summary.emailsSent,
       failuresCount: context.summary.failuresCount,
