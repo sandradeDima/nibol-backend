@@ -4,10 +4,15 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  buildProgressReviewQueueScopeWhere,
   buildProgressEvaluationSubmissionData,
   canSubmitProgressEvaluationForPlan,
   removeStoredEvidenceFiles,
 } from "./progress.service.js";
+import {
+  buildActionPlanScopeWhere,
+  type AuthorizationSummary,
+} from "../../services/authorization-service.js";
 import { evidenceUploadsDir, uploadsRootDir } from "../../utils/uploads.js";
 
 test("removes stored files when a draft evidence record is deleted", async () => {
@@ -39,4 +44,26 @@ test("clears stale review metadata when a returned evaluation is resubmitted", (
     reviewStatus: "SENT_TO_AUDIT",
     submittedAt,
   });
+});
+
+test("progress review scope adds only the assigned workflow evaluation", () => {
+  const customReviewer: AuthorizationSummary = {
+    dataScope: "ASSIGNED",
+    isAdmin: false,
+    permissions: ["action_plans.evaluate", "action_plans.approve"],
+    roleCode: null,
+    roleCodes: [],
+    roleName: "Custom reviewer",
+    roles: ["Custom reviewer"],
+    userId: "reviewer-1",
+  };
+  const where = buildProgressReviewQueueScopeWhere(customReviewer, [
+    "evaluation-1",
+  ]);
+
+  assert.deepEqual(where.OR?.[0], {
+    deletedAt: null,
+    actionPlan: buildActionPlanScopeWhere(customReviewer),
+  });
+  assert.deepEqual(where.OR?.[1], { id: { in: ["evaluation-1"] } });
 });

@@ -117,7 +117,7 @@ notificationsRouter.post(
 
 notificationsRouter.delete(
   "/notifications/:id",
-  requirePermission("notifications.view"),
+  requirePermission("notifications.delete"),
   asyncHandler(async (request, response) => {
     await notificationService.delete(
       getRequiredNotificationId(request.params.id),

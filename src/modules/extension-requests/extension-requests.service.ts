@@ -50,6 +50,7 @@ const include = {
       description: true,
       observation: {
         select: {
+          areaAssignments: { select: { areaResponsibleUserId: true } },
           auditReport: { select: { reportNumber: true } },
           id: true,
           observationNumber: true,
@@ -95,6 +96,7 @@ const include = {
   managerReviewer: { select: userSelect },
   observation: {
     select: {
+      areaAssignments: { select: { areaResponsibleUserId: true } },
       auditReport: { select: { reportNumber: true } },
       auditorUserId: true,
       id: true,
@@ -125,6 +127,15 @@ type ReviewTaskSummary = {
   status: string;
 };
 
+export const getEffectiveExtensionDueDate = (input: {
+  actionPlanDueDate?: Date | null;
+  observationDueDate?: Date | null;
+  previousDueDate: Date;
+}): Date =>
+  input.actionPlanDueDate ??
+  input.observationDueDate ??
+  input.previousDueDate;
+
 const extensionTargetUrl = (record: ExtensionRecord) =>
   resolveNotificationTarget({
     entityId: record.id,
@@ -133,6 +144,7 @@ const extensionTargetUrl = (record: ExtensionRecord) =>
 
 const format = (
   record: ExtensionRecord,
+  access: AuthorizationSummary,
   reviewTask: ReviewTaskSummary | null = null,
 ) => ({
   actionPlan: record.actionPlan
@@ -146,12 +158,14 @@ const format = (
         observationArea: record.actionPlan.observationArea,
       }
     : null,
-  attachments: record.attachments.map(({ evidenceFile }) => ({
-    ...evidenceFile,
-    createdAt: evidenceFile.createdAt.toISOString(),
-    downloadPath: `/evidences/${evidenceFile.id}/download`,
-    sizeBytes: Number(evidenceFile.sizeBytes),
-  })),
+  attachments: authorizationService.can(access, "evidence.view")
+    ? record.attachments.map(({ evidenceFile }) => ({
+        ...evidenceFile,
+        createdAt: evidenceFile.createdAt.toISOString(),
+        downloadPath: `/evidences/${evidenceFile.id}/download`,
+        sizeBytes: Number(evidenceFile.sizeBytes),
+      }))
+    : [],
   createdAt: record.createdAt.toISOString(),
   classification: record.classification,
   finalApprovedAt: record.finalApprovedAt?.toISOString() ?? null,
@@ -163,12 +177,11 @@ const format = (
   managerComment: record.managerComment,
   managerReviewedAt: record.managerReviewedAt?.toISOString() ?? null,
   managerReviewer: record.managerReviewer,
-  effectiveDueDate: (record.status === "MANAGER_APPROVED"
-    ? record.proposedDueDate
-    : (record.actionPlan?.currentDueDate ??
-      record.observation?.currentDueDate ??
-      record.previousDueDate)
-  ).toISOString(),
+  effectiveDueDate: getEffectiveExtensionDueDate({
+    actionPlanDueDate: record.actionPlan?.currentDueDate ?? null,
+    observationDueDate: record.observation?.currentDueDate ?? null,
+    previousDueDate: record.previousDueDate,
+  }).toISOString(),
   observation:
     (record.observation ?? record.actionPlan?.observation)
       ? {
@@ -197,7 +210,15 @@ const legacyReviewTask = (
     return null;
   const isAreaResponsible =
     record.observationArea?.areaResponsible.id === access.userId ||
-    record.actionPlan?.observationArea?.areaResponsible.id === access.userId;
+    record.actionPlan?.observationArea?.areaResponsible.id === access.userId ||
+    (record.observation?.areaAssignments.some(
+      (assignment) => assignment.areaResponsibleUserId === access.userId,
+    ) ??
+      false) ||
+    (record.actionPlan?.observation.areaAssignments.some(
+      (assignment) => assignment.areaResponsibleUserId === access.userId,
+    ) ??
+      false);
   const canAct = access.isAdmin || isAreaResponsible;
   const allowedActions = [
     ...(canAct &&
@@ -229,7 +250,11 @@ const formatWithReviewTask = async (
         userId: access.userId,
       })
     : null;
-  return format(record, workflowTask ?? legacyReviewTask(record, access));
+  return format(
+    record,
+    access,
+    workflowTask ?? legacyReviewTask(record, access),
+  );
 };
 
 const accessWhere = (
@@ -247,6 +272,43 @@ const extensionWorkflowPermissions = (access: AuthorizationSummary) => [
     : []),
 ];
 
+const legacyReviewableWhere = (
+  access: AuthorizationSummary,
+): Prisma.DeadlineExtensionRequestWhereInput =>
+  access.isAdmin
+    ? { workflowInstanceId: null }
+    : {
+        OR: [
+          { observationArea: { areaResponsibleUserId: access.userId } },
+          {
+            actionPlan: {
+              observationArea: { areaResponsibleUserId: access.userId },
+            },
+          },
+          {
+            observation: {
+              areaAssignments: {
+                some: { areaResponsibleUserId: access.userId },
+              },
+            },
+          },
+        ],
+        workflowInstanceId: null,
+      };
+
+export const buildExtensionReviewQueueScopeWhere = (
+  access: AuthorizationSummary,
+  assignedRequestIds: readonly string[],
+): Prisma.DeadlineExtensionRequestWhereInput => ({
+  OR: [
+    accessWhere(access),
+    legacyReviewableWhere(access),
+    ...(assignedRequestIds.length
+      ? [{ id: { in: [...assignedRequestIds] } }]
+      : []),
+  ],
+});
+
 const find = async (
   id: string,
   access: AuthorizationSummary,
@@ -254,6 +316,44 @@ const find = async (
   const record = await prisma.deadlineExtensionRequest.findFirst({
     include,
     where: { deletedAt: null, id, ...accessWhere(access) },
+  });
+  if (!record) throw new AppError("Deadline extension request not found.", 404);
+  return record;
+};
+
+const findReviewable = async (
+  id: string,
+  access: AuthorizationSummary,
+): Promise<ExtensionRecord> => {
+  const task = await findActiveWorkflowTaskForEntity({
+    entityId: id,
+    entityType: "deadline_extension_request",
+    permissions: extensionWorkflowPermissions(access),
+    processType: "DEADLINE_EXTENSION",
+    userId: access.userId,
+  });
+  const record = task
+    ? await prisma.deadlineExtensionRequest.findFirst({
+        include,
+        where: { deletedAt: null, id },
+      })
+    : await prisma.deadlineExtensionRequest.findFirst({
+        include,
+        where: {
+          AND: [
+            { deletedAt: null, id },
+            { OR: [accessWhere(access), legacyReviewableWhere(access)] },
+          ],
+        },
+      });
+  if (!record) throw new AppError("Deadline extension request not found.", 404);
+  return record;
+};
+
+const findById = async (id: string): Promise<ExtensionRecord> => {
+  const record = await prisma.deadlineExtensionRequest.findFirst({
+    include,
+    where: { deletedAt: null, id },
   });
   if (!record) throw new AppError("Deadline extension request not found.", 404);
   return record;
@@ -321,11 +421,6 @@ export const extensionRequestsService = {
     if (!authorizationService.can(access, "deadline_extensions.request"))
       throw new AppError("No tiene permiso para solicitar ampliaciones.", 403);
     if (!actionPlan) throw new AppError("Action plan not found.", 404);
-    if (!access.isAdmin && actionPlan.responsibleUserId !== access.userId)
-      throw new AppError(
-        "Solo el ejecutor asignado puede solicitar la ampliación.",
-        403,
-      );
     const classification =
       await prisma.deadlineExtensionClassification.findFirst({
         select: { id: true, maxAdditionalDays: true },
@@ -384,11 +479,11 @@ export const extensionRequestsService = {
       );
       return request;
     });
-    return format(await find(created.id, access));
+    return format(await find(created.id, access), access);
   },
 
   async getById(id: string, access: AuthorizationSummary) {
-    return formatWithReviewTask(await find(id, access), access);
+    return formatWithReviewTask(await findReviewable(id, access), access);
   },
 
   async list(query: ListExtensionRequestsQuery, access: AuthorizationSummary) {
@@ -408,35 +503,11 @@ export const extensionRequestsService = {
           userId: access.userId,
         })
       : new Map<string, ActiveWorkflowTaskSummary>();
-    const legacyReviewable = access.isAdmin
-      ? { workflowInstanceId: null }
-      : {
-          OR: [
-            {
-              observationArea: {
-                areaResponsibleUserId: access.userId,
-              },
-            },
-            {
-              actionPlan: {
-                observationArea: {
-                  areaResponsibleUserId: access.userId,
-                },
-              },
-            },
-            {
-              observation: {
-                areaAssignments: {
-                  some: { areaResponsibleUserId: access.userId },
-                },
-              },
-            },
-          ],
-          workflowInstanceId: null,
-        };
     const filters: Prisma.DeadlineExtensionRequestWhereInput[] = [
       { deletedAt: null },
-      accessWhere(access),
+      query.reviewQueue
+        ? buildExtensionReviewQueueScopeWhere(access, [...reviewTasks.keys()])
+        : accessWhere(access),
       ...(query.actionPlanId ? [{ actionPlanId: query.actionPlanId }] : []),
       ...(query.areaId
         ? [
@@ -517,7 +588,7 @@ export const extensionRequestsService = {
             ? [{ id: { in: [...reviewTasks.keys()] } }]
             : []),
           {
-            ...legacyReviewable,
+            ...legacyReviewableWhere(access),
             status: "SENT_TO_MANAGER",
           },
         ],
@@ -541,6 +612,7 @@ export const extensionRequestsService = {
       data: records.map((record) =>
         format(
           record,
+          access,
           query.reviewQueue
             ? (reviewTasks.get(record.id) ?? legacyReviewTask(record, access))
             : null,
@@ -637,8 +709,8 @@ export const extensionRequestsService = {
       }
     });
     return {
-      current: format(await find(id, access)),
-      previous: format(previous),
+      current: format(await find(id, access), access),
+      previous: format(previous, access),
     };
   },
 
@@ -648,8 +720,8 @@ export const extensionRequestsService = {
     const previous = await find(id, access);
     if (previous.status === "SENT_TO_MANAGER" && previous.workflowInstanceId)
       return {
-        current: format(previous),
-        previous: format(previous),
+        current: format(previous, access),
+        previous: format(previous, access),
       };
     if (!EDITABLE_EXTENSION_REQUEST_STATUSES.has(previous.status))
       throw new AppError("This request cannot be submitted.", 409);
@@ -691,8 +763,8 @@ export const extensionRequestsService = {
       throw new AppError("La solicitud ya fue enviada a revisión.", 409);
     }
     return {
-      current: format(await find(id, access)),
-      previous: format(previous),
+      current: format(await find(id, access), access),
+      previous: format(previous, access),
     };
   },
 
@@ -709,14 +781,14 @@ export const extensionRequestsService = {
       )
     )
       throw new AppError("No tiene permiso para revisar esta ampliación.", 403);
-    const previous = await find(id, access);
+    const previous = await findReviewable(id, access);
     const alreadyReviewedStatus = approved
       ? "MANAGER_APPROVED"
       : "MANAGER_REJECTED";
     if (previous.status === alreadyReviewedStatus)
       return {
-        current: format(previous),
-        previous: format(previous),
+        current: format(previous, access),
+        previous: format(previous, access),
       };
     if (previous.status !== "SENT_TO_MANAGER")
       throw new AppError("This request is not pending management review.", 409);
@@ -730,8 +802,12 @@ export const extensionRequestsService = {
     if (
       !workflowInstanceId &&
       !access.isAdmin &&
-      previous.observationArea?.areaResponsible.id !== access.userId &&
-      previous.actionPlan?.observationArea?.areaResponsible.id !== access.userId
+      !(await prisma.deadlineExtensionRequest.findFirst({
+        select: { id: true },
+        where: {
+          AND: [{ deletedAt: null, id }, legacyReviewableWhere(access)],
+        },
+      }))
     )
       throw new AppError(
         "Solo el responsable del área puede decidir esta ampliación.",
@@ -803,8 +879,8 @@ export const extensionRequestsService = {
         userId: previous.requestedByUserId,
       });
     return {
-      current: format(await find(id, access)),
-      previous: format(previous),
+      current: format(await findById(id), access),
+      previous: format(previous, access),
     };
   },
 
@@ -835,8 +911,8 @@ export const extensionRequestsService = {
       where: { id },
     });
     return {
-      current: format(await find(id, access)),
-      previous: format(previous),
+      current: format(await find(id, access), access),
+      previous: format(previous, access),
     };
   },
 };

@@ -119,6 +119,52 @@ const createContext = (input: {
   custom: input.custom ?? {},
 });
 
+export const buildDeadlineExtensionWorkflowDecisionData = (input: {
+  action: WorkflowTaskAction;
+  actorUserId: string;
+  comment?: string | undefined;
+  now?: Date;
+}) => {
+  const correction = ["REQUEST_CORRECTION", "OBSERVE"].includes(input.action);
+  const approved = ["APPROVE", "COMPLETE"].includes(input.action);
+  return {
+    managerComment: input.comment?.trim() || null,
+    managerReviewedAt: input.now ?? new Date(),
+    managerReviewerId: input.actorUserId,
+    finalApprovedAt: null,
+    ...(correction
+      ? { status: "DRAFT" as const, workflowInstanceId: null }
+      : {
+          status: approved
+            ? ("SENT_TO_MANAGER" as const)
+            : ("MANAGER_REJECTED" as const),
+        }),
+  };
+};
+
+export const buildObservationClosureWorkflowDecisionData = (input: {
+  action: WorkflowTaskAction;
+  actorUserId: string;
+  comment?: string | undefined;
+  now?: Date;
+}) => {
+  const correction = ["REQUEST_CORRECTION", "OBSERVE", "REJECT"].includes(
+    input.action,
+  );
+  return {
+    reviewComment: input.comment?.trim() || null,
+    reviewedAt: input.now ?? new Date(),
+    reviewedByUserId: input.actorUserId,
+    ...(correction
+      ? { reviewStatus: "RETURNED" as const, workflowInstanceId: null }
+      : { evaluatedStatus: "CONCLUDED" as const }),
+  };
+};
+
+export const isFinalizationProgressComplete = (
+  reportedProgressPercent: number | null | undefined,
+): boolean => reportedProgressPercent === 100;
+
 const deadlineExtensionAdapter: WorkflowEntityAdapter = {
   processType: "DEADLINE_EXTENSION",
 
@@ -278,27 +324,12 @@ const deadlineExtensionAdapter: WorkflowEntityAdapter = {
       where: { deletedAt: null, id: entityId },
     });
     if (!request || request.status !== "SENT_TO_MANAGER") return;
-    if (action === "REQUEST_CORRECTION" || action === "OBSERVE") {
-      await db.deadlineExtensionRequest.update({
-        data: {
-          managerComment: comment?.trim() || null,
-          managerReviewedAt: new Date(),
-          managerReviewerId: actorUserId,
-          status: "DRAFT",
-        },
-        where: { id: entityId },
-      });
-      return;
-    }
-    const approved = action === "APPROVE" || action === "COMPLETE";
     await db.deadlineExtensionRequest.update({
-      data: {
-        managerComment: comment?.trim() || null,
-        managerReviewedAt: new Date(),
-        managerReviewerId: actorUserId,
-        finalApprovedAt: null,
-        status: approved ? "MANAGER_APPROVED" : "MANAGER_REJECTED",
-      },
+      data: buildDeadlineExtensionWorkflowDecisionData({
+        action,
+        actorUserId,
+        comment,
+      }),
       where: { id: entityId },
     });
   },
@@ -431,7 +462,7 @@ const observationClosureAdapter: WorkflowEntityAdapter = {
     };
     if (update.actionPlan.observation.status.isFinal)
       throw new AppError("La observación ya está cerrada.", 409);
-    if (update.reportedProgressPercent !== 100)
+    if (!isFinalizationProgressComplete(update.reportedProgressPercent))
       throw new AppError("El cierre requiere 100% de avance.", 400);
     if (!["DRAFT", "RETURNED"].includes(update.reviewStatus))
       throw new AppError("El cierre no está disponible para envío.", 409);
@@ -491,12 +522,11 @@ const observationClosureAdapter: WorkflowEntityAdapter = {
       throw new AppError("No se encontró la solicitud de cierre.", 404);
     if (action === "REQUEST_CORRECTION" || action === "OBSERVE") {
       await db.progressEvaluation.update({
-        data: {
-          reviewComment: comment?.trim() || null,
-          reviewedAt: new Date(),
-          reviewedByUserId: actorUserId,
-          reviewStatus: "RETURNED",
-        },
+        data: buildObservationClosureWorkflowDecisionData({
+          action,
+          actorUserId,
+          comment,
+        }),
         where: { id: entityId },
       });
       await db.progressReviewHistory.create({
@@ -511,12 +541,11 @@ const observationClosureAdapter: WorkflowEntityAdapter = {
       });
     } else if (action === "REJECT") {
       await db.progressEvaluation.update({
-        data: {
-          reviewComment: comment?.trim() || null,
-          reviewedAt: new Date(),
-          reviewedByUserId: actorUserId,
-          reviewStatus: "RETURNED",
-        },
+        data: buildObservationClosureWorkflowDecisionData({
+          action,
+          actorUserId,
+          comment,
+        }),
         where: { id: entityId },
       });
       await db.progressReviewHistory.create({
@@ -534,12 +563,11 @@ const observationClosureAdapter: WorkflowEntityAdapter = {
       update.reviewStatus !== "APPROVED"
     ) {
       await db.progressEvaluation.update({
-        data: {
-          evaluatedStatus: "CONCLUDED",
-          reviewedAt: new Date(),
-          reviewedByUserId: actorUserId,
-          reviewStatus: "APPROVED",
-        },
+        data: buildObservationClosureWorkflowDecisionData({
+          action,
+          actorUserId,
+          comment,
+        }),
         where: { id: entityId },
       });
       await db.progressReviewHistory.create({
@@ -547,7 +575,7 @@ const observationClosureAdapter: WorkflowEntityAdapter = {
           action: "APPROVED",
           fromStatus: update.reviewStatus,
           progressEvaluationId: entityId,
-          toStatus: "APPROVED",
+          toStatus: "SENT_TO_AUDIT",
           userId: actorUserId,
         },
       });
@@ -590,11 +618,22 @@ const observationClosureAdapter: WorkflowEntityAdapter = {
         db,
         update.actionPlan.observationId,
       );
-      if (update.reviewStatus !== "APPROVED")
+      if (update.reviewStatus !== "APPROVED") {
         await db.progressEvaluation.update({
           data: { reviewStatus: "APPROVED" },
           where: { id: entityId },
         });
+        const lastReview = await db.progressReviewHistory.findFirst({
+          orderBy: { createdAt: "desc" },
+          select: { id: true },
+          where: { progressEvaluationId: entityId },
+        });
+        if (lastReview)
+          await db.progressReviewHistory.update({
+            data: { toStatus: "APPROVED" },
+            where: { id: lastReview.id },
+          });
+      }
     } else if (
       ["REJECTED", "EXPIRED"].includes(finalResult) &&
       update.reviewStatus !== "RETURNED"

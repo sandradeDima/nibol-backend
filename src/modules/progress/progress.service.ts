@@ -230,11 +230,15 @@ const evaluationAccessWhere = (
 ): Prisma.ProgressEvaluationWhereInput =>
   buildProgressEvaluationScopeWhere(access);
 
-export const canReviewEvidenceAsAuditor = (
+export const canReviewEvidence = (access: AuthorizationSummary): boolean =>
+  authorizationService.can(access, "evidence.review");
+
+export const canViewEvidence = (access: AuthorizationSummary): boolean =>
+  authorizationService.can(access, "evidence.view");
+
+export const canViewActionPlanHistory = (
   access: AuthorizationSummary,
-): boolean =>
-  access.roleCode === "AUDITOR" &&
-  access.permissions.includes("evidence.review");
+): boolean => authorizationService.can(access, "action_plans.history.view");
 
 type EvidenceNotificationRecipient = {
   email: string;
@@ -444,6 +448,7 @@ const getEvidenceReviewRecord = async (
 
 const formatEvaluation = (
   record: EvaluationRecord,
+  access: AuthorizationSummary,
   reviewTask: ReviewTaskSummary | null = null,
 ) => ({
   actionPlan: {
@@ -459,21 +464,28 @@ const formatEvaluation = (
   },
   evaluatedStatus: record.evaluatedStatus,
   comment: record.comment,
-  evidence: record.evidenceFiles.map((file) => ({
-    ...file,
-    createdAt: file.createdAt.toISOString(),
-    downloadPath: `/evidences/${file.id}/download`,
-    observationArea: file.observationArea
-      ? { id: file.observationArea.id, name: file.observationArea.area.name }
-      : null,
-    reviewedAt: file.reviewedAt?.toISOString() ?? null,
-    sizeBytes: Number(file.sizeBytes),
-    submittedAt: file.submittedAt?.toISOString() ?? null,
-  })),
-  history: record.reviewHistory.map((item) => ({
-    ...item,
-    createdAt: item.createdAt.toISOString(),
-  })),
+  evidence: canViewEvidence(access)
+    ? record.evidenceFiles.map((file) => ({
+        ...file,
+        createdAt: file.createdAt.toISOString(),
+        downloadPath: `/evidences/${file.id}/download`,
+        observationArea: file.observationArea
+          ? {
+              id: file.observationArea.id,
+              name: file.observationArea.area.name,
+            }
+          : null,
+        reviewedAt: file.reviewedAt?.toISOString() ?? null,
+        sizeBytes: Number(file.sizeBytes),
+        submittedAt: file.submittedAt?.toISOString() ?? null,
+      }))
+    : [],
+  history: canViewActionPlanHistory(access)
+    ? record.reviewHistory.map((item) => ({
+        ...item,
+        createdAt: item.createdAt.toISOString(),
+      }))
+    : [],
   id: record.id,
   observation: {
     displayCode: `${record.actionPlan.observation.auditReport.reportNumber} / OBS-${String(record.actionPlan.observation.observationNumber).padStart(3, "0")}`,
@@ -548,6 +560,7 @@ const formatWithReviewTask = async (
     : null;
   return formatEvaluation(
     record,
+    access,
     workflowTask ?? legacyReviewTask(record, access),
   );
 };
@@ -559,6 +572,51 @@ const findEvaluation = async (
   const record = await prisma.progressEvaluation.findFirst({
     include: evaluationInclude,
     where: { deletedAt: null, id, ...evaluationAccessWhere(access) },
+  });
+  if (!record)
+    throw new AppError("No se encontró la evaluación de avance.", 404);
+  return record;
+};
+
+const findReviewableEvaluation = async (
+  id: string,
+  access: AuthorizationSummary,
+): Promise<EvaluationRecord> => {
+  const task = await findActiveWorkflowTaskForEntity({
+    entityId: id,
+    entityType: "progress_evaluation",
+    permissions: progressWorkflowPermissions(access),
+    processType: "OBSERVATION_CLOSURE",
+    userId: access.userId,
+  });
+  const record = task
+    ? await prisma.progressEvaluation.findFirst({
+        include: evaluationInclude,
+        where: { deletedAt: null, id },
+      })
+    : null;
+  if (task && !record)
+    throw new AppError("No se encontró la evaluación de avance.", 404);
+  return record ?? findEvaluation(id, access);
+};
+
+export const buildProgressReviewQueueScopeWhere = (
+  access: AuthorizationSummary,
+  assignedEvaluationIds: readonly string[],
+): Prisma.ProgressEvaluationWhereInput =>
+  assignedEvaluationIds.length
+    ? {
+        OR: [
+          evaluationAccessWhere(access),
+          { id: { in: [...assignedEvaluationIds] } },
+        ],
+      }
+    : evaluationAccessWhere(access);
+
+const findEvaluationById = async (id: string): Promise<EvaluationRecord> => {
+  const record = await prisma.progressEvaluation.findFirst({
+    include: evaluationInclude,
+    where: { deletedAt: null, id },
   });
   if (!record)
     throw new AppError("No se encontró la evaluación de avance.", 404);
@@ -695,11 +753,14 @@ export const progressService = {
       data: { ...input, actionPlanId, submittedByUserId: access.userId },
       include: evaluationInclude,
     });
-    return formatEvaluation(record);
+    return formatEvaluation(record, access);
   },
 
   async getProgressEvaluation(id: string, access: AuthorizationSummary) {
-    return formatWithReviewTask(await findEvaluation(id, access), access);
+    return formatWithReviewTask(
+      await findReviewableEvaluation(id, access),
+      access,
+    );
   },
 
   async listProgressEvaluations(
@@ -725,7 +786,9 @@ export const progressService = {
       : new Map<string, ActiveWorkflowTaskSummary>();
     const filters: Prisma.ProgressEvaluationWhereInput[] = [
       { deletedAt: null },
-      evaluationAccessWhere(access),
+      query.reviewQueue
+        ? buildProgressReviewQueueScopeWhere(access, [...reviewTasks.keys()])
+        : evaluationAccessWhere(access),
       ...(query.actionPlanId ? [{ actionPlanId: query.actionPlanId }] : []),
       ...(query.areaId
         ? [{ actionPlan: { observationArea: { areaId: query.areaId } } }]
@@ -800,6 +863,7 @@ export const progressService = {
       data: records.map((record) =>
         formatEvaluation(
           record,
+          access,
           query.reviewQueue
             ? (reviewTasks.get(record.id) ?? legacyReviewTask(record, access))
             : null,
@@ -820,12 +884,6 @@ export const progressService = {
     input: ReviewProgressEvaluationInput,
     access: AuthorizationSummary,
   ) {
-    const previous = await findEvaluation(id, access);
-    if (previous.reviewStatus !== "SENT_TO_AUDIT")
-      throw new AppError(
-        "Solo se pueden revisar evaluaciones enviadas a Auditoría.",
-        409,
-      );
     const requiredPermissions = [
       "action_plans.evaluate",
       ...(action === "approve"
@@ -841,6 +899,12 @@ export const progressService = {
       throw new AppError(
         "No tiene permisos para revisar evaluaciones de avance.",
         403,
+      );
+    const previous = await findReviewableEvaluation(id, access);
+    if (previous.reviewStatus !== "SENT_TO_AUDIT")
+      throw new AppError(
+        "Solo se pueden revisar evaluaciones enviadas a Auditoría.",
+        409,
       );
     if (action !== "approve" && !input.comment)
       throw new AppError(
@@ -901,8 +965,8 @@ export const progressService = {
         );
       }
       return {
-        current: formatEvaluation(await findEvaluation(id, access)),
-        previous: formatEvaluation(previous),
+        current: formatEvaluation(await findEvaluationById(id), access),
+        previous: formatEvaluation(previous, access),
       };
     }
     if (
@@ -981,8 +1045,8 @@ export const progressService = {
       });
     }
     return {
-      current: formatEvaluation(await findEvaluation(id, access)),
-      previous: formatEvaluation(previous),
+      current: formatEvaluation(await findEvaluation(id, access), access),
+      previous: formatEvaluation(previous, access),
     };
   },
 
@@ -1031,8 +1095,8 @@ export const progressService = {
       const current = await findEvaluation(id, access);
       if (current.reviewStatus === "SENT_TO_AUDIT")
         return {
-          current: formatEvaluation(current),
-          previous: formatEvaluation(previous),
+          current: formatEvaluation(current, access),
+          previous: formatEvaluation(previous, access),
         };
       throw new AppError(
         "La evaluación ya no está disponible para envío.",
@@ -1058,8 +1122,8 @@ export const progressService = {
       });
     }
     return {
-      current: formatEvaluation(await findEvaluation(id, access)),
-      previous: formatEvaluation(previous),
+      current: formatEvaluation(await findEvaluation(id, access), access),
+      previous: formatEvaluation(previous, access),
     };
   },
 
@@ -1082,8 +1146,8 @@ export const progressService = {
       where: { id },
     });
     return {
-      current: formatEvaluation(await findEvaluation(id, access)),
-      previous: formatEvaluation(previous),
+      current: formatEvaluation(await findEvaluation(id, access), access),
+      previous: formatEvaluation(previous, access),
     };
   },
 
@@ -1339,6 +1403,8 @@ export const progressService = {
     observationId: string,
     access: AuthorizationSummary,
   ) {
+    if (!canViewEvidence(access))
+      throw new AppError("You do not have permission to view evidence.", 403);
     const observation = await prisma.observation.findFirst({
       select: { id: true },
       where: {
@@ -1488,11 +1554,8 @@ export const progressService = {
     comment: string | null,
     access: AuthorizationSummary,
   ) {
-    if (!canReviewEvidenceAsAuditor(access))
-      throw new AppError(
-        "Solo un usuario con rol Auditor puede revisar evidencias.",
-        403,
-      );
+    if (!canReviewEvidence(access))
+      throw new AppError("No tiene permiso para revisar evidencias.", 403);
     const previous = await getEvidenceReviewRecord(id, access);
     assertFileLevelReviewable(previous.context);
     if (previous.reviewStatus !== "PENDING")
@@ -1642,6 +1705,8 @@ export const progressService = {
   },
 
   async downloadEvidence(id: string, access: AuthorizationSummary) {
+    if (!canViewEvidence(access))
+      throw new AppError("You do not have permission to view evidence.", 403);
     const record = await prisma.evidenceFile.findFirst({
       where: {
         deletedAt: null,

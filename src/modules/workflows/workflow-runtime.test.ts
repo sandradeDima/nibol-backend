@@ -5,7 +5,12 @@ import {
   buildWorkflowRuntimeContext,
   getSpecialRequestRuntimeSummary,
 } from "./workflow-runtime-context.js";
-import { getWorkflowEntityAdapter } from "./workflow-entity-adapters.js";
+import {
+  buildDeadlineExtensionWorkflowDecisionData,
+  buildObservationClosureWorkflowDecisionData,
+  getWorkflowEntityAdapter,
+  isFinalizationProgressComplete,
+} from "./workflow-entity-adapters.js";
 import type { PinnedWorkflowGraph } from "./workflow-runtime-graph.js";
 import { selectRuntimeTransition } from "./workflow-transition-resolver.js";
 import { workflowDesignerSaveSchema } from "./workflows.validators.js";
@@ -202,6 +207,78 @@ test("runtime registers operational adapters for every integrated process", () =
   assert.equal(
     getWorkflowEntityAdapter("EVIDENCE_REVIEW")?.processType,
     "EVIDENCE_REVIEW",
+  );
+});
+
+test("extension approvals stay pending until workflow completion", () => {
+  const now = new Date("2026-10-16T12:00:00.000Z");
+  assert.deepEqual(
+    buildDeadlineExtensionWorkflowDecisionData({
+      action: "APPROVE",
+      actorUserId: "area-reviewer",
+      comment: "  Validado  ",
+      now,
+    }),
+    {
+      finalApprovedAt: null,
+      managerComment: "Validado",
+      managerReviewedAt: now,
+      managerReviewerId: "area-reviewer",
+      status: "SENT_TO_MANAGER",
+    },
+  );
+  assert.deepEqual(
+    buildDeadlineExtensionWorkflowDecisionData({
+      action: "REQUEST_CORRECTION",
+      actorUserId: "area-reviewer",
+      comment: "Adjunte respaldo",
+      now,
+    }),
+    {
+      finalApprovedAt: null,
+      managerComment: "Adjunte respaldo",
+      managerReviewedAt: now,
+      managerReviewerId: "area-reviewer",
+      status: "DRAFT",
+      workflowInstanceId: null,
+    },
+  );
+});
+
+test("finalization approvals remain in Audit until the workflow completes", () => {
+  const now = new Date("2026-10-16T12:00:00.000Z");
+  assert.deepEqual(
+    buildObservationClosureWorkflowDecisionData({
+      action: "APPROVE",
+      actorUserId: "auditor",
+      comment: "Aprobado en esta etapa",
+      now,
+    }),
+    {
+      evaluatedStatus: "CONCLUDED",
+      reviewComment: "Aprobado en esta etapa",
+      reviewedAt: now,
+      reviewedByUserId: "auditor",
+    },
+  );
+  assert.equal(isFinalizationProgressComplete(80), false);
+  assert.equal(isFinalizationProgressComplete(99), false);
+  assert.equal(isFinalizationProgressComplete(100), true);
+  assert.equal(isFinalizationProgressComplete(null), false);
+  assert.deepEqual(
+    buildObservationClosureWorkflowDecisionData({
+      action: "REQUEST_CORRECTION",
+      actorUserId: "auditor",
+      comment: "Corrija la evidencia",
+      now,
+    }),
+    {
+      reviewComment: "Corrija la evidencia",
+      reviewedAt: now,
+      reviewedByUserId: "auditor",
+      reviewStatus: "RETURNED",
+      workflowInstanceId: null,
+    },
   );
 });
 

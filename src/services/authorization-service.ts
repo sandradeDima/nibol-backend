@@ -10,6 +10,7 @@ export type AuthorizationSummary = {
   isAdmin: boolean;
   permissions: string[];
   roleCode: RoleCode | null;
+  roleCodes?: RoleCode[];
   roleName: string | null;
   roles: string[];
   userId: string;
@@ -23,23 +24,63 @@ type AuthorizationLookupOptions = {
   cache?: AuthorizationRequestCache;
 };
 
-const getDataScope = (
-  roleCode: RoleCode | null,
-  isAdmin: boolean,
-): DataScope => {
-  if (isAdmin) return "ALL";
-  if (roleCode === "AUDITOR" || roleCode === "AUDIT_CHIEF")
+const ROLE_CODE_PRIORITY: readonly RoleCode[] = [
+  ADMIN_ROLE_CODE,
+  "AUDITOR",
+  "AUDIT_CHIEF",
+  "PROCESS_OWNER",
+  "AREA_RESPONSIBLE",
+  "EXECUTOR",
+];
+
+type AssignedRole = {
+  code: string;
+  name: string;
+  permissions: string[];
+};
+
+const recognizedRoleCodes = (roles: readonly AssignedRole[]): RoleCode[] =>
+  ROLE_CODE_PRIORITY.filter((code) => roles.some((role) => role.code === code));
+
+const getDataScope = (roleCodes: readonly RoleCode[]): DataScope => {
+  if (roleCodes.includes(ADMIN_ROLE_CODE)) return "ALL";
+  if (roleCodes.includes("AUDITOR") || roleCodes.includes("AUDIT_CHIEF"))
     return "AUDIT_SCOPE";
-  if (roleCode === "PROCESS_OWNER" || roleCode === "AREA_RESPONSIBLE") {
+  if (
+    roleCodes.includes("PROCESS_OWNER") ||
+    roleCodes.includes("AREA_RESPONSIBLE")
+  ) {
     return "AREA";
   }
   return "ASSIGNED";
 };
 
+export const buildAuthorizationSummaryFromRoles = (
+  userId: string,
+  roles: readonly AssignedRole[],
+): AuthorizationSummary => {
+  const roleCodes = recognizedRoleCodes(roles);
+  const roleCode = roleCodes[0] ?? null;
+  const primaryRole = roles.find((role) => role.code === roleCode);
+  const isAdmin = roleCodes.includes(ADMIN_ROLE_CODE);
+  return {
+    dataScope: getDataScope(roleCodes),
+    isAdmin,
+    permissions: [...new Set(roles.flatMap((role) => role.permissions))].sort(
+      (left, right) => left.localeCompare(right),
+    ),
+    roleCode,
+    roleCodes,
+    roleName: primaryRole?.name ?? null,
+    roles: [...new Set(roles.map((role) => role.name))],
+    userId,
+  };
+};
+
 const buildAuthorizationSummary = async (
   userId: string,
 ): Promise<AuthorizationSummary> => {
-  const userRole = await prisma.userRole.findFirst({
+  const userRoles = await prisma.userRole.findMany({
     select: {
       role: {
         select: {
@@ -64,24 +105,37 @@ const buildAuthorizationSummary = async (
     },
   });
 
-  const roleCode = (userRole?.role.code ?? null) as RoleCode | null;
-  const isAdmin = roleCode === ADMIN_ROLE_CODE;
-  const permissions =
-    userRole?.role.rolePermissions
-      .map(({ permission }) => permission.name)
-      .sort((left, right) => left.localeCompare(right)) ?? [];
-  const roleName = userRole?.role.name ?? null;
-
-  return {
-    dataScope: getDataScope(roleCode, isAdmin),
-    isAdmin,
-    permissions,
-    roleCode,
-    roleName,
-    roles: roleName ? [roleName] : [],
+  return buildAuthorizationSummaryFromRoles(
     userId,
-  };
+    userRoles.map(({ role }) => ({
+      code: role.code,
+      name: role.name,
+      permissions: role.rolePermissions.map(
+        ({ permission }) => permission.name,
+      ),
+    })),
+  );
 };
+
+const getRoleCodes = (access: AuthorizationSummary): readonly RoleCode[] =>
+  access.roleCodes ?? (access.roleCode ? [access.roleCode] : []);
+
+const getAreaAssignmentPredicates = (
+  access: AuthorizationSummary,
+): Prisma.ObservationAreaWhereInput[] => {
+  return [
+    { processOwnerUserId: access.userId },
+    { areaResponsibleUserId: access.userId },
+  ];
+};
+
+const assignedActionPlanWhere = (
+  access: AuthorizationSummary,
+): Prisma.ActionPlanWhereInput => ({
+  OR: [{ remediationPlanId: null }, { remediationPlan: { deletedAt: null } }],
+  deletedAt: null,
+  responsibleUserId: access.userId,
+});
 
 const getCachedSummary = (
   userId: string,
@@ -106,29 +160,45 @@ export const buildObservationScopeWhere = (
     case "ALL":
     case "AUDIT_SCOPE":
       return base;
-    case "AREA":
+    case "AREA": {
+      const areaAssignments = getAreaAssignmentPredicates(access);
+      if (getRoleCodes(access).includes("EXECUTOR")) {
+        return {
+          ...base,
+          OR: [
+            {
+              areaAssignments: {
+                some:
+                  areaAssignments.length === 1
+                    ? (areaAssignments[0] ?? {})
+                    : { OR: areaAssignments },
+              },
+            },
+            { actionPlans: { some: assignedActionPlanWhere(access) } },
+          ],
+        };
+      }
       return {
         ...base,
         areaAssignments: {
           some:
-            access.roleCode === "PROCESS_OWNER"
-              ? { processOwnerUserId: access.userId }
-              : { areaResponsibleUserId: access.userId },
+            areaAssignments.length === 1
+              ? (areaAssignments[0] ?? {})
+              : { OR: areaAssignments },
         },
       };
+    }
     case "ASSIGNED":
       return {
         ...base,
-        actionPlans: {
-          some: {
-            OR: [
-              { remediationPlanId: null },
-              { remediationPlan: { deletedAt: null } },
-            ],
-            deletedAt: null,
-            responsibleUserId: access.userId,
+        OR: [
+          {
+            areaAssignments: {
+              some: { OR: getAreaAssignmentPredicates(access) },
+            },
           },
-        },
+          { actionPlans: { some: assignedActionPlanWhere(access) } },
+        ],
       };
   }
 };
@@ -143,25 +213,29 @@ export const buildObservationAreaScopeWhere = (
     return base;
   }
   if (access.dataScope === "AREA") {
+    const areaAssignments = getAreaAssignmentPredicates(access);
+    if (getRoleCodes(access).includes("EXECUTOR")) {
+      return {
+        ...base,
+        OR: [
+          ...areaAssignments,
+          { actionPlans: { some: assignedActionPlanWhere(access) } },
+        ],
+      };
+    }
     return {
       ...base,
-      ...(access.roleCode === "PROCESS_OWNER"
-        ? { processOwnerUserId: access.userId }
-        : { areaResponsibleUserId: access.userId }),
+      ...(areaAssignments.length === 1
+        ? areaAssignments[0]
+        : { OR: areaAssignments }),
     };
   }
   return {
     ...base,
-    actionPlans: {
-      some: {
-        OR: [
-          { remediationPlanId: null },
-          { remediationPlan: { deletedAt: null } },
-        ],
-        deletedAt: null,
-        responsibleUserId: access.userId,
-      },
-    },
+    OR: [
+      ...getAreaAssignmentPredicates(access),
+      { actionPlans: { some: assignedActionPlanWhere(access) } },
+    ],
   };
 };
 
@@ -185,12 +259,27 @@ export const buildActionPlanScopeWhere = (
     return base;
   }
   if (access.dataScope === "AREA") {
+    if (getRoleCodes(access).includes("EXECUTOR")) {
+      return {
+        ...base,
+        OR: [
+          { observationArea: buildObservationAreaScopeWhere(access) },
+          { responsibleUserId: access.userId },
+        ],
+      };
+    }
     return {
       ...base,
       observationArea: buildObservationAreaScopeWhere(access),
     };
   }
-  return { ...base, responsibleUserId: access.userId };
+  return {
+    ...base,
+    OR: [
+      { observationArea: buildObservationAreaScopeWhere(access) },
+      { responsibleUserId: access.userId },
+    ],
+  };
 };
 
 export const buildRemediationPlanScopeWhere = (
@@ -299,6 +388,8 @@ export const buildExtensionRequestScopeWhere = (
     OR: [
       { requestedByUserId: access.userId },
       { actionPlan: buildActionPlanScopeWhere(access) },
+      { observationArea: buildObservationAreaScopeWhere(access) },
+      { observation: buildObservationScopeWhere(access) },
     ],
   };
 };

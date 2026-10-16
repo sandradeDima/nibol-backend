@@ -1,4 +1,4 @@
-import type { Request } from "express";
+import type { Request, RequestHandler } from "express";
 import { Router } from "express";
 import { z } from "zod";
 
@@ -54,6 +54,32 @@ const getAccess = (request: Request) => {
   return request.authorizationSummary;
 };
 
+const requireEntityHistoryPermission: RequestHandler = (
+  request,
+  _response,
+  next,
+) => {
+  const entityType = getParamValue(request.params.entityType).toUpperCase();
+  const specificPermission =
+    entityType === "OBSERVATION"
+      ? "observations.history.view"
+      : entityType === "ACTION_PLAN"
+        ? "action_plans.history.view"
+        : null;
+  const access = getAccess(request);
+  const canViewGenericActivity =
+    access.isAdmin ||
+    ["activity.view", "activity_logs.view"].some((permission) =>
+      access.permissions.includes(permission),
+    );
+  if (
+    canViewGenericActivity ||
+    (specificPermission && access.permissions.includes(specificPermission))
+  )
+    return next();
+  next(new AppError("No tiene permiso para ver este historial.", 403));
+};
+
 const parseQuery = (request: Request) => {
   const pageSize =
     getQueryValue(request.query.pageSize) ??
@@ -105,7 +131,11 @@ const activityAccess = requireAnyPermission([
 
 entityActivityRouter.get(
   "/observations/:id/history",
-  activityAccess,
+  requireAnyPermission([
+    "observations.history.view",
+    "activity.view",
+    "activity_logs.view",
+  ]),
   asyncHandler(async (request, response) => {
     const query = parseQuery(request);
     const result = await entityActivityService.list(
@@ -118,7 +148,13 @@ entityActivityRouter.get(
 
 entityActivityRouter.get(
   "/entities/:entityType/:entityId/history",
-  activityAccess,
+  requireAnyPermission([
+    "observations.history.view",
+    "action_plans.history.view",
+    "activity.view",
+    "activity_logs.view",
+  ]),
+  requireEntityHistoryPermission,
   asyncHandler(async (request, response) => {
     const query = parseQuery(request);
     const result = await entityActivityService.list(

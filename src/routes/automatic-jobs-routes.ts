@@ -4,9 +4,9 @@ import { Router, type RequestHandler } from "express";
 import { z } from "zod";
 
 import { asyncHandler } from "../middleware/async-handler.js";
+import { requirePermission } from "../middleware/authorization-middleware.js";
 import { emailService } from "../emails/EmailService.js";
 import { emailTemplateDefinitions } from "../emails/templates/index.js";
-import { authorizationService } from "../services/authorization-service.js";
 import { auditLogService } from "../services/audit-log-service.js";
 import { prisma } from "../utils/prisma.js";
 import { AppError } from "../utils/app-error.js";
@@ -90,29 +90,6 @@ const getUserId = (request: Parameters<RequestHandler>[0]): string => {
   return userId;
 };
 
-const requireSystemOperator: RequestHandler = async (
-  request,
-  response,
-  next,
-) => {
-  try {
-    const userId = getUserId(request);
-    const summary =
-      await authorizationService.getUserAuthorizationSummary(userId);
-    request.authorizationSummary = summary;
-    if (summary.dataScope !== "ALL") {
-      response.status(403).json({
-        success: false,
-        message: "Acceso restringido a Admin o Sistemas.",
-      });
-      return;
-    }
-    next();
-  } catch (error) {
-    next(error);
-  }
-};
-
 const extractCronSecret = (
   request: Parameters<RequestHandler>[0],
 ): string | null => {
@@ -187,7 +164,7 @@ automaticJobsRouter.post(
 
 automaticJobsRouter.get(
   "/automatic-jobs/deadline-reminders/config",
-  requireSystemOperator,
+  requirePermission("automatic_jobs.view"),
   asyncHandler(async (_request, response) => {
     sendSuccess(response, await deadlineReminderService.getConfiguration());
   }),
@@ -195,7 +172,7 @@ automaticJobsRouter.get(
 
 automaticJobsRouter.patch(
   "/automatic-jobs/deadline-reminders/policies/:role",
-  requireSystemOperator,
+  requirePermission("automatic_jobs.edit"),
   asyncHandler(async (request, response) => {
     const role = deadlineReminderRoleSchema.parse(request.params.role);
     const payload = deadlineReminderPolicySchema.parse(request.body);
@@ -214,7 +191,7 @@ automaticJobsRouter.patch(
 
 automaticJobsRouter.post(
   "/automatic-jobs/deadline-reminders/preview",
-  requireSystemOperator,
+  requirePermission("automatic_jobs.view"),
   asyncHandler(async (request, response) => {
     const payload = deadlineReminderPreviewSchema.parse(request.body);
     sendSuccess(
@@ -230,7 +207,7 @@ automaticJobsRouter.post(
 
 automaticJobsRouter.post(
   "/automatic-jobs/deadline-reminders/run",
-  requireSystemOperator,
+  requirePermission("automatic_jobs.edit"),
   asyncHandler(async (request, response) => {
     const payload = deadlineReminderRunSchema.parse(request.body ?? {});
     const userId = getUserId(request);
@@ -260,7 +237,7 @@ automaticJobsRouter.post(
 
 automaticJobsRouter.get(
   "/automatic-jobs/deadline-reminders/executions",
-  requireSystemOperator,
+  requirePermission("automatic_jobs.view"),
   asyncHandler(async (request, response) => {
     const pagination = paginationSchema.parse({
       page: getQueryValue(request.query.page),
@@ -276,7 +253,7 @@ automaticJobsRouter.get(
 
 automaticJobsRouter.get(
   "/automatic-jobs/deadline-reminders/latest",
-  requireSystemOperator,
+  requirePermission("automatic_jobs.view"),
   asyncHandler(async (_request, response) => {
     sendSuccess(response, await deadlineReminderService.getLatestExecution());
   }),
@@ -284,7 +261,7 @@ automaticJobsRouter.get(
 
 automaticJobsRouter.get(
   "/automatic-jobs/executions",
-  requireSystemOperator,
+  requirePermission("automatic_jobs.view"),
   asyncHandler(async (request, response) => {
     const pagination = paginationSchema.parse({
       page: getQueryValue(request.query.page),
@@ -300,7 +277,7 @@ automaticJobsRouter.get(
 
 automaticJobsRouter.get(
   "/automatic-jobs/latest",
-  requireSystemOperator,
+  requirePermission("automatic_jobs.view"),
   asyncHandler(async (_request, response) => {
     sendSuccess(response, await deadlineReminderService.getLatestExecution());
   }),
@@ -308,7 +285,7 @@ automaticJobsRouter.get(
 
 automaticJobsRouter.post(
   "/automatic-jobs/deadline-monitor/run",
-  requireSystemOperator,
+  requirePermission("automatic_jobs.edit"),
   asyncHandler(async (request, response) => {
     const userId = getUserId(request);
     const result = await deadlineReminderService.run({
@@ -328,7 +305,7 @@ automaticJobsRouter.post(
 
 automaticJobsRouter.get(
   "/automatic-jobs/workflow-timers/executions",
-  requireSystemOperator,
+  requirePermission("automatic_jobs.view"),
   asyncHandler(async (request, response) => {
     const pagination = paginationSchema.parse({
       page: getQueryValue(request.query.page),
@@ -344,7 +321,7 @@ automaticJobsRouter.get(
 
 automaticJobsRouter.get(
   "/automatic-jobs/workflow-timers/latest",
-  requireSystemOperator,
+  requirePermission("automatic_jobs.view"),
   asyncHandler(async (_request, response) => {
     sendSuccess(response, await workflowTimerService.getLatestExecution());
   }),
@@ -352,7 +329,7 @@ automaticJobsRouter.get(
 
 automaticJobsRouter.post(
   "/automatic-jobs/workflow-timers/run",
-  requireSystemOperator,
+  requirePermission("automatic_jobs.edit"),
   asyncHandler(async (request, response) => {
     const userId = getUserId(request);
     const result = await workflowTimerService.run({
@@ -371,7 +348,7 @@ automaticJobsRouter.post(
 
 automaticJobsRouter.get(
   "/automatic-jobs/rules",
-  requireSystemOperator,
+  requirePermission("automatic_jobs.view"),
   asyncHandler(async (_request, response) => {
     const keys = Object.keys(AUTOMATIC_NOTIFICATION_RULE_DEFAULTS);
     const records = await prisma.systemParameter.findMany({
@@ -432,7 +409,7 @@ automaticJobsRouter.get(
 
 automaticJobsRouter.get(
   "/automatic-jobs/deadline-reminders/email-preview",
-  requireSystemOperator,
+  requirePermission("automatic_jobs.view"),
   asyncHandler(async (_request, response) => {
     const rendered = await emailService.renderTemplate(
       "deadlineReminder",
@@ -448,7 +425,7 @@ automaticJobsRouter.get(
 
 automaticJobsRouter.patch(
   "/automatic-jobs/rules/:key",
-  requireSystemOperator,
+  requirePermission("automatic_jobs.edit"),
   asyncHandler(async (request, response) => {
     const key =
       typeof request.params.key === "string" ? request.params.key : "";

@@ -77,7 +77,7 @@ progressRouter.post(
 );
 progressRouter.get(
   "/observations/:id/evidence",
-  requirePermission("observations.view"),
+  requirePermission("evidence.view"),
   asyncHandler(controller.getObservationEvidence),
 );
 progressRouter.post(
@@ -108,7 +108,7 @@ progressRouter.post(
 );
 progressRouter.get(
   "/evidences/:id/download",
-  requirePermission("observations.view"),
+  requirePermission("evidence.view"),
   asyncHandler(controller.downloadEvidence),
 );
 progressRouter.get(
