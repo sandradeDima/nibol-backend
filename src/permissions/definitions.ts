@@ -118,6 +118,11 @@ export const REPORT_PERMISSION_NAMES = [
   "reports.export",
 ] as const;
 
+export const ACTIVITY_PERMISSION_NAMES = [
+  "activity.export",
+  "activity.technical",
+] as const;
+
 export const AUDIT_REPORT_PERMISSION_NAMES = [
   "audit_reports.view",
   "audit_reports.create",
@@ -160,6 +165,7 @@ export const ALL_PERMISSION_NAMES = Array.from(
     ...MODULE_PERMISSION_NAMES,
     ...WORKFLOW_PERMISSION_NAMES,
     ...REPORT_PERMISSION_NAMES,
+    ...ACTIVITY_PERMISSION_NAMES,
     ...AUDIT_REPORT_PERMISSION_NAMES,
     ...OBSERVATION_DOMAIN_PERMISSION_NAMES,
   ]),
