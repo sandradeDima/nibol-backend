@@ -20,6 +20,7 @@
     "db:migrate:dev": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
     "db:migrate:status": "prisma migrate status",
+    "db:check-connection": "node --import tsx scripts/check-sqlserver-connection.ts",
     "db:generate": "prisma generate",
     "db:seed": "prisma db seed",
     "db:seed:demo": "node --import tsx prisma/seed.ts --demo",
