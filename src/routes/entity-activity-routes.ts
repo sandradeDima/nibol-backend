@@ -123,11 +123,14 @@ const parseQuery = (request: Request) => {
 };
 
 export const entityActivityRouter = Router();
-const activityAccess = requireAnyPermission([
-  "activity.view",
-  "activity_logs.view",
-  "observations.view",
-]);
+const activityAccess = [
+  requirePermission("activity.view_module"),
+  requireAnyPermission([
+    "activity.view",
+    "activity_logs.view",
+    "observations.view",
+  ]),
+];
 
 entityActivityRouter.get(
   "/observations/:id/history",

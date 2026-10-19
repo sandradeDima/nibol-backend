@@ -230,9 +230,24 @@ const AREA_PERMISSIONS = [
   "reports.view",
 ] as const;
 
+const withModuleViewPermissions = (permissionNames: readonly string[]) => {
+  const moduleViewPermissions = permissionNames
+    .filter((permissionName) => permissionName.endsWith(".view"))
+    .filter((permissionName) => permissionName !== "activity.view")
+    .map(
+      (permissionName) =>
+        `${permissionName.slice(0, -".view".length)}.view_module`,
+    )
+    .filter((permissionName) =>
+      MODULE_PERMISSION_NAMES.includes(permissionName),
+    );
+
+  return [...permissionNames, ...new Set(moduleViewPermissions)];
+};
+
 export const ROLE_PERMISSION_NAMES: Record<RoleCode, readonly string[]> = {
   [ADMIN_ROLE_CODE]: ALL_PERMISSION_NAMES,
-  AUDITOR: AUDITOR_PERMISSIONS,
+  AUDITOR: withModuleViewPermissions(AUDITOR_PERMISSIONS),
   AUDIT_CHIEF: [
     "users.view",
     "areas.view",
@@ -252,8 +267,8 @@ export const ROLE_PERMISSION_NAMES: Record<RoleCode, readonly string[]> = {
     "notifications.view",
     "notifications.view_module",
   ],
-  PROCESS_OWNER: AREA_PERMISSIONS,
-  AREA_RESPONSIBLE: [
+  PROCESS_OWNER: withModuleViewPermissions(AREA_PERMISSIONS),
+  AREA_RESPONSIBLE: withModuleViewPermissions([
     ...AREA_PERMISSIONS,
     "workflow_tasks.approve",
     "workflow_tasks.reject",
@@ -261,8 +276,8 @@ export const ROLE_PERMISSION_NAMES: Record<RoleCode, readonly string[]> = {
     "action_plans.submit_to_audit",
     "deadline_extensions.approve",
     "deadline_extensions.reject",
-  ],
-  EXECUTOR: [
+  ]),
+  EXECUTOR: withModuleViewPermissions([
     "notifications.view",
     "workflow_tasks.view",
     "workflow_tasks.complete",
@@ -279,7 +294,7 @@ export const ROLE_PERMISSION_NAMES: Record<RoleCode, readonly string[]> = {
     "deadline_extensions.request",
     "progress_evaluations.view",
     "reports.view",
-  ],
+  ]),
 };
 
 export const CRITICAL_ADMIN_PERMISSIONS = [...ALL_PERMISSION_NAMES];

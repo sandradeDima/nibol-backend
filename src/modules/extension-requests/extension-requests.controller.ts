@@ -157,7 +157,7 @@ export const extensionRequestsController = {
     );
     await log(
       request,
-      "action_plans.submit_to_audit",
+      "deadline_extensions.request",
       result.current,
       result.previous,
     );

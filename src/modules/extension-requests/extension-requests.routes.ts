@@ -18,6 +18,7 @@ extensionRequestsRouter.get(
   "/extension-requests",
   requireAnyPermission([
     permissions.view,
+    permissions.request,
     permissions.approve,
     permissions.reject,
   ]),
@@ -27,6 +28,7 @@ extensionRequestsRouter.get(
   "/extension-requests/:id",
   requireAnyPermission([
     permissions.view,
+    permissions.request,
     permissions.approve,
     permissions.reject,
   ]),

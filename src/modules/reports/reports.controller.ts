@@ -46,6 +46,7 @@ const getAccess = (request: Request): AuthorizationSummary => {
 const reportQueryInput = (request: Request) => ({
   activeOnly: getQueryValue(request.query["filter.activeOnly"]),
   areaId: getQueryValue(request.query["filter.areaId"]),
+  areaIds: getQueryValue(request.query["filter.areaIds"]),
   areaResponsibleId: getQueryValue(request.query["filter.areaResponsibleId"]),
   auditReportId: getQueryValue(request.query["filter.auditReportId"]),
   dateFrom: getQueryValue(request.query["filter.dateFrom"]),

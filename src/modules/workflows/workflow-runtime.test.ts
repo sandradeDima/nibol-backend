@@ -240,7 +240,6 @@ test("extension approvals stay pending until workflow completion", () => {
       managerReviewedAt: now,
       managerReviewerId: "area-reviewer",
       status: "DRAFT",
-      workflowInstanceId: null,
     },
   );
 });
@@ -277,7 +276,6 @@ test("finalization approvals remain in Audit until the workflow completes", () =
       reviewedAt: now,
       reviewedByUserId: "auditor",
       reviewStatus: "RETURNED",
-      workflowInstanceId: null,
     },
   );
 });

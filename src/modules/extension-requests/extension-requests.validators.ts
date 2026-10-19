@@ -1,5 +1,17 @@
 import { z } from "zod";
 
+const csvArray = <T extends z.ZodType>(item: T) =>
+  z.preprocess(
+    (value) =>
+      typeof value === "string"
+        ? value
+            .split(",")
+            .map((value) => value.trim())
+            .filter(Boolean)
+        : value,
+    z.array(item).min(1).optional(),
+  );
+
 export const observationIdParamSchema = z.object({ id: z.uuid() });
 export const actionPlanIdParamSchema = z.object({ id: z.uuid() });
 export const extensionRequestIdParamSchema = z.object({ id: z.uuid() });
@@ -26,24 +38,24 @@ export const reviewExtensionRequestSchema = z.object({
 });
 export const listExtensionRequestsQuerySchema = z.object({
   actionPlanId: z.uuid().optional(),
-  areaId: z.uuid().optional(),
-  executorUserId: z.uuid().optional(),
+  areaId: csvArray(z.uuid()),
+  executorUserId: csvArray(z.uuid()),
   observationId: z.uuid().optional(),
   page: z.coerce.number().int().positive().default(1),
   perPage: z.coerce.number().int().positive().max(100).default(20),
   requestedByUserId: z.uuid().optional(),
-  responsibleUserId: z.uuid().optional(),
+  responsibleUserId: csvArray(z.uuid()),
   reviewQueue: z.coerce.boolean().default(false),
   search: z.string().trim().default(""),
-  status: z
-    .enum([
+  status: csvArray(
+    z.enum([
       "DRAFT",
       "SENT_TO_MANAGER",
       "MANAGER_APPROVED",
       "MANAGER_REJECTED",
       "CANCELLED",
-    ])
-    .optional(),
+    ]),
+  ),
   targetType: z.enum(["OBSERVATION", "ACTION_PLAN"]).optional(),
 });
 

@@ -51,6 +51,7 @@ export const reportProgressStatusSchema = z.enum([
 export const reportFiltersSchema = z.object({
   activeOnly: booleanFilter,
   areaId: z.uuid().optional(),
+  areaIds: csvArray(z.uuid()),
   areaResponsibleId: csvArray(z.uuid()),
   auditReportId: csvArray(z.uuid()),
   dateFrom: dateFilter,

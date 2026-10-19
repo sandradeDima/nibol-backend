@@ -91,13 +91,22 @@ export const getReportFilterCapabilities = (
   };
 };
 
+const getReportAreaIds = (
+  filters: Pick<ReportFilters, "areaId" | "areaIds">,
+) =>
+  filters.areaIds?.length
+    ? filters.areaIds
+    : filters.areaId
+      ? [filters.areaId]
+      : undefined;
+
 export const assertReportFilterAccess = (
   filters: ReportFilters,
   access: AuthorizationSummary,
 ): void => {
   const capabilities = getReportFilterCapabilities(access);
   const requested: Array<[boolean, boolean, string]> = [
-    [Boolean(filters.areaId), capabilities.area, "Área"],
+    [Boolean(getReportAreaIds(filters)?.length), capabilities.area, "Área"],
     [
       Boolean(filters.areaResponsibleId?.length),
       capabilities.areaResponsible,
@@ -230,6 +239,7 @@ const buildObservationWhere = (
     buildObservationScopeWhere(access),
   ];
   const periodFilter = dateRange(filters.dateFrom, filters.dateTo);
+  const areaIds = getReportAreaIds(filters);
 
   if (periodFilter) {
     conditions.push(
@@ -240,8 +250,8 @@ const buildObservationWhere = (
           },
     );
   }
-  if (filters.areaId)
-    conditions.push({ areaAssignments: { some: { areaId: filters.areaId } } });
+  if (areaIds?.length)
+    conditions.push({ areaAssignments: { some: { areaId: { in: areaIds } } } });
   if (filters.auditReportId?.length)
     conditions.push({ auditReportId: { in: filters.auditReportId } });
   if (filters.globalStatus)
@@ -547,6 +557,7 @@ export const buildActionPlanWhere = (
           filters.dateFrom,
           filters.dateTo,
         );
+  const areaIds = getReportAreaIds(filters);
 
   if (period) conditions.push(period as Prisma.ActionPlanWhereInput);
   const effectivePeriod =
@@ -558,8 +569,8 @@ export const buildActionPlanWhere = (
     conditions.push({
       observation: { auditReportId: { in: filters.auditReportId } },
     });
-  if (filters.areaId)
-    conditions.push({ observationArea: { areaId: filters.areaId } });
+  if (areaIds?.length)
+    conditions.push({ observationArea: { areaId: { in: areaIds } } });
   if (filters.areaResponsibleId?.length)
     conditions.push({
       observationArea: {
@@ -1687,12 +1698,18 @@ const buildFilterLabelMap = (
 ): Record<string, string | number | boolean | null> => {
   const rows = Array.isArray(dashboard.rows) ? dashboard.rows : [];
   const cutoffDate = filters.cutoffDate ?? dashboard.cutoffDate;
+  const areaIds = getReportAreaIds(filters);
 
   return {
     "Fecha de corte": cutoffDate ? formatReportDateKey(cutoffDate) : "Actual",
-    Área: filters.areaId
-      ? (rows.find((row) => row.area.id === filters.areaId)?.area.name ??
-        "Área seleccionada")
+    Área: areaIds?.length
+      ? [
+          ...new Set(
+            rows
+              .filter((row) => areaIds.includes(row.area.id))
+              .map((row) => row.area.name),
+          ),
+        ].join(", ") || "Área seleccionada"
       : "Todas",
     "Dueño del proceso": filters.processOwnerId?.length
       ? [
@@ -2076,8 +2093,9 @@ export const mapObservationDetailRows = (
   query: ReportPreviewQuery,
   now: Date,
   timeZone: string,
-): Array<Record<string, unknown>> =>
-  observations.flatMap((observation: any) => {
+): Array<Record<string, unknown>> => {
+  const areaIds = getReportAreaIds(query);
+  return observations.flatMap((observation: any) => {
     const base = {
       "Informe de Auditoría": observation.auditReport.reportNumber,
       "Título de informe": observation.auditReport.title,
@@ -2099,7 +2117,7 @@ export const mapObservationDetailRows = (
       const area = plan.observationArea;
       const deadline = getActionPlanDeadlineStatus(plan, now, timeZone);
       return (
-        (!query.areaId || area.area.id === query.areaId) &&
+        (!areaIds?.length || areaIds.includes(area.area.id)) &&
         (!query.areaResponsibleId?.length ||
           query.areaResponsibleId.includes(area.areaResponsible.id)) &&
         (!query.processOwnerId?.length ||
@@ -2148,6 +2166,7 @@ export const mapObservationDetailRows = (
       };
     });
   });
+};
 
 const getObservationDetailRows = async (
   query: ReportPreviewQuery,

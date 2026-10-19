@@ -1063,12 +1063,27 @@ export const progressService = {
         409,
       );
     if (previous.type === "FINALIZATION") {
+      let replaceInstanceId: string | undefined;
+      if (previous.workflowInstanceId) {
+        const priorInstance = await prisma.workflowInstance.findUnique({
+          select: { status: true },
+          where: { id: previous.workflowInstanceId },
+        });
+        if (
+          priorInstance &&
+          ["CANCELLED", "COMPLETED", "REJECTED"].includes(priorInstance.status)
+        ) {
+          replaceInstanceId = previous.workflowInstanceId;
+        }
+      }
+
       await workflowIntegrationService.startForEntity({
         access: { ...access, ipAddress: null },
         actorUserId: access.userId,
         entityId: id,
         entityType: "progress_evaluation",
         processType: "OBSERVATION_CLOSURE",
+        replaceInstanceId,
       });
     }
     const updated = await prisma.$transaction(async (tx) => {

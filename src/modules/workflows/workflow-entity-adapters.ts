@@ -127,13 +127,14 @@ export const buildDeadlineExtensionWorkflowDecisionData = (input: {
 }) => {
   const correction = ["REQUEST_CORRECTION", "OBSERVE"].includes(input.action);
   const approved = ["APPROVE", "COMPLETE"].includes(input.action);
+  // Correction routes can create another review task on the same instance.
   return {
     managerComment: input.comment?.trim() || null,
     managerReviewedAt: input.now ?? new Date(),
     managerReviewerId: input.actorUserId,
     finalApprovedAt: null,
     ...(correction
-      ? { status: "DRAFT" as const, workflowInstanceId: null }
+      ? { status: "DRAFT" as const }
       : {
           status: approved
             ? ("SENT_TO_MANAGER" as const)
@@ -151,12 +152,13 @@ export const buildObservationClosureWorkflowDecisionData = (input: {
   const correction = ["REQUEST_CORRECTION", "OBSERVE", "REJECT"].includes(
     input.action,
   );
+  // Correction routes can create another review task on the same instance.
   return {
     reviewComment: input.comment?.trim() || null,
     reviewedAt: input.now ?? new Date(),
     reviewedByUserId: input.actorUserId,
     ...(correction
-      ? { reviewStatus: "RETURNED" as const, workflowInstanceId: null }
+      ? { reviewStatus: "RETURNED" as const }
       : { evaluatedStatus: "CONCLUDED" as const }),
   };
 };

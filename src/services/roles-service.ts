@@ -90,22 +90,26 @@ const assertRoleNameAvailable = async (
 const getPermissionRecords = async (
   permissionNames: string[],
 ): Promise<Array<{ id: string; name: string }>> => {
+  if (
+    permissionNames.some(
+      (permissionName) =>
+        permissionName.startsWith("activity.") &&
+        permissionName !== "activity.view_module",
+    ) &&
+    !permissionNames.includes("activity.view_module")
+  ) {
+    throw new AppError(
+      "Activity permissions require the activity.view_module permission.",
+      400,
+    );
+  }
+
   for (const permissionName of permissionNames) {
     const moduleMatch = /^([a-z0-9_.]+)\.view_module$/.exec(permissionName);
     if (moduleMatch) {
-      const resourcePermissionPrefix = `${moduleMatch[1]}.`;
-      const hasOtherPermission = permissionNames.some(
-        (selectedPermission) =>
-          selectedPermission !== permissionName &&
-          selectedPermission.startsWith(resourcePermissionPrefix) &&
-          !selectedPermission
-            .slice(resourcePermissionPrefix.length)
-            .includes("."),
-      );
-
-      if (!hasOtherPermission) {
+      if (!permissionNames.includes(`${moduleMatch[1]}.view`)) {
         throw new AppError(
-          `At least one ${moduleMatch[1]} permission is required to view its module.`,
+          `The ${moduleMatch[1]}.view permission is required to view its module.`,
           400,
         );
       }
