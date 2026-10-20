@@ -83,7 +83,7 @@ const assertRoleNameAvailable = async (
   });
 
   if (existingRole && existingRole.id !== excludedRoleId) {
-    throw new AppError("A role with this name already exists.", 400);
+    throw new AppError("Ya existe un rol con este nombre.", 400);
   }
 };
 
@@ -99,7 +99,7 @@ const getPermissionRecords = async (
     !permissionNames.includes("activity.view_module")
   ) {
     throw new AppError(
-      "Activity permissions require the activity.view_module permission.",
+      "Los permisos de actividad requieren el permiso activity.view_module.",
       400,
     );
   }
@@ -109,7 +109,7 @@ const getPermissionRecords = async (
     if (moduleMatch) {
       if (!permissionNames.includes(`${moduleMatch[1]}.view`)) {
         throw new AppError(
-          `The ${moduleMatch[1]}.view permission is required to view its module.`,
+          `Se requiere el permiso ${moduleMatch[1]}.view para acceder a su módulo.`,
           400,
         );
       }
@@ -134,7 +134,7 @@ const getPermissionRecords = async (
   });
 
   if (permissions.length !== permissionNames.length) {
-    throw new AppError("One or more selected permissions are invalid.", 400);
+    throw new AppError("Uno o más permisos seleccionados no son válidos.", 400);
   }
 
   return permissions;
@@ -324,7 +324,7 @@ export const rolesService = {
             entityType: "role",
             metadata: {
               permissions: createdSnapshot.permissionNames,
-              summary: `${createdSnapshot.name} was created.`,
+              summary: `Se creó el rol ${createdSnapshot.name}.`,
             },
           },
           {
@@ -342,7 +342,7 @@ export const rolesService = {
               metadata: {
                 afterPermissions: createdSnapshot.permissionNames,
                 beforePermissions: [],
-                summary: `${createdSnapshot.permissionNames.length} permission(s) were assigned to ${createdSnapshot.name}.`,
+                summary: `Se asignaron ${createdSnapshot.permissionNames.length} permisos al rol ${createdSnapshot.name}.`,
               },
             },
             {
@@ -372,7 +372,7 @@ export const rolesService = {
     });
 
     if (!role) {
-      throw new AppError("Role not found.", 404);
+      throw new AppError("No se encontró el rol.", 404);
     }
 
     await adminSafeguardService.assertRoleDeletionAllowed(roleId);
@@ -423,7 +423,7 @@ export const rolesService = {
             entityId: previousSnapshot.id,
             entityType: "role",
             metadata: {
-              summary: `${previousSnapshot.name} was deleted.`,
+              summary: `Se eliminó el rol ${previousSnapshot.name}.`,
             },
           },
           {
@@ -438,7 +438,7 @@ export const rolesService = {
     const role = await getRoleDetailsRecord(roleId);
 
     if (!role) {
-      throw new AppError("Role not found.", 404);
+      throw new AppError("No se encontró el rol.", 404);
     }
 
     return mapRoleDetails(role);
@@ -509,7 +509,7 @@ export const rolesService = {
     });
 
     if (!existingRole) {
-      throw new AppError("Role not found.", 404);
+      throw new AppError("No se encontró el rol.", 404);
     }
 
     await assertRoleNameAvailable(input.name, roleId);
@@ -572,7 +572,7 @@ export const rolesService = {
             entityId: roleId,
             entityType: "role",
             metadata: {
-              summary: `${nextSnapshot.name} was updated.`,
+              summary: `Se actualizó el rol ${nextSnapshot.name}.`,
               updatedFields: ["description", "name", "permissions"],
             },
           },
@@ -596,7 +596,7 @@ export const rolesService = {
               metadata: {
                 afterPermissions: nextSnapshot.permissionNames,
                 beforePermissions: previousSnapshot.permissionNames,
-                summary: `${nextSnapshot.name}'s permissions changed.`,
+                summary: `Se modificaron los permisos del rol ${nextSnapshot.name}.`,
               },
             },
             {

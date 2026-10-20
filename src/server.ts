@@ -10,12 +10,12 @@ import { prisma } from "./utils/prisma.js";
 const server = createServer(app);
 
 const shutdown = (signal: NodeJS.Signals): void => {
-  logger.info(`Received ${signal}. Shutting down server.`);
+  logger.info(`Se recibió la señal ${signal}. Se cerrará el servidor.`);
 
   server.close((error) => {
     void prisma.$disconnect().finally(() => {
       if (error) {
-        logger.error("Server shutdown failed.", { message: error.message });
+        logger.error("Falló el cierre del servidor.", { message: error.message });
         process.exitCode = 1;
         return;
       }
@@ -26,7 +26,7 @@ const shutdown = (signal: NodeJS.Signals): void => {
 };
 
 server.listen(env.PORT, () => {
-  logger.info(`API server listening on http://localhost:${env.PORT}`);
+  logger.info(`Servidor de la API disponible en http://localhost:${env.PORT}`);
   workflowTimerScheduler.start();
   deadlineReminderScheduler.start();
 });

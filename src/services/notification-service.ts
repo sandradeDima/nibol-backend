@@ -353,7 +353,7 @@ export const notificationService = {
     );
 
     if (!existingNotification) {
-      throw new AppError("Notification not found.", 404);
+      throw new AppError("No se encontró la notificación.", 404);
     }
 
     await prisma.notification.update({
@@ -406,7 +406,7 @@ export const notificationService = {
     );
 
     if (!existingNotification) {
-      throw new AppError("Notification not found.", 404);
+      throw new AppError("No se encontró la notificación.", 404);
     }
 
     if (existingNotification.isRead) {

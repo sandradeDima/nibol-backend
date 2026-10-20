@@ -375,13 +375,13 @@ export const workflowInstanceService = {
       if (definitions.length === 0) {
         throw new WorkflowRuntimeError(
           WORKFLOW_RUNTIME_ERROR_CODES.NO_ACTIVE_VERSION,
-          "No existe un workflow publicado y activo para este tipo de proceso.",
+          "No existe un flujo de trabajo publicado y activo para este tipo de proceso.",
         );
       }
       if (definitions.length > 1) {
         throw new WorkflowRuntimeError(
           WORKFLOW_RUNTIME_ERROR_CODES.RUNTIME_CONFIGURATION,
-          "Hay varios workflows activos para este tipo de proceso; seleccione un workflow explícitamente.",
+          "Hay varios flujos de trabajo activos para este tipo de proceso; seleccione uno explícitamente.",
         );
       }
 
@@ -389,26 +389,26 @@ export const workflowInstanceService = {
       if (!selected || selected.status !== "PUBLISHED" || selected.archivedAt) {
         throw new WorkflowRuntimeError(
           WORKFLOW_RUNTIME_ERROR_CODES.RUNTIME_CONFIGURATION,
-          "El workflow seleccionado está archivado o no está publicado.",
+          "El flujo de trabajo seleccionado está archivado o no está publicado.",
         );
       }
       if (selected.processType !== input.processType) {
         throw new WorkflowRuntimeError(
           WORKFLOW_RUNTIME_ERROR_CODES.RUNTIME_CONFIGURATION,
-          "El workflow seleccionado no corresponde al tipo de proceso solicitado.",
+          "El flujo de trabajo seleccionado no corresponde al tipo de proceso solicitado.",
         );
       }
       const version = selected.activeVersion;
       if (!version || selected.activeVersionId !== version.id) {
         throw new WorkflowRuntimeError(
           WORKFLOW_RUNTIME_ERROR_CODES.NO_ACTIVE_VERSION,
-          "El workflow no tiene una versión activa.",
+          "El flujo de trabajo no tiene una versión activa.",
         );
       }
       if (version.status !== "PUBLISHED") {
         throw new WorkflowRuntimeError(
           WORKFLOW_RUNTIME_ERROR_CODES.VERSION_NOT_PUBLISHED,
-          "La versión activa del workflow no está publicada.",
+          "La versión activa del flujo de trabajo no está publicada.",
         );
       }
 

@@ -1004,7 +1004,7 @@ export const processPendingWorkflowTimers = async (input?: {
           where: { id: timerId },
         })
         .catch(() => undefined);
-      logger.error("Workflow timer failed.", {
+      logger.error("Falló el temporizador del flujo de trabajo.", {
         errorCode: failure.code,
         timerId,
       });
@@ -1158,7 +1158,7 @@ export const workflowTimerService = {
           errorCode: "WORKFLOW_NOTIFICATION_EMAIL_FAILED",
           message:
             result.error ??
-            "No fue posible entregar una notificación de workflow.",
+            "No fue posible entregar una notificación del flujo de trabajo.",
           timerId: result.deliveryId,
         })),
       );

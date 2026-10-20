@@ -1,24 +1,24 @@
-# SQL Server deployment
+# Implementación de SQL Server
 
-The backend targets SQL Server 2022 or newer and uses the `dbo` schema. Prisma supports SQL Server through `@prisma/adapter-mssql`; see [Prisma's SQL Server setup and connection-string reference](https://docs.prisma.io/docs/orm/v7/core-concepts/supported-databases/sql-server).
+El backend funciona con SQL Server 2022 o posterior y usa el esquema `dbo`. Prisma admite SQL Server mediante `@prisma/adapter-mssql`; consulte la [configuración y referencia de cadenas de conexión de SQL Server de Prisma](https://docs.prisma.io/docs/orm/v7/core-concepts/supported-databases/sql-server).
 
-## Database and permissions
+## Base de datos y permisos
 
-Create a dedicated database once through a DBA-approved SQL Server session. Confirm the target collation against the source MySQL database before creation; the repository does not record the source database collation. If the source uses case-insensitive and accent-insensitive comparisons, a SQL Server Windows collation with `_CI_AI` semantics is a candidate. For example:
+Cree una base de datos dedicada mediante una sesión de SQL Server aprobada por el DBA. Antes de crearla, compare la intercalación de destino con la base MySQL de origen; el repositorio no registra la intercalación de esa base. Si el origen compara sin distinguir mayúsculas ni acentos, puede considerar una intercalación de Windows de SQL Server con semántica `_CI_AI`. Por ejemplo:
 
 ```sql
 CREATE DATABASE [NIBOL] COLLATE Latin1_General_100_CI_AI_SC;
 ```
 
-SQL Server collation controls text comparison and ordering, so verify uniqueness and search behavior with real source data before choosing it. See [Microsoft's collation documentation](https://learn.microsoft.com/en-us/sql/relational-databases/collations/collation-and-unicode-support?view=sql-server-ver16).
+La intercalación de SQL Server controla la comparación y el orden del texto; antes de elegirla, verifique la unicidad y las búsquedas con datos reales del origen. Consulte la [documentación de intercalaciones de Microsoft](https://learn.microsoft.com/en-us/sql/relational-databases/collations/collation-and-unicode-support?view=sql-server-ver16).
 
-Use a dedicated migration principal with permission to create/alter tables, indexes, constraints, and Prisma's `_prisma_migrations` table. Grant it `db_owner` only for migration operations if the organization does not use a narrower reviewed role. Use a separate application principal with data reader/writer access for normal runtime. Keep credentials outside Git.
+Use una cuenta dedicada para migraciones con permisos para crear y modificar tablas, índices, restricciones y la tabla `_prisma_migrations` de Prisma. Asígnele `db_owner` únicamente para las operaciones de migración si la organización no cuenta con un rol revisado más limitado. Para la ejecución normal, use otra cuenta de aplicación con permisos de lectura y escritura de datos. Mantenga las credenciales fuera de Git.
 
-Allow TCP traffic from the application host to the SQL Server listener (usually port 1433). Production connections must use a certificate trusted by the application host, `encrypt=true`, and no `trustServerCertificate=true`. SQL Server connection-string values containing `:`, `\\`, `=`, `;`, `/`, `[`, `]`, `{`, or `}` need the escaping documented by Prisma; do not paste unescaped secrets into shell history.
+Permita tráfico TCP desde el host de la aplicación hasta el puerto de escucha de SQL Server (normalmente 1433). En producción, las conexiones deben usar un certificado confiable para el host de la aplicación y `encrypt=true`, sin `trustServerCertificate=true`. Los valores de la cadena de conexión que contengan `:`, `\\`, `=`, `;`, `/`, `[`, `]`, `{` o `}` requieren el escape documentado por Prisma; no pegue secretos sin escapar en el historial del shell.
 
-## Environment
+## Entorno
 
-Set `DATABASE_URL` to the target database and schema. For a local self-signed certificate only, `trustServerCertificate=true` is allowed when `NODE_ENV` is not `production`.
+Configure `DATABASE_URL` con la base de datos y el esquema de destino. `trustServerCertificate=true` se permite solo para certificados autofirmados locales cuando `NODE_ENV` no es `production`.
 
 ```sh
 export DATABASE_URL='sqlserver://db-host:1433;database=NIBOL;schema=dbo;user=nibol_app;password={replace-me};encrypt=true'
@@ -27,11 +27,11 @@ export SEED_ADMIN_EMAIL='platform-admin@example.com'
 export SEED_ADMIN_PASSWORD='replace-with-a-secret-of-at-least-8-characters'
 ```
 
-Production seeding requires explicit administrator email and password. Do not set the example password in production. For local setup, copy `.env.example` and replace its example values.
+La carga de semillas en producción exige definir explícitamente el correo y la contraseña del administrador. No use la contraseña de ejemplo en producción. Para la configuración local, copie `.env.example` y reemplace sus valores de ejemplo.
 
-## Build and deploy
+## Compilación e implementación
 
-Run these commands from `backend/` after a backup and after the migration chain has passed on a disposable SQL Server 2022+ database:
+Ejecute estos comandos desde `backend/` después de crear una copia de seguridad y de que la cadena de migraciones haya pasado en una base desechable de SQL Server 2022 o posterior:
 
 ```sh
 npm ci
@@ -43,15 +43,15 @@ npm run db:migrate:deploy
 npm run db:migrate:status
 ```
 
-`db:migrate:deploy` applies the checked-in history and fails on migration errors. Production deployment must not use `db:migrate:dev`, `db:reset`, or `prisma db push`. This branch has no reset command in `package.json`.
+`db:migrate:deploy` aplica el historial incluido en el repositorio y falla si hay errores de migración. En producción no use `db:migrate:dev`, `db:reset` ni `prisma db push`. Esta rama no define un comando de reinicio en `package.json`.
 
-For a new empty installation, install baseline reference/system data after migration:
+En una instalación nueva y vacía, cargue los datos base del sistema y de referencia después de la migración:
 
 ```sh
 npm run db:seed
 ```
 
-Optional local/demo operations are separate:
+Las operaciones locales y de demostración son independientes y opcionales:
 
 ```sh
 npm run db:seed:demo
@@ -59,13 +59,13 @@ npm run db:seed:roles
 npm run db:seed:admin
 ```
 
-`db:seed:demo` and `db:seed:roles` are blocked in production. `db:seed:admin` reasserts the administrator role and credential and removes/recreates that role's permission links; run it only when that is intended. For an existing MySQL database, follow the ordering and seed-impact notes in [SQL_SERVER_DATA_TRANSFER.md](SQL_SERVER_DATA_TRANSFER.md) before running seeds.
+`db:seed:demo` y `db:seed:roles` están bloqueados en producción. `db:seed:admin` vuelve a aplicar el rol y las credenciales del administrador, y elimina y recrea los vínculos de permisos de ese rol; ejecútelo solo si eso es lo previsto. Para una base MySQL existente, antes de cargar semillas siga el orden y las notas sobre su impacto en [SQL_SERVER_DATA_TRANSFER.md](SQL_SERVER_DATA_TRANSFER.md).
 
-## Backup and recovery
+## Copia de seguridad y recuperación
 
-Take and verify a full backup before applying migrations or importing data. Prisma migrations are forward-only operational steps; there is no automatic SQL rollback. If a migration fails, stop the deployment, preserve the SQL Server error and `_prisma_migrations` state, and restore the pre-deployment backup or prepare a reviewed corrective migration. Do not drop or reset a database containing records as a recovery shortcut. Retain the MySQL source and its backup until application cutover, asset checks, and business reconciliation are signed off.
+Cree y verifique una copia de seguridad completa antes de aplicar migraciones o importar datos. Las migraciones Prisma son operaciones que avanzan en una sola dirección; no existe una reversión SQL automática. Si una migración falla, detenga la implementación, conserve el error de SQL Server y el estado de `_prisma_migrations`, y restaure la copia previa a la implementación o prepare una migración correctiva revisada. No elimine ni reinicie una base con registros como atajo de recuperación. Conserve el origen MySQL y su copia de seguridad hasta aprobar la transición de la aplicación, las verificaciones de archivos y la conciliación del negocio.
 
-## Verification commands
+## Comandos de verificación
 
 ```sh
 npm run db:validate
@@ -78,4 +78,4 @@ npm run test:historical-observations
 npm run db:migrate:status
 ```
 
-The full migration chain, second deploy, live schema diff, and seed commands were verified on a disposable SQL Server 2022 instance. Production credentials, network policy, source collation, business-data reconciliation, and restore rehearsal still require environment-specific checks. See [SQL_SERVER_TEST_RESULTS.md](SQL_SERVER_TEST_RESULTS.md).
+La cadena completa de migraciones, la segunda implementación, la comparación del esquema en vivo y los comandos de semillas se verificaron en una instancia desechable de SQL Server 2022. Aún se deben verificar las credenciales de producción, la política de red, la intercalación de origen, la conciliación de datos de negocio y el ensayo de restauración en cada entorno. Consulte [SQL_SERVER_TEST_RESULTS.md](SQL_SERVER_TEST_RESULTS.md).

@@ -405,7 +405,7 @@ export const assertDraftWorkflowVersion = (status: string): void => {
 export const assertWorkflowCanStartInstance = (status: string): void => {
   if (status !== "PUBLISHED") {
     throw new AppError(
-      "Solo se pueden iniciar instancias con workflows publicados.",
+      "Solo se pueden iniciar instancias con flujos de trabajo publicados.",
       409,
     );
   }
@@ -518,7 +518,7 @@ export const validateDesignerGraph = (
     ) {
       addDesignerIssue(result, {
         code: "START_PROCESS_MISMATCH",
-        message: "El proceso del nodo Inicio debe coincidir con el workflow.",
+        message: "El proceso del nodo Inicio debe coincidir con el flujo de trabajo.",
         nodeKey: node.nodeKey,
         severity: "error",
       });
@@ -671,7 +671,7 @@ const getWorkflowDefinition = async (
   });
 
   if (!definition) {
-    throw new AppError("El workflow solicitado no existe.", 404);
+    throw new AppError("El flujo de trabajo solicitado no existe.", 404);
   }
 
   return mapWorkflowDefinition(definition);
@@ -708,7 +708,7 @@ const getWorkflowVersionForClone = async (
       })));
 
   if (!version) {
-    throw new AppError("La versión origen no existe dentro del workflow.", 404);
+    throw new AppError("La versión de origen no existe dentro del flujo de trabajo.", 404);
   }
 
   return version;
@@ -1149,7 +1149,7 @@ const buildDesignerResult = (
 ) => {
   if (version.definition.status === "ARCHIVED") {
     throw new AppError(
-      "No se puede abrir el diseñador de un workflow archivado.",
+      "No se puede abrir el diseñador de un flujo de trabajo archivado.",
       409,
     );
   }
@@ -1196,7 +1196,7 @@ const getDesignerVersion = async (
   });
 
   if (!version) {
-    throw new AppError("La versión de workflow solicitada no existe.", 404);
+    throw new AppError("La versión del flujo de trabajo solicitada no existe.", 404);
   }
 
   return version;
@@ -1910,7 +1910,7 @@ export const workflowService = {
       const previous = await getWorkflowDefinition(db, workflowId);
 
       if (previous.status === "ARCHIVED") {
-        throw new AppError("Un workflow archivado no se puede modificar.", 409);
+        throw new AppError("Un flujo de trabajo archivado no se puede modificar.", 409);
       }
 
       if (
@@ -1926,7 +1926,7 @@ export const workflowService = {
 
         if (previous._count.instances > 0 || publishedVersionCount > 0) {
           throw new AppError(
-            "No se puede cambiar el proceso de un workflow publicado o con instancias.",
+            "No se puede cambiar el proceso de un flujo de trabajo publicado o con instancias.",
             409,
           );
         }
@@ -2085,7 +2085,7 @@ export const workflowService = {
 
       if (definition.status === "ARCHIVED") {
         throw new AppError(
-          "No se pueden crear versiones en un workflow archivado.",
+          "No se pueden crear versiones de un flujo de trabajo archivado.",
           409,
         );
       }
@@ -2178,7 +2178,7 @@ export const workflowService = {
     });
 
     if (!version) {
-      throw new AppError("La versión de workflow solicitada no existe.", 404);
+      throw new AppError("La versión del flujo de trabajo solicitada no existe.", 404);
     }
 
     return mapWorkflowVersionDetail(version);
@@ -2211,7 +2211,7 @@ export const workflowService = {
 
       if (version.definition.status === "ARCHIVED") {
         throw new AppError(
-          "No se puede guardar el diseñador de un workflow archivado.",
+          "No se puede guardar el diseñador de un flujo de trabajo archivado.",
           409,
         );
       }
@@ -2259,7 +2259,7 @@ export const workflowService = {
       const version = await getDesignerVersion(db, versionId);
       if (version.definition.status === "ARCHIVED") {
         throw new AppError(
-          "No se puede validar el diseñador de un workflow archivado.",
+          "No se puede validar el diseñador de un flujo de trabajo archivado.",
           409,
         );
       }
@@ -2415,7 +2415,7 @@ export const workflowService = {
     return prisma.$transaction(async (db) => {
       const version = await getDesignerVersion(db, versionId);
       if (version.definition.status === "ARCHIVED") {
-        throw new AppError("No se puede publicar un workflow archivado.", 409);
+        throw new AppError("No se puede publicar un flujo de trabajo archivado.", 409);
       }
       assertDraftWorkflowVersion(version.status);
 

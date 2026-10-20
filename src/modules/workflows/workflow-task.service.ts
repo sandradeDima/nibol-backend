@@ -63,7 +63,7 @@ const assertTaskReadPermission = (access: WorkflowActorContext) => {
     ].some((permission) => access.permissions.includes(permission))
   ) {
     throw new AppError(
-      "Falta un permiso para consultar tareas de workflow.",
+      "Falta un permiso para consultar tareas del flujo de trabajo.",
       403,
     );
   }

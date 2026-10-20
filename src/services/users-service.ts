@@ -154,7 +154,7 @@ const assertUserCanLoseActiveAccess = async (userId: string): Promise<void> => {
   });
 
   if (remainingAdminCount === 0) {
-    throw new AppError("The last admin user cannot be deactivated.", 400);
+    throw new AppError("No se puede desactivar al último usuario administrador.", 400);
   }
 };
 
@@ -180,7 +180,7 @@ const assertEmailAvailable = async (
   });
 
   if (existingUser) {
-    throw new AppError("A user with this email already exists.", 400);
+    throw new AppError("Ya existe un usuario con ese correo electrónico.", 400);
   }
 };
 
@@ -195,7 +195,7 @@ const assertRolesExist = async (roleIds: string[]): Promise<void> => {
   });
 
   if (matchingRoles !== roleIds.length) {
-    throw new AppError("One or more selected roles are invalid.", 400);
+    throw new AppError("Uno o más roles seleccionados no son válidos.", 400);
   }
 };
 
@@ -455,7 +455,7 @@ export const usersService = {
               entityType: "user",
               metadata: {
                 email: snapshot.email,
-                summary: `${snapshot.name} was deleted.`,
+                summary: `Se eliminó el usuario ${snapshot.name}.`,
               },
             },
             {
@@ -490,7 +490,7 @@ export const usersService = {
 
     if (!user?.password) {
       throw new AppError(
-        "Password credentials are not available for this account.",
+        "Esta cuenta no tiene credenciales de contraseña disponibles.",
         400,
       );
     }
@@ -501,7 +501,7 @@ export const usersService = {
     );
 
     if (!passwordMatches) {
-      throw new AppError("The current password is incorrect.", 400);
+      throw new AppError("La contraseña actual es incorrecta.", 400);
     }
 
     const nextPasswordHash = await bcrypt.hash(input.newPassword, 12);
@@ -534,7 +534,7 @@ export const usersService = {
           entityType: "user",
           metadata: {
             email: user.email,
-            summary: `${user.name} changed their password.`,
+            summary: `El usuario ${user.name} cambió su contraseña.`,
             updatedFields: ["password"],
           },
         },
@@ -654,7 +654,7 @@ export const usersService = {
                 metadata: {
                   email: nextSnapshot.email,
                   roles: nextSnapshot.roleNames,
-                  summary: `${nextSnapshot.name} was restored.`,
+                  summary: `Se restauró el usuario ${nextSnapshot.name}.`,
                 },
               },
               {
@@ -676,7 +676,7 @@ export const usersService = {
                   entityType: "user",
                   metadata: {
                     roles: nextSnapshot.roleNames,
-                    summary: `Assigned ${nextSnapshot.roleNames.join(", ")} to ${nextSnapshot.name}.`,
+                    summary: `Se asignó el rol ${nextSnapshot.roleNames.join(", ")} a ${nextSnapshot.name}.`,
                   },
                 },
                 {
@@ -688,7 +688,7 @@ export const usersService = {
         });
       } catch (error) {
         if (isUniqueConstraintError(error)) {
-          throw new AppError("A user with this email already exists.", 400, {
+          throw new AppError("Ya existe un usuario con ese correo electrónico.", 400, {
             email: input.email,
             fields: error.meta?.target,
           });
@@ -762,7 +762,7 @@ export const usersService = {
               metadata: {
                 email: createdSnapshot.email,
                 roles: createdSnapshot.roleNames,
-                summary: `${createdSnapshot.name} was created.`,
+                summary: `Se creó el usuario ${createdSnapshot.name}.`,
               },
             },
             {
@@ -779,7 +779,7 @@ export const usersService = {
                 entityType: "user",
                 metadata: {
                   roles: createdSnapshot.roleNames,
-                  summary: `Assigned ${createdSnapshot.roleNames.join(", ")} to ${createdSnapshot.name}.`,
+                  summary: `Se asignó el rol ${createdSnapshot.roleNames.join(", ")} a ${createdSnapshot.name}.`,
                 },
               },
               {
@@ -793,7 +793,7 @@ export const usersService = {
       });
     } catch (error) {
       if (isUniqueConstraintError(error)) {
-        throw new AppError("A user with this email already exists.", 400, {
+        throw new AppError("Ya existe un usuario con ese correo electrónico.", 400, {
           email: input.email,
           fields: error.meta?.target,
         });
@@ -818,7 +818,7 @@ export const usersService = {
     });
 
     if (!user) {
-      throw new AppError("User not found.", 404);
+      throw new AppError("No se encontró el usuario.", 404);
     }
 
     await assertUserCanLoseActiveAccess(userId);
@@ -864,7 +864,7 @@ export const usersService = {
             entityType: "user",
             metadata: {
               email: previousSnapshot.email,
-              summary: `${previousSnapshot.name} was deleted.`,
+              summary: `Se eliminó el usuario ${previousSnapshot.name}.`,
             },
           },
           {
@@ -914,7 +914,7 @@ export const usersService = {
     });
 
     if (!user) {
-      throw new AppError("User not found.", 404);
+      throw new AppError("No se encontró el usuario.", 404);
     }
 
     return {
@@ -933,7 +933,7 @@ export const usersService = {
     const user = await getUserDetailsRecord(userId);
 
     if (!user) {
-      throw new AppError("User not found.", 404);
+      throw new AppError("No se encontró el usuario.", 404);
     }
 
     return mapUserDetails(user);
@@ -1045,7 +1045,7 @@ export const usersService = {
     });
 
     if (!user) {
-      throw new AppError("User not found.", 404);
+      throw new AppError("No se encontró el usuario.", 404);
     }
 
     if (user.emailVerified) {
@@ -1086,7 +1086,7 @@ export const usersService = {
     });
 
     if (!user) {
-      throw new AppError("User not found.", 404);
+      throw new AppError("No se encontró el usuario.", 404);
     }
 
     if (user.isActive === isActive) {
@@ -1132,7 +1132,7 @@ export const usersService = {
             entityId: userId,
             entityType: "user",
             metadata: {
-              summary: `${nextSnapshot.name} was ${isActive ? "enabled" : "disabled"}.`,
+              summary: `Se ${isActive ? "habilitó" : "deshabilitó"} al usuario ${nextSnapshot.name}.`,
             },
           },
           {
@@ -1161,7 +1161,7 @@ export const usersService = {
     });
 
     if (!user) {
-      throw new AppError("User not found.", 404);
+      throw new AppError("No se encontró el usuario.", 404);
     }
 
     await prisma.$transaction(async (transaction) => {
@@ -1199,7 +1199,7 @@ export const usersService = {
             entityId: userId,
             entityType: "user",
             metadata: {
-              summary: `${nextSnapshot.name} updated their profile.`,
+              summary: `El usuario ${nextSnapshot.name} actualizó su perfil.`,
               updatedFields: ["name"],
             },
           },
@@ -1231,7 +1231,7 @@ export const usersService = {
     });
 
     if (!existingUser) {
-      throw new AppError("User not found.", 404);
+      throw new AppError("No se encontró el usuario.", 404);
     }
 
     await assertEmailAvailable(input.email, userId);
@@ -1308,7 +1308,7 @@ export const usersService = {
             entityId: userId,
             entityType: "user",
             metadata: {
-              summary: `${nextSnapshot.name} was updated.`,
+              summary: `Se actualizó el usuario ${nextSnapshot.name}.`,
               updatedFields: ["email", "isActive", "name", "roles"],
             },
           },
@@ -1332,7 +1332,7 @@ export const usersService = {
               metadata: {
                 afterRoles: nextSnapshot.roleNames,
                 beforeRoles: previousSnapshot.roleNames,
-                summary: `${nextSnapshot.name}'s roles changed from ${previousSnapshot.roleNames.join(", ") || "none"} to ${nextSnapshot.roleNames.join(", ") || "none"}.`,
+                summary: `Los roles de ${nextSnapshot.name} cambiaron de ${previousSnapshot.roleNames.join(", ") || "ninguno"} a ${nextSnapshot.roleNames.join(", ") || "ninguno"}.`,
               },
             },
             {
@@ -1342,8 +1342,8 @@ export const usersService = {
 
           await notificationService.create(
             {
-              message: `Your access roles changed from ${previousSnapshot.roleNames.join(", ") || "none"} to ${nextSnapshot.roleNames.join(", ") || "none"}.`,
-              title: "Role changed",
+              message: `Sus roles de acceso cambiaron de ${previousSnapshot.roleNames.join(", ") || "ninguno"} a ${nextSnapshot.roleNames.join(", ") || "ninguno"}.`,
+              title: "Roles actualizados",
               type: "warning",
               userId,
             },
@@ -1378,7 +1378,7 @@ export const usersService = {
     });
 
     if (!user) {
-      throw new AppError("User not found.", 404);
+      throw new AppError("No se encontró el usuario.", 404);
     }
 
     const fileName = buildAvatarFileName(userId, file.originalName);

@@ -26,7 +26,7 @@ const classId = (request: Request) =>
   auditReportClassIdParamSchema.parse({ id: value(request.params.id) }).id;
 const userId = (request: Request) => {
   if (!request.authorizationSummary)
-    throw new AppError("Authorization required.", 401);
+    throw new AppError("Se requiere autorización.", 401);
   return request.authorizationSummary.userId;
 };
 

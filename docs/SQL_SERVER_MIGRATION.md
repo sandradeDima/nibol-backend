@@ -1,70 +1,70 @@
-# SQL Server migration
+# Migración a SQL Server
 
-Updated 2026-10-15. This branch converts the backend to Microsoft SQL Server 2022+ while retaining the original MySQL migration history and providing a separate data-transfer command. No existing database was contacted; all integration checks used disposable containers.
+Actualizado el 2026-10-15. Esta rama adapta el backend a Microsoft SQL Server 2022+ y conserva el historial original de migraciones de MySQL; también incluye un comando independiente para transferir datos. No se contactó ninguna base de datos existente; las verificaciones de integración se realizaron en contenedores desechables.
 
-## Status
+## Estado
 
-**PARTIAL.** The 15-migration chain, second deploy, live schema diff, all seed paths, Better Auth sign-in, representative Prisma CRUD, and a synthetic MySQL-to-SQL Server transfer pass on disposable databases. Full application API coverage, production data volume, external evidence assets, and backup/restore cutover remain unverified.
+**PARCIAL.** La cadena de 15 migraciones, la segunda implementación, la comparación del esquema en vivo, todas las rutas de siembra, el inicio de sesión de Better Auth, operaciones CRUD representativas de Prisma y una transferencia sintética de MySQL a SQL Server se completaron correctamente en bases de datos desechables. Aún no se verificaron todas las API de la aplicación, el volumen de datos de producción, los archivos externos de evidencia ni la transición con copia de seguridad y restauración.
 
-The backend remains on branch `feat/sql-server-support`, based on `1b211e0`. The frontend repository was not modified.
+El backend permanece en la rama `feat/sql-server-support`, basada en `1b211e0`. No se modificó el repositorio del frontend.
 
-## Inventory
+## Inventario
 
-- Prisma 7.8.0, TypeScript, Node.js, and the `prisma-client` generator.
-- 49 Prisma models. The original schema declared 25 enums used by 28 model fields; the SQL Server schema stores these as strings and removes Prisma enum declarations.
-- 18 original JSON model fields are represented as `NVARCHAR(MAX)`. `toDatabaseJson` serializes JSON and rejects non-serializable values; `parseDatabaseJson` parses stored JSON and can apply a caller-supplied validator. DTOs continue to expose parsed values. Workflow configuration continues through its existing workflow validators.
-- The initial migration creates 47 tables. The remaining migrations add two domain tables and retain the historical schema/data transitions.
-- 15 historical migrations are present in both the active directory and the MySQL archive. The archive matches the source revision byte-for-byte.
-- The original seed contained 37 MySQL `ON DUPLICATE KEY UPDATE` statements; these are now T-SQL `MERGE` upserts. The two observation `FOR UPDATE` statements now use SQL Server `UPDLOCK`, `HOLDLOCK`, and `ROWLOCK` hints. Other application access remains Prisma Client based.
+- Prisma 7.8.0, TypeScript, Node.js y el generador `prisma-client`.
+- 49 modelos Prisma. El esquema original declaraba 25 enums usados por 28 campos de modelo; el esquema de SQL Server los almacena como cadenas y elimina las declaraciones enum de Prisma.
+- Los 18 campos JSON originales de los modelos se representan como `NVARCHAR(MAX)`. `toDatabaseJson` serializa JSON y rechaza valores no serializables; `parseDatabaseJson` analiza el JSON almacenado y puede aplicar un validador proporcionado por quien llama. Los DTO siguen exponiendo los valores analizados. La configuración de flujos de trabajo continúa usando sus validadores existentes.
+- La migración inicial crea 47 tablas. Las migraciones restantes agregan dos tablas de dominio y conservan las transiciones históricas de esquema y datos.
+- Las 15 migraciones históricas están tanto en el directorio activo como en el archivo de MySQL. El archivo coincide byte por byte con la revisión de origen.
+- La semilla original contenía 37 instrucciones MySQL `ON DUPLICATE KEY UPDATE`; ahora son operaciones T-SQL `MERGE` de inserción o actualización. Las dos instrucciones `FOR UPDATE` de observaciones ahora usan las sugerencias de bloqueo `UPDLOCK`, `HOLDLOCK` y `ROWLOCK` de SQL Server. El resto del acceso de la aplicación sigue usando Prisma Client.
 
-## Conversion choices
+## Decisiones de conversión
 
-- The Prisma datasource declares `sqlserver`; Prisma 7 records the normalized provider as `mssql` in `migration_lock.toml`. The generated client connects through `PrismaMssql` and the `dbo` schema.
-- MySQL enum values are retained as TypeScript literal maps in `src/types/database-enums.ts`. `parseDatabaseEnum` checks values at runtime boundaries. Prisma itself exposes these stored columns as strings.
-- JSON database values are strings, decoded before they leave service boundaries. SQL `NULL` remains distinct from the JSON literal `null`.
-- MySQL text, date/time, boolean, integer, and binary fields use SQL Server `NVARCHAR`, `DATETIME2`, `DATE`, `BIT`, `INT`/`BIGINT`, and `VARBINARY` mappings as appropriate.
-- Nullable unique constraints use filtered SQL Server indexes where required, including notification/delivery dedupe keys, activity dedupe keys, catalogs with nullable keys, workflow active versions, and deadline extensions with optional action plans.
-- The Prisma schema uses `NoAction` for foreign keys where SQL Server cascade rules require application-side cleanup. Observation-area removal and workflow-node removal preserve prior set-null behavior explicitly. The historical-observation importer performs the corresponding cleanup before hard deletes.
-- Production rejects `trustServerCertificate=true` and requires `encrypt=true`. Local self-signed certificates are documented in `.env.example`.
-- `mysql2` remains a development dependency only for the optional one-time transfer utility. It is not used by the running backend or Prisma adapter.
+- La fuente de datos de Prisma declara `sqlserver`; Prisma 7 registra el proveedor normalizado como `mssql` en `migration_lock.toml`. El cliente generado se conecta mediante `PrismaMssql` y el esquema `dbo`.
+- Los valores enum de MySQL se conservan como mapas de literales TypeScript en `src/types/database-enums.ts`. `parseDatabaseEnum` verifica los valores en los límites de ejecución. Prisma expone estas columnas almacenadas como cadenas.
+- Los valores JSON de la base de datos son cadenas y se decodifican antes de salir de los límites del servicio. SQL `NULL` se mantiene diferenciado del literal JSON `null`.
+- Los campos de texto, fecha/hora, booleanos, enteros y binarios de MySQL se asignan, según corresponda, a `NVARCHAR`, `DATETIME2`, `DATE`, `BIT`, `INT`/`BIGINT` y `VARBINARY` de SQL Server.
+- Las restricciones únicas anulables usan índices filtrados de SQL Server cuando se requiere, por ejemplo en claves de deduplicación de notificaciones/entregas y actividad, catálogos con claves anulables, versiones activas de flujos de trabajo y ampliaciones de plazo con planes de acción opcionales.
+- El esquema de Prisma usa `NoAction` en las claves foráneas donde las reglas de cascada de SQL Server exigen limpieza desde la aplicación. La eliminación de relaciones observación-área y de nodos de flujos de trabajo conserva explícitamente el comportamiento previo de asignar `NULL`. El importador de observaciones históricas realiza la limpieza correspondiente antes de las eliminaciones permanentes.
+- En producción se rechaza `trustServerCertificate=true` y se exige `encrypt=true`. Los certificados locales autofirmados están documentados en `.env.example`.
+- `mysql2` permanece como dependencia de desarrollo únicamente para la utilidad opcional de transferencia única. No lo usan el backend en ejecución ni el adaptador Prisma.
 
-## Historical migrations
+## Migraciones históricas
 
-The 15 source migration files are preserved in `prisma/migrations-mysql-archive/`. Each active migration keeps its original directory name and order. The baseline preserves the original initial schema, and subsequent SQL Server migrations retain their data transformations. The workflow-node enum expansion is a SQL no-op because the SQL Server baseline already stores the value as a string; the migration directory remains in place to preserve history order.
+Los 15 archivos de migración de origen se conservan en `prisma/migrations-mysql-archive/`. Cada migración activa mantiene el nombre y el orden de su directorio original. La base conserva el esquema inicial y las migraciones posteriores de SQL Server mantienen sus transformaciones de datos. La ampliación del enum de nodos de flujo de trabajo no requiere cambios SQL porque la base de SQL Server ya almacena el valor como cadena; el directorio de migración se conserva para mantener el orden histórico.
 
-Static scanning found no MySQL migration constructs in the active chain. All 15 migrations also passed a clean SQL Server 2022 replay, a second deploy with no pending work, and a live Prisma schema diff with no difference. See [SQL_SERVER_MIGRATION_MATRIX.md](SQL_SERVER_MIGRATION_MATRIX.md) for each conversion.
+El análisis estático no encontró construcciones de migración de MySQL en la cadena activa. Las 15 migraciones también se aplicaron correctamente desde cero en SQL Server 2022; una segunda implementación no dejó trabajo pendiente y la comparación en vivo del esquema Prisma no detectó diferencias. Consulte [SQL_SERVER_MIGRATION_MATRIX.md](SQL_SERVER_MIGRATION_MATRIX.md) para ver cada conversión.
 
-## Seeds and transfer
+## Semillas y transferencia
 
-- `npm run db:seed` installs required reference data, roles/permissions, settings, canonical workflows, and the configured bootstrap administrator. Demo users and observations are excluded by default.
-- `npm run db:seed:demo` is optional and prohibited in production.
-- `npm run db:seed:roles` is a local role/demo-account helper and is prohibited in production.
-- Production bootstrap requires explicit `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD`; the development fallback account is never created in production.
-- `npm run db:transfer:mysql` is a separate, read-only, resumable MySQL-to-SQL Server import. It requires an empty target unless `--resume` is explicitly supplied, transfers IDs and relationships in bounded batches, checks source/target foreign keys and counts, and compares every transferred row. Run it before seeds because seed upserts may update canonical rows. See [SQL_SERVER_DATA_TRANSFER.md](SQL_SERVER_DATA_TRANSFER.md).
-- The transfer utility does not move files stored outside the database; evidence/object-storage assets need a separate copy that preserves references.
+- `npm run db:seed` instala los datos de referencia requeridos, los roles y permisos, la configuración, los flujos de trabajo canónicos y el administrador de inicio configurado. De forma predeterminada, excluye usuarios y observaciones de demostración.
+- `npm run db:seed:demo` es opcional y está prohibido en producción.
+- `npm run db:seed:roles` es una utilidad local para roles y cuentas de demostración; está prohibida en producción.
+- La inicialización en producción exige definir explícitamente `SEED_ADMIN_EMAIL` y `SEED_ADMIN_PASSWORD`; nunca se crea allí la cuenta alternativa de desarrollo.
+- `npm run db:transfer:mysql` realiza una importación independiente, de solo lectura y reanudable, de MySQL a SQL Server. Exige un destino vacío, salvo que se indique explícitamente `--resume`; transfiere ID y relaciones en lotes limitados, verifica las claves foráneas y los conteos de ambos lados, y compara cada fila transferida. Ejecútelo antes de las semillas porque sus operaciones de inserción o actualización pueden modificar filas canónicas. Consulte [SQL_SERVER_DATA_TRANSFER.md](SQL_SERVER_DATA_TRANSFER.md).
+- La utilidad de transferencia no mueve archivos almacenados fuera de la base de datos; los archivos de evidencia y almacenamiento de objetos deben copiarse por separado, conservando sus referencias.
 
-## Verification completed
+## Verificaciones completadas
 
-| Check                                                   | Result                                                                          |
+| Verificación                                            | Resultado                                                                       |
 | ------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `prisma validate` with a dummy SQL Server URL           | PASS                                                                            |
-| `prisma generate` with a dummy SQL Server URL           | PASS                                                                            |
-| TypeScript typecheck                                    | PASS                                                                            |
-| ESLint                                                  | PASS                                                                            |
-| Backend build                                           | PASS                                                                            |
-| Historical-observation importer tests                   | 23 passed                                                                       |
-| Backend unit tests                                      | 135 passed, 1 failed because Puppeteer could not launch Chromium in the sandbox |
-| Transfer/serialization/enum/admin-seed self-checks      | Passed as part of the unit suite                                                |
-| Active migration MySQL-syntax scan                      | PASS; zero matches                                                              |
-| MySQL migration archive comparison                      | PASS; all 15 files byte-identical to the source revision                        |
-| SQL Server replay, second deploy, and live schema drift | PASS; 15 migrations replayed, second deploy had no pending work, zero diff      |
-| Main/demo/admin/role seeds and reruns                   | PASS on disposable SQL Server databases                                         |
-| Better Auth sign-in and representative Prisma CRUD      | PASS; temporary session cleaned up after sign-in                                |
-| Synthetic MySQL transfer and `--resume`                 | PASS; 49 tables, 93 FK checks per side, six rows reconciled                     |
+| `prisma validate` con una URL ficticia de SQL Server   | Correcto                                                                         |
+| `prisma generate` con una URL ficticia de SQL Server   | Correcto                                                                         |
+| Verificación de tipos de TypeScript                    | Correcto                                                                         |
+| ESLint                                                  | Correcto                                                                         |
+| Compilación del backend                                 | Correcto                                                                         |
+| Pruebas del importador de observaciones históricas     | 23 aprobadas                                                                     |
+| Pruebas unitarias del backend                          | 135 aprobadas; 1 falló porque Puppeteer no pudo iniciar Chromium en el entorno aislado |
+| Autocomprobaciones de transferencia/serialización/enum/semilla | Aprobadas como parte de la suite unitaria                                  |
+| Búsqueda de sintaxis MySQL en migraciones activas        | Correcta; sin coincidencias                                                      |
+| Comparación del archivo de migraciones MySQL            | Correcta; los 15 archivos coinciden byte por byte con la revisión de origen      |
+| Reproducción SQL Server, segunda implementación y diferencias de esquema | Correcta; se reprodujeron 15 migraciones, la segunda implementación no tenía pendientes y no hubo diferencias |
+| Semillas y repeticiones para datos principal/demo/admin/roles | Correctas en bases de datos desechables de SQL Server                      |
+| Inicio de sesión de Better Auth y operaciones CRUD de Prisma | Correctos; la sesión temporal se eliminó después del inicio de sesión        |
+| Transferencia sintética de MySQL y `--resume`           | Correcta; 49 tablas, 93 verificaciones de claves foráneas por lado y seis filas conciliadas |
 
-The checks do not cover all API routes, load/concurrency behavior, actual production data volume, external evidence assets, or backup/restore. Review [SQL_SERVER_TEST_RESULTS.md](SQL_SERVER_TEST_RESULTS.md) before planning a production cutover.
+Las verificaciones no cubren todas las rutas de API, el comportamiento con carga o concurrencia, el volumen real de datos de producción, los archivos externos de evidencia ni los procesos de copia de seguridad y restauración. Antes de planificar la transición a producción, revise [SQL_SERVER_TEST_RESULTS.md](SQL_SERVER_TEST_RESULTS.md).
 
-## Official references
+## Referencias oficiales
 
 - [Prisma ORM 7 SQL Server support and connection configuration](https://docs.prisma.io/docs/orm/v7/core-concepts/supported-databases/sql-server)
 - [Prisma SQL Server schema reference](https://www.prisma.io/docs/orm/v7/reference/prisma-schema-reference)

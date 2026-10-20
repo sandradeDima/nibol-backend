@@ -86,7 +86,7 @@ const getQueryValue = (value: unknown): string | undefined => {
 
 const getUserId = (request: Parameters<RequestHandler>[0]): string => {
   const userId = request.authSession?.user.id;
-  if (!userId) throw new AppError("Authentication required.", 401);
+  if (!userId) throw new AppError("Debe iniciar sesión para continuar.", 401);
   return userId;
 };
 
@@ -112,10 +112,10 @@ automaticJobsRouter.post(
   "/internal/jobs/deadline-reminders",
   asyncHandler(async (request, response) => {
     if (!env.CRON_SECRET) {
-      throw new AppError("CRON_SECRET is not configured.", 503);
+      throw new AppError("La variable CRON_SECRET no está configurada.", 503);
     }
     if (!hasValidCronSecret(extractCronSecret(request))) {
-      throw new AppError("Invalid cron credentials.", 401);
+      throw new AppError("Las credenciales de cron no son válidas.", 401);
     }
     sendSuccess(
       response,
@@ -131,10 +131,10 @@ automaticJobsRouter.post(
   "/internal/jobs/deadline-monitor",
   asyncHandler(async (request, response) => {
     if (!env.CRON_SECRET) {
-      throw new AppError("CRON_SECRET is not configured.", 503);
+      throw new AppError("La variable CRON_SECRET no está configurada.", 503);
     }
     if (!hasValidCronSecret(extractCronSecret(request))) {
-      throw new AppError("Invalid cron credentials.", 401);
+      throw new AppError("Las credenciales de cron no son válidas.", 401);
     }
     sendSuccess(
       response,
@@ -150,10 +150,10 @@ automaticJobsRouter.post(
   "/internal/jobs/workflow-timers",
   asyncHandler(async (request, response) => {
     if (!env.CRON_SECRET) {
-      throw new AppError("CRON_SECRET is not configured.", 503);
+      throw new AppError("La variable CRON_SECRET no está configurada.", 503);
     }
     if (!hasValidCronSecret(extractCronSecret(request))) {
-      throw new AppError("Invalid cron credentials.", 401);
+      throw new AppError("Las credenciales de cron no son válidas.", 401);
     }
     sendSuccess(
       response,
@@ -430,7 +430,7 @@ automaticJobsRouter.patch(
     const key =
       typeof request.params.key === "string" ? request.params.key : "";
     if (!(key in AUTOMATIC_NOTIFICATION_RULE_DEFAULTS)) {
-      throw new AppError("Unknown automatic notification rule.", 404);
+      throw new AppError("No se encontró la regla de notificación automática.", 404);
     }
     const payload = ruleUpdateSchema.parse(request.body);
     const userId = getUserId(request);

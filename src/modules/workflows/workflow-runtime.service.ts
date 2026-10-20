@@ -94,7 +94,7 @@ const ensureHumanTask = async ({
   if (!node || (node.type !== "STAGE" && node.type !== "APPROVAL")) {
     throw new WorkflowRuntimeError(
       WORKFLOW_RUNTIME_ERROR_CODES.RUNTIME_CONFIGURATION,
-      "El runtime intentó crear una tarea para un nodo no accionable.",
+      "El motor de ejecución intentó crear una tarea para un nodo no accionable.",
     );
   }
 
@@ -344,7 +344,7 @@ const completeAtEnd = async ({
   if (!node || node.configurationJson.nodeType !== "END") {
     throw new WorkflowRuntimeError(
       WORKFLOW_RUNTIME_ERROR_CODES.RUNTIME_CONFIGURATION,
-      "El runtime intentó completar una instancia fuera de un nodo final.",
+      "El motor de ejecución intentó completar una instancia fuera de un nodo final.",
     );
   }
   const finalResult = node.configurationJson.finalResult;
@@ -395,7 +395,7 @@ const completeAtEnd = async ({
       WORKFLOW_RUNTIME_ERROR_CODES.INTEGRATION_FAILED,
       error instanceof AppError
         ? error.message
-        : "No se pudo actualizar el registro relacionado al completar el workflow.",
+        : "No se pudo actualizar el registro relacionado al completar el flujo de trabajo.",
       409,
     );
   }
@@ -472,7 +472,7 @@ const executeAutomaticNodesInternal = async ({
   if (!instance) {
     throw new WorkflowRuntimeError(
       WORKFLOW_RUNTIME_ERROR_CODES.INSTANCE_NOT_ACTIONABLE,
-      "La instancia de workflow no existe.",
+      "La instancia del flujo de trabajo no existe.",
       404,
     );
   }

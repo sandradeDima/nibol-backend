@@ -313,8 +313,8 @@ const chooseNextTransition = (
         warnings: selectedDecision.wasDefaulted
           ? [
               repeatedDecisionNode
-                ? "Se aplicó APPROVE después de un retorno controlado para modelar la nueva decisión humana."
-                : "Se aplicó APPROVE como decisión simulada predeterminada.",
+                ? "Se simuló «Aprobar» después de una devolución para representar la nueva decisión humana."
+                : "Se usó «Aprobar» como decisión predeterminada de la simulación.",
             ]
           : choice.usedFallback
             ? ["Se utilizó la salida DEFAULT para la decisión simulada."]
@@ -346,8 +346,8 @@ const chooseNextTransition = (
         warnings: selectedDecision.wasDefaulted
           ? [
               repeatedDecisionNode
-                ? "Se aplicó COMPLETE después de un retorno controlado para modelar la nueva acción humana."
-                : "Se aplicó COMPLETE como acción simulada predeterminada.",
+                ? "Se simuló «Completar» después de una devolución para representar la nueva acción humana."
+                : "Se usó «Completar» como acción predeterminada de la simulación.",
             ]
           : choice.usedFallback
             ? ["Se utilizó la salida DEFAULT para la acción simulada."]

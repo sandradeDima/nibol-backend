@@ -38,7 +38,7 @@ export const updateSettingsSchema = z.object({
     .string()
     .trim()
     .regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, {
-      message: "Primary color must be a valid hex color.",
+      message: "El color principal debe ser un código hexadecimal válido.",
     })
     .transform(normalizeHexColor),
   senderEmail: z.email().max(191),
@@ -50,7 +50,7 @@ export const updateSettingsSchema = z.object({
     .min(1)
     .max(100)
     .refine((value) => supportedTimezones.has(value), {
-      message: "Timezone must be a valid IANA timezone.",
+      message: "Seleccione una zona horaria IANA válida.",
     }),
 });
 

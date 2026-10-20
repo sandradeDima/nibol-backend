@@ -75,7 +75,7 @@ const database = (db?: Prisma.TransactionClient): Prisma.TransactionClient => {
   // the registry only for validation/context reads in standalone callers.
   if (!db)
     throw new AppError(
-      "La operación de workflow requiere una transacción.",
+      "La operación del flujo de trabajo requiere una transacción.",
       500,
     );
   return db;

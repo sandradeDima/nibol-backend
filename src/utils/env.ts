@@ -20,7 +20,7 @@ const envSchema = z.object({
   CRON_SECRET: z.string().min(32).optional(),
   DATABASE_URL: z
     .string()
-    .startsWith("sqlserver://", "DATABASE_URL must use sqlserver://"),
+    .startsWith("sqlserver://", "DATABASE_URL debe usar sqlserver://"),
   DEADLINE_REMINDER_INTERVAL_MS: z.coerce
     .number()
     .int()
@@ -69,7 +69,7 @@ const parsedEnv = envSchema
     if (value.NODE_ENV === "production" && encrypt !== "true") {
       context.addIssue({
         code: "custom",
-        message: "DATABASE_URL must explicitly set encrypt=true in production.",
+        message: "DATABASE_URL debe establecer encrypt=true explícitamente en producción.",
         path: ["DATABASE_URL"],
       });
     }
@@ -78,7 +78,7 @@ const parsedEnv = envSchema
       context.addIssue({
         code: "custom",
         message:
-          "DATABASE_URL must not set trustServerCertificate=true in production.",
+          "DATABASE_URL no debe establecer trustServerCertificate=true en producción.",
         path: ["DATABASE_URL"],
       });
     }
@@ -90,7 +90,7 @@ const parsedEnv = envSchema
       context.addIssue({
         code: "custom",
         message:
-          "MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET must be configured together.",
+          "MICROSOFT_CLIENT_ID y MICROSOFT_CLIENT_SECRET deben configurarse juntos.",
         path: ["MICROSOFT_CLIENT_ID"],
       });
     }
@@ -104,7 +104,7 @@ const parsedEnv = envSchema
       context.addIssue({
         code: "custom",
         message:
-          "BETTER_AUTH_SECRET must be explicitly configured in production.",
+          "BETTER_AUTH_SECRET debe configurarse explícitamente en producción.",
         path: ["BETTER_AUTH_SECRET"],
       });
     }
@@ -112,7 +112,7 @@ const parsedEnv = envSchema
     if (!process.env.BETTER_AUTH_URL) {
       context.addIssue({
         code: "custom",
-        message: "BETTER_AUTH_URL must be explicitly configured in production.",
+        message: "BETTER_AUTH_URL debe configurarse explícitamente en producción.",
         path: ["BETTER_AUTH_URL"],
       });
     }
@@ -120,7 +120,7 @@ const parsedEnv = envSchema
     if (!process.env.FRONTEND_URL) {
       context.addIssue({
         code: "custom",
-        message: "FRONTEND_URL must be explicitly configured in production.",
+        message: "FRONTEND_URL debe configurarse explícitamente en producción.",
         path: ["FRONTEND_URL"],
       });
     }
@@ -132,7 +132,7 @@ if (!parsedEnv.success) {
     .map(({ path, message }) => `${path.join(".") || "env"}: ${message}`)
     .join("\n");
 
-  throw new Error(`Invalid environment configuration.\n${issues}`);
+  throw new Error(`La configuración del entorno no es válida.\n${issues}`);
 }
 
 export const env = parsedEnv.data;

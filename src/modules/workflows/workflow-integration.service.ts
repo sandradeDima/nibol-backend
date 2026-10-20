@@ -157,7 +157,7 @@ const getActivePublishedWorkflow = async (
   });
   if (definitions.length > 1) {
     throw new AppError(
-      "Hay varios workflows publicados para este proceso. Corrija la configuración antes de continuar.",
+      "Hay varios flujos de trabajo publicados para este proceso. Corrija la configuración antes de continuar.",
       409,
     );
   }
@@ -255,7 +255,7 @@ const assertReviewTask = async (
   });
   if (!task)
     throw new AppError(
-      "El workflow no tiene una tarea de revisión activa asignada. Revise la instancia y su versión publicada antes de reintentar el envío.",
+      "El flujo de trabajo no tiene una tarea de revisión activa asignada. Revise la instancia y su versión publicada antes de reintentar el envío.",
       409,
     );
 };
@@ -291,7 +291,7 @@ export const workflowIntegrationService = {
     if (input.replaceInstanceId) {
       if (!(await hasActivePublishedWorkflow(input.processType)))
         throw new AppError(
-          "El registro ya utilizó un workflow. Debe existir una versión publicada para reenviarlo.",
+          "El registro ya utilizó un flujo de trabajo. Debe existir una versión publicada para reenviarlo.",
           409,
         );
     } else if (
@@ -321,7 +321,7 @@ export const workflowIntegrationService = {
       { deferNotifications: true, internal: true },
     );
     if (!started || typeof started.id !== "string") {
-      throw new AppError("No se pudo iniciar el workflow de integración.", 500);
+      throw new AppError("No se pudo iniciar el flujo de trabajo de integración.", 500);
     }
     try {
       await assertReviewTask(input.processType, started.id);
@@ -345,7 +345,7 @@ export const workflowIntegrationService = {
         await assertReviewTask(input.processType, existingInstanceId);
         return { instanceId: existingInstanceId, started: false, status: null };
       }
-      throw new AppError("No se pudo vincular el workflow al registro.", 409);
+      throw new AppError("No se pudo vincular el flujo de trabajo al registro.", 409);
     }
     await deliverWorkflowNotificationsForInstance(started.id);
     return { instanceId: started.id, started: true, status: started.status };

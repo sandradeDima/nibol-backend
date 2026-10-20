@@ -30,14 +30,14 @@ const value = (input: unknown): string | undefined =>
   typeof input === "string" ? input : undefined;
 const access = (request: Request): AuthorizationSummary => {
   if (!request.authorizationSummary)
-    throw new AppError("Authorization required.", 401);
+    throw new AppError("Se requiere autorización.", 401);
   return request.authorizationSummary;
 };
 const idWith = (request: Request, schema: typeof observationIdParamSchema) =>
   schema.parse({ id: value(request.params.id) }).id;
 const files = (request: Request) => {
   if (!Array.isArray(request.files) || request.files.length === 0)
-    throw new AppError("At least one file is required.", 400);
+    throw new AppError("Debe adjuntar al menos un archivo.", 400);
   return request.files.map((file) => ({
     buffer: file.buffer,
     mimetype: file.mimetype,

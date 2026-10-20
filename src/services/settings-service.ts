@@ -317,7 +317,7 @@ export class SettingsService {
           entityId: nextSnapshot.recordId,
           entityType: "setting",
           metadata: {
-            summary: "Application settings were updated.",
+            summary: "Se actualizaron los ajustes de la aplicación.",
             updatedFields: [
               "appName",
               "dateFormat",
@@ -337,8 +337,8 @@ export class SettingsService {
       await notificationService.createMany(
         {
           message:
-            "Application settings were updated. Review branding, sender identity, and localization defaults if this affects your workflow.",
-          title: "Settings updated",
+            "Se actualizaron los ajustes de la aplicación. Revise la marca, los datos del remitente y las preferencias de idioma y formato.",
+          title: "Ajustes actualizados",
           type: "info",
           userIds: await listActiveAdminUserIds(transaction),
         },
@@ -417,7 +417,7 @@ export class SettingsService {
           entityId: nextSnapshot.recordId,
           entityType: "setting",
           metadata: {
-            summary: "The application logo was updated.",
+            summary: "Se actualizó el logotipo de la aplicación.",
             updatedFields: ["logo"],
           },
         },
@@ -429,8 +429,8 @@ export class SettingsService {
       await notificationService.createMany(
         {
           message:
-            "Application settings were updated. The logo and shared branding assets changed.",
-          title: "Settings updated",
+            "Se actualizaron los ajustes de la aplicación. Cambiaron el logotipo y los recursos visuales compartidos.",
+          title: "Ajustes actualizados",
           type: "info",
           userIds: await listActiveAdminUserIds(transaction),
         },

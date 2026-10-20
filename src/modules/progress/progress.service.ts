@@ -335,9 +335,9 @@ const queueEvidenceNotifications = async (input: {
     }
   });
   void deliverEvidenceNotificationEmails(emailDeliveries).catch((error) => {
-    logger.error("Evidence notification email delivery failed.", {
+    logger.error("Falló la entrega del correo de notificación de evidencia.", {
       entityId: input.entityId,
-      message: error instanceof Error ? error.message : "Unknown error",
+      message: error instanceof Error ? error.message : "Error desconocido",
     });
   });
 };
@@ -442,7 +442,7 @@ const getEvidenceReviewRecord = async (
       ...buildEvidenceScopeWhere(access),
     },
   });
-  if (!evidence) throw new AppError("Evidence not found.", 404);
+  if (!evidence) throw new AppError("No se encontró la evidencia.", 404);
   return evidence;
 };
 
@@ -927,7 +927,7 @@ export const progressService = {
       if (action === "approve") {
         if (!task.allowedActions.includes("APPROVE"))
           throw new AppError(
-            "La aprobación no está disponible en este workflow.",
+            "La aprobación no está disponible en este flujo de trabajo.",
             409,
           );
         await workflowTaskService.actOnTask(
@@ -950,7 +950,7 @@ export const progressService = {
             : null;
         if (!workflowAction)
           throw new AppError(
-            "La devolución no está disponible en este workflow.",
+            "La devolución no está disponible en este flujo de trabajo.",
             409,
           );
         await workflowTaskService.actOnTask(
@@ -1149,7 +1149,7 @@ export const progressService = {
   ) {
     const previous = await findEvaluation(id, access);
     if (!canEdit(previous, access))
-      throw new AppError("You cannot edit this evaluation.", 403);
+      throw new AppError("No tiene permiso para editar esta evaluación.", 403);
     await prisma.progressEvaluation.update({
       data: {
         ...(input.comment !== undefined ? { comment: input.comment } : {}),
@@ -1238,7 +1238,7 @@ export const progressService = {
     access: AuthorizationSummary,
   ) {
     if (files.length === 0)
-      throw new AppError("At least one file is required.", 400);
+      throw new AppError("Debe adjuntar al menos un archivo.", 400);
     const expectedContext = target.progressEvaluationId
       ? "PROGRESS_EVALUATION"
       : target.actionPlanId
@@ -1248,7 +1248,7 @@ export const progressService = {
       input.context !== expectedContext &&
       !["FINDING", "CLOSURE"].includes(input.context)
     )
-      throw new AppError("Evidence context does not match its target.", 400);
+      throw new AppError("El contexto de la evidencia no coincide con el destino.", 400);
     const observation = await prisma.observation.findFirst({
       select: { id: true },
       where: {
@@ -1257,7 +1257,7 @@ export const progressService = {
         ...buildObservationScopeWhere(access),
       },
     });
-    if (!observation) throw new AppError("Observation not found.", 404);
+    if (!observation) throw new AppError("No se encontró la observación.", 404);
     if (target.observationAreaId) {
       const observationArea = await prisma.observationArea.findFirst({
         select: { id: true },
@@ -1347,7 +1347,7 @@ export const progressService = {
   ) {
     if (!["FINDING", "CLOSURE"].includes(input.context))
       throw new AppError(
-        "Observation evidence must be finding or closure evidence.",
+        "La evidencia de una observación debe corresponder al hallazgo o al cierre.",
         400,
       );
     return this.uploadEvidence(
@@ -1371,7 +1371,7 @@ export const progressService = {
   ) {
     if (input.context !== "ACTION_PLAN")
       throw new AppError(
-        "Action plan evidence must use ACTION_PLAN context.",
+        "La evidencia de un plan de acción debe usar el contexto de plan de acción.",
         400,
       );
     const actionPlan = await requireActionPlan(actionPlanId, access);
@@ -1395,12 +1395,12 @@ export const progressService = {
   ) {
     if (input.context !== "PROGRESS_EVALUATION")
       throw new AppError(
-        "Progress evaluation evidence must use PROGRESS_EVALUATION context.",
+        "La evidencia de una evaluación de avance debe usar el contexto de evaluación de avance.",
         400,
       );
     const evaluation = await findEvaluation(progressEvaluationId, access);
     if (!canEdit(evaluation, access))
-      throw new AppError("You cannot attach evidence to this evaluation.", 403);
+      throw new AppError("No tiene permiso para adjuntar evidencia a esta evaluación.", 403);
     return this.uploadEvidence(
       {
         actionPlanId: evaluation.actionPlan.id,
@@ -1419,7 +1419,7 @@ export const progressService = {
     access: AuthorizationSummary,
   ) {
     if (!canViewEvidence(access))
-      throw new AppError("You do not have permission to view evidence.", 403);
+      throw new AppError("No tiene permiso para ver esta evidencia.", 403);
     const observation = await prisma.observation.findFirst({
       select: { id: true },
       where: {
@@ -1428,7 +1428,7 @@ export const progressService = {
         ...buildObservationScopeWhere(access),
       },
     });
-    if (!observation) throw new AppError("Observation not found.", 404);
+    if (!observation) throw new AppError("No se encontró la observación.", 404);
     const records = await prisma.evidenceFile.findMany({
       include: {
         actionPlan: { select: { id: true, title: true } },
@@ -1479,10 +1479,10 @@ export const progressService = {
     const evidence = await getEvidenceReviewRecord(id, access);
     assertFileLevelReviewable(evidence.context);
     if (!access.isAdmin && evidence.uploadedByUserId !== access.userId)
-      throw new AppError("You cannot submit this evidence.", 403);
+      throw new AppError("No tiene permiso para enviar esta evidencia.", 403);
     if (evidence.reviewStatus === "PENDING") {
       const record = (await this.getObservationEvidenceForIds([id], access))[0];
-      if (!record) throw new AppError("Evidence not found.", 404);
+      if (!record) throw new AppError("No se encontró la evidencia.", 404);
       return record;
     }
     if (!["DRAFT", "RETURNED"].includes(evidence.reviewStatus))
@@ -1538,7 +1538,7 @@ export const progressService = {
         const record = (
           await this.getObservationEvidenceForIds([id], access)
         )[0];
-        if (!record) throw new AppError("Evidence not found.", 404);
+        if (!record) throw new AppError("No se encontró la evidencia.", 404);
         return record;
       }
       throw new AppError("La evidencia no está disponible para envío.", 409);
@@ -1559,7 +1559,7 @@ export const progressService = {
     }
 
     const record = (await this.getObservationEvidenceForIds([id], access))[0];
-    if (!record) throw new AppError("Evidence not found.", 404);
+    if (!record) throw new AppError("No se encontró la evidencia.", 404);
     return record;
   },
 
@@ -1619,7 +1619,7 @@ export const progressService = {
     }
 
     const record = (await this.getObservationEvidenceForIds([id], access))[0];
-    if (!record) throw new AppError("Evidence not found.", 404);
+    if (!record) throw new AppError("No se encontró la evidencia.", 404);
     return {
       current: record,
       previous: {
@@ -1691,7 +1691,7 @@ export const progressService = {
         ...buildEvidenceScopeWhere(access),
       },
     });
-    if (!record) throw new AppError("Evidence not found.", 404);
+    if (!record) throw new AppError("No se encontró la evidencia.", 404);
     if (["PENDING", "APPROVED"].includes(record.reviewStatus))
       throw new AppError(
         "No se puede eliminar evidencia pendiente o aprobada.",
@@ -1706,7 +1706,7 @@ export const progressService = {
         409,
       );
     if (!access.isAdmin && record.uploadedByUserId !== access.userId)
-      throw new AppError("You cannot delete this evidence.", 403);
+      throw new AppError("No tiene permiso para eliminar esta evidencia.", 403);
     await prisma.evidenceFile.update({
       data: { deletedAt: new Date() },
       where: { id },
@@ -1721,7 +1721,7 @@ export const progressService = {
 
   async downloadEvidence(id: string, access: AuthorizationSummary) {
     if (!canViewEvidence(access))
-      throw new AppError("You do not have permission to view evidence.", 403);
+      throw new AppError("No tiene permiso para ver esta evidencia.", 403);
     const record = await prisma.evidenceFile.findFirst({
       where: {
         deletedAt: null,
@@ -1729,12 +1729,12 @@ export const progressService = {
         ...buildEvidenceScopeWhere(access),
       },
     });
-    if (!record) throw new AppError("Evidence not found.", 404);
+    if (!record) throw new AppError("No se encontró la evidencia.", 404);
     const absolutePath = path.join(uploadsRootDir, record.relativePath);
     try {
       await fsAccess(absolutePath);
     } catch {
-      throw new AppError("Evidence file not found on disk.", 404);
+      throw new AppError("No se encontró el archivo de evidencia.", 404);
     }
     return {
       absolutePath,
@@ -1756,7 +1756,7 @@ export const progressService = {
         ...buildObservationScopeWhere(access),
       },
     });
-    if (!observation) throw new AppError("Observation not found.", 404);
+    if (!observation) throw new AppError("No se encontró la observación.", 404);
     if (input.actionPlanId) {
       const plan = await prisma.actionPlan.findFirst({
         select: { id: true },
@@ -1768,7 +1768,7 @@ export const progressService = {
       });
       if (!plan)
         throw new AppError(
-          "Action plan does not belong to the observation.",
+          "El plan de acción no pertenece a la observación.",
           400,
         );
     }
@@ -1819,9 +1819,9 @@ export const progressService = {
         observation: buildObservationScopeWhere(access),
       },
     });
-    if (!record) throw new AppError("Comment not found.", 404);
+    if (!record) throw new AppError("No se encontró el comentario.", 404);
     if (!access.isAdmin && record.authorUserId !== access.userId)
-      throw new AppError("You cannot edit this comment.", 403);
+      throw new AppError("No tiene permiso para editar este comentario.", 403);
     return prisma.observationComment.update({
       data: {
         ...(input.body !== undefined ? { body: input.body } : {}),
@@ -1842,9 +1842,9 @@ export const progressService = {
         observation: buildObservationScopeWhere(access),
       },
     });
-    if (!record) throw new AppError("Comment not found.", 404);
+    if (!record) throw new AppError("No se encontró el comentario.", 404);
     if (!access.isAdmin && record.authorUserId !== access.userId)
-      throw new AppError("You cannot delete this comment.", 403);
+      throw new AppError("No tiene permiso para eliminar este comentario.", 403);
     await prisma.observationComment.update({
       data: { deletedAt: new Date() },
       where: { id },

@@ -323,7 +323,7 @@ const find = async (
     include,
     where: { deletedAt: null, id, ...accessWhere(access) },
   });
-  if (!record) throw new AppError("Deadline extension request not found.", 404);
+  if (!record) throw new AppError("No se encontró la solicitud de ampliación de plazo.", 404);
   return record;
 };
 
@@ -352,7 +352,7 @@ const findReviewable = async (
           ],
         },
       });
-  if (!record) throw new AppError("Deadline extension request not found.", 404);
+  if (!record) throw new AppError("No se encontró la solicitud de ampliación de plazo.", 404);
   return record;
 };
 
@@ -361,7 +361,7 @@ const findById = async (id: string): Promise<ExtensionRecord> => {
     include,
     where: { deletedAt: null, id },
   });
-  if (!record) throw new AppError("Deadline extension request not found.", 404);
+  if (!record) throw new AppError("No se encontró la solicitud de ampliación de plazo.", 404);
   return record;
 };
 
@@ -381,7 +381,7 @@ const attachEvidence = async (
     },
   });
   if (count !== new Set(evidenceIds).size)
-    throw new AppError("One or more evidence files are invalid.", 400);
+    throw new AppError("Uno o más archivos de evidencia no son válidos.", 400);
   await tx.deadlineExtensionAttachment.createMany({
     data: Array.from(new Set(evidenceIds)).map((evidenceFileId) => ({
       evidenceFileId,
@@ -426,7 +426,7 @@ export const extensionRequestsService = {
     });
     if (!authorizationService.can(access, "deadline_extensions.request"))
       throw new AppError("No tiene permiso para solicitar ampliaciones.", 403);
-    if (!actionPlan) throw new AppError("Action plan not found.", 404);
+    if (!actionPlan) throw new AppError("No se encontró el plan de acción.", 404);
     if (!access.isAdmin && actionPlan.responsibleUserId !== access.userId)
       throw new AppError(
         "Solo puede solicitar ampliaciones de sus planes asignados.",
@@ -448,7 +448,7 @@ export const extensionRequestsService = {
     );
     if (input.proposedDueDate <= actionPlan.currentDueDate)
       throw new AppError(
-        "The proposed date must be after the current due date.",
+        "La fecha propuesta debe ser posterior a la fecha de compromiso vigente.",
         400,
       );
     if (input.proposedDueDate > maxAllowedDate)
@@ -663,9 +663,9 @@ export const extensionRequestsService = {
         403,
       );
     if (!EDITABLE_EXTENSION_REQUEST_STATUSES.has(previous.status))
-      throw new AppError("This request is not editable.", 409);
+      throw new AppError("Esta solicitud ya no se puede editar.", 409);
     if (!access.isAdmin && previous.requestedByUserId !== access.userId)
-      throw new AppError("You cannot edit this request.", 403);
+      throw new AppError("No tiene permiso para editar esta solicitud.", 403);
     const classification = input.classificationCode
       ? await prisma.deadlineExtensionClassification.findFirst({
           select: { id: true, maxAdditionalDays: true },
@@ -725,7 +725,7 @@ export const extensionRequestsService = {
           : null;
         const targetObservationId = observationId ?? actionPlanObservationId;
         if (!targetObservationId)
-          throw new AppError("Extension target is invalid.", 409);
+          throw new AppError("El destino de la ampliación no es válido.", 409);
         await attachEvidence(
           tx,
           id,
@@ -758,7 +758,7 @@ export const extensionRequestsService = {
       !EDITABLE_EXTENSION_REQUEST_STATUSES.has(previous.status) &&
       !(previous.status === "SENT_TO_MANAGER" && previous.workflowInstanceId)
     )
-      throw new AppError("This request cannot be submitted.", 409);
+      throw new AppError("Esta solicitud no se puede enviar.", 409);
     if (!access.isAdmin && previous.requestedByUserId !== access.userId)
       throw new AppError(
         "Solo el solicitante puede enviar la ampliación.",
@@ -824,7 +824,7 @@ export const extensionRequestsService = {
         previous: format(previous, access),
       };
     if (previous.status !== "SENT_TO_MANAGER")
-      throw new AppError("This request is not pending management review.", 409);
+      throw new AppError("Esta solicitud no está pendiente de revisión por Gerencia.", 409);
     if (!approved && !input.comment)
       throw new AppError(
         "Debe ingresar un comentario para rechazar la ampliación.",
@@ -922,7 +922,7 @@ export const extensionRequestsService = {
       throw new AppError("No tiene permiso para cancelar ampliaciones.", 403);
     const previous = await find(id, access);
     if (!access.isAdmin && previous.requestedByUserId !== access.userId)
-      throw new AppError("You cannot cancel this request.", 403);
+      throw new AppError("No tiene permiso para cancelar esta solicitud.", 403);
     if (previous.workflowInstanceId) {
       const workflowInstance = await prisma.workflowInstance.findUnique({
         select: { status: true },

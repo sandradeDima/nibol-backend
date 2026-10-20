@@ -12,7 +12,7 @@ const runOnce = (): void => {
     })
     .then((summary) => {
       if (summary.lockSkipped) return;
-      logger.debug("Deadline reminder scheduler completed.", {
+      logger.debug("Finalizó la programación de recordatorios de plazos.", {
         emailsSent: summary.emailsSent,
         failuresCount: summary.failuresCount,
         plansIncluded: summary.plansIncluded,
@@ -20,8 +20,8 @@ const runOnce = (): void => {
       });
     })
     .catch((error: unknown) => {
-      logger.error("Deadline reminder scheduler failed.", {
-        message: error instanceof Error ? error.message : "Unknown error",
+      logger.error("Falló la programación de recordatorios de plazos.", {
+        message: error instanceof Error ? error.message : "Error desconocido",
       });
     });
 };

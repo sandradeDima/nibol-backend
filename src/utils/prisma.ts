@@ -11,7 +11,7 @@ const globalForPrisma = globalThis as typeof globalThis & {
 
 const adapter = new PrismaMssql(env.DATABASE_URL, {
   schema: "dbo",
-  onPoolError: (error) => logger.error("SQL Server pool error.", { error }),
+  onPoolError: (error) => logger.error("Error en el grupo de conexiones de SQL Server.", { error }),
 });
 
 export const prisma =

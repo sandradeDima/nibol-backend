@@ -21,7 +21,7 @@ const value = (input: unknown): string | undefined =>
   typeof input === "string" ? input : undefined;
 const access = (request: Request): AuthorizationSummary => {
   if (!request.authorizationSummary)
-    throw new AppError("Authorization required.", 401);
+    throw new AppError("Se requiere autorización.", 401);
   return request.authorizationSummary;
 };
 const parsedId = (

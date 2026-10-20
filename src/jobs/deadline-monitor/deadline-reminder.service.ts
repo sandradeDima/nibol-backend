@@ -711,13 +711,13 @@ const deliverReminderEmailDelivery = async (
         !Array.isArray((value as ReminderPayload).plans) ||
         typeof (value as ReminderPayload).platformLink !== "string"
       ) {
-        throw new Error("Reminder payload has an invalid shape.");
+        throw new Error("La carga útil del recordatorio tiene un formato no válido.");
       }
       return value as ReminderPayload;
     },
   );
   if (!payload) {
-    throw new Error("Reminder payload is missing.");
+    throw new Error("No se encontró la carga útil del recordatorio.");
   }
   const plans = payload.plans.filter((plan) =>
     isReminderBucketEnabled(plan.bucket, alertSettings),
@@ -1466,7 +1466,7 @@ export const deadlineReminderService = {
       });
       baseSummary.status = "FAILED";
       baseSummary.finishedAt = new Date().toISOString();
-      logger.error("Deadline reminder scheduler failed.", {
+      logger.error("Falló la programación de recordatorios de plazos.", {
         message: errorMessage(error),
       });
       return baseSummary;

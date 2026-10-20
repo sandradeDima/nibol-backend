@@ -28,7 +28,7 @@ export const adminSafeguardService = {
     const role = await getRole(roleId);
 
     if (isAdminRole(role?.code)) {
-      throw new AppError("Admin role cannot be deleted.", 400);
+      throw new AppError("No se puede eliminar el rol de administrador.", 400);
     }
   },
 
@@ -43,7 +43,7 @@ export const adminSafeguardService = {
     }
 
     if (nextRoleName !== ADMIN_ROLE_NAME) {
-      throw new AppError("Admin role name cannot be changed.", 400);
+      throw new AppError("No se puede cambiar el nombre del rol de administrador.", 400);
     }
   },
 
@@ -81,7 +81,7 @@ export const adminSafeguardService = {
 
     if (userStillHasAdminRole && adminCount <= 1) {
       throw new AppError(
-        "Admin role cannot be removed from the last admin.",
+        "No se puede quitar el rol de administrador al último administrador.",
         400,
       );
     }
@@ -129,7 +129,7 @@ export const adminSafeguardService = {
 
     if (missingCriticalPermissions.length > 0) {
       throw new AppError(
-        `Admin role must keep critical permissions: ${missingCriticalPermissions.join(", ")}.`,
+        `El rol de administrador debe conservar estos permisos críticos: ${missingCriticalPermissions.join(", ")}.`,
         400,
       );
     }

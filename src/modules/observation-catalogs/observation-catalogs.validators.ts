@@ -13,7 +13,7 @@ export const updateObservationCatalogSchema = z
   .object(fields)
   .partial()
   .refine((value) => Object.keys(value).length > 0, {
-    message: "At least one field is required.",
+    message: "Debe modificar al menos un campo.",
   });
 export const observationCatalogIdSchema = z.object({ id: z.uuid() });
 export const listObservationCatalogSchema = z.object({

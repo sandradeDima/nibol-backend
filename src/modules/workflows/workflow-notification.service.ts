@@ -485,7 +485,7 @@ const recordNotificationFailure = async (
       metadata: { instanceId, message },
     });
   } catch (failure) {
-    logger.warn("Could not record workflow notification failure event.", {
+    logger.warn("No se pudo registrar el evento de fallo de notificación del flujo de trabajo.", {
       deliveryId,
       errorCode: "WORKFLOW_NOTIFICATION_FAILURE_EVENT_FAILED",
       message: safeErrorMessage(failure),
@@ -609,7 +609,7 @@ export const deliverWorkflowNotificationDelivery = async (
         : {}),
       message:
         delivery.notification?.message ?? "Tiene una notificación pendiente.",
-      title: delivery.notification?.title ?? "Notificación de workflow",
+      title: delivery.notification?.title ?? "Notificación del flujo de trabajo",
       userName: delivery.recipientUser.name,
     },
   });
@@ -620,7 +620,7 @@ export const deliverWorkflowNotificationDelivery = async (
       result.error ?? "No fue posible enviar el correo.",
     );
     await recordNotificationFailure(deliveryId, error);
-    logger.warn("Workflow notification email failed.", {
+    logger.warn("Falló el correo de notificación del flujo de trabajo.", {
       deliveryId,
       errorCode: "WORKFLOW_NOTIFICATION_EMAIL_FAILED",
     });
@@ -764,7 +764,7 @@ export const createTaskAssignedNotification = async ({
     entityType: "workflow_task",
     eventType: "workflow.task.assigned",
     instanceId: instance.id,
-    message: `Tiene una tarea de workflow pendiente: ${task.nodeName}.`,
+    message: `Tiene una tarea pendiente del flujo de trabajo: ${task.nodeName}.`,
     priority: NotificationPriority.HIGH,
     recipients,
     targetUrl: buildWorkflowTaskUrl(task.id),
@@ -865,7 +865,7 @@ export const createWorkflowDecisionNotification = async ({
         : NotificationPriority.NORMAL,
     recipients,
     targetUrl: buildWorkflowTaskUrl(task.id),
-    title: "Actualización de tarea de workflow",
+    title: "Actualización de tarea del flujo de trabajo",
     taskId: task.id,
     visitSequence: task.visitSequence,
   });
@@ -897,14 +897,14 @@ export const createWorkflowCompletionNotification = async ({
     eventType: "workflow.instance.completed",
     instanceId,
     message: approved
-      ? "El workflow finalizó correctamente."
-      : `El workflow finalizó con resultado ${finalResult}.`,
+      ? "El flujo de trabajo finalizó correctamente."
+      : `El flujo de trabajo finalizó con el resultado ${finalResult}.`,
     priority: approved
       ? NotificationPriority.NORMAL
       : NotificationPriority.HIGH,
     recipients,
     targetUrl: targetUrl ?? buildWorkflowInstanceUrl(instanceId),
-    title: approved ? "Workflow completado" : "Workflow finalizado",
+    title: approved ? "Flujo de trabajo completado" : "Flujo de trabajo finalizado",
     visitSequence: 0,
   });
 };

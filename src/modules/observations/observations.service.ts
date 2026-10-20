@@ -526,7 +526,7 @@ const findRecord = async (
       ...buildObservationAccessWhere(access),
     },
   });
-  if (!record) throw new AppError("Observation not found.", 404);
+  if (!record) throw new AppError("No se encontró la observación.", 404);
   return record;
 };
 
@@ -834,17 +834,17 @@ export const observationsService = {
       throw new AppError("No tiene permiso para cerrar observaciones.", 403);
     const existing = await findRecord(id, access);
     if (existing.status.isFinal) {
-      throw new AppError("The observation is already concluded.", 409);
+      throw new AppError("La observación ya está concluida.", 409);
     }
     if (existing.actionPlans.length === 0) {
       throw new AppError(
-        "At least one action plan is required before closure.",
+        "Debe existir al menos un plan de acción antes de cerrar la observación.",
         409,
       );
     }
     if (existing.actionPlans.some((plan) => plan.status !== "CONCLUDED")) {
       throw new AppError(
-        "All action plans must be concluded before closing the observation.",
+        "Todos los planes de acción deben estar concluidos antes de cerrar la observación.",
         409,
       );
     }
@@ -857,7 +857,7 @@ export const observationsService = {
     });
     if (pendingEvaluations > 0) {
       throw new AppError(
-        "Pending progress evaluations must be resolved before closure.",
+        "Debe resolver las evaluaciones de avance pendientes antes de cerrar la observación.",
         409,
       );
     }
@@ -867,7 +867,7 @@ export const observationsService = {
     });
     if (!concludedStatus) {
       throw new AppError(
-        "The final observation status is not configured.",
+        "No está configurado el estado final de la observación.",
         500,
       );
     }
@@ -1129,8 +1129,8 @@ export const observationsService = {
         await notificationService.completeEmailDelivery(deliveryId, result);
       }),
     ).catch((error) => {
-      logger.error("Observation assignment email delivery failed.", {
-        message: error instanceof Error ? error.message : "Unknown error",
+      logger.error("Falló la entrega del correo de asignación de la observación.", {
+        message: error instanceof Error ? error.message : "Error desconocido",
       });
     });
     const current = await Promise.all(
@@ -1438,7 +1438,7 @@ export const observationsService = {
       !access.permissions.includes("observation_areas.manage")
     ) {
       throw new AppError(
-        "You cannot change observation area assignments.",
+        "No puede cambiar las asignaciones de áreas de la observación.",
         403,
       );
     }
@@ -1491,7 +1491,7 @@ export const observationsService = {
     );
     if (blockedRemoval) {
       throw new AppError(
-        `Area ${blockedRemoval.area.name} cannot be removed while it has action plans.`,
+        `No se puede quitar el área ${blockedRemoval.area.name} mientras tenga planes de acción.`,
         409,
       );
     }
@@ -1585,7 +1585,7 @@ export const observationsService = {
     } catch (error) {
       if ((error as { code?: string }).code === "P2002") {
         throw new AppError(
-          "That observation number already exists in the selected audit report.",
+          "Ese número de observación ya existe en el informe de auditoría seleccionado.",
           409,
         );
       }

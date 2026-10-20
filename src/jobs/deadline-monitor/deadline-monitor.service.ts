@@ -434,7 +434,7 @@ const recordFailure = (
 ) => {
   context.summary.failuresCount += 1;
   context.summary.failures.push({ entityId, entityType });
-  logger.error("Deadline monitor entity failed.", {
+  logger.error("Falló la entidad del monitor de plazos.", {
     entityId,
     entityType,
     message: errorMessage(error),
@@ -999,7 +999,7 @@ export const deadlineMonitorService = {
         "FAILED",
         errorMessage(error),
       );
-      logger.error("Deadline monitor failed.", {
+      logger.error("Falló el monitor de plazos.", {
         message: errorMessage(error),
       });
       return summary;

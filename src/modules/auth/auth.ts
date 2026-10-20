@@ -126,7 +126,7 @@ export const auth = betterAuth({
           if (!user?.isActive || user.deletedAt) {
             throw APIError.from("FORBIDDEN", {
               code: "ACCOUNT_INACTIVE",
-              message: "This account is inactive.",
+              message: "Esta cuenta está inactiva.",
             });
           }
         },
@@ -150,13 +150,13 @@ export const auth = betterAuth({
       void notificationService
         .create({
           message:
-            "Your password was reset successfully. If this wasn't you, contact support immediately.",
-          title: "Password reset",
+            "Su contraseña se restableció correctamente. Si no realizó este cambio, comuníquese con soporte de inmediato.",
+          title: "Contraseña restablecida",
           type: "warning",
           userId: user.id,
         })
         .catch((error: unknown) => {
-          logger.error("Failed to create password reset notification.", {
+          logger.error("No se pudo crear la notificación para restablecer la contraseña.", {
             error: error instanceof Error ? error.message : String(error),
             userId: user.id,
           });
@@ -212,8 +212,8 @@ export const auth = betterAuth({
               email,
               reason: response.message,
               summary: email
-                ? `A login attempt failed for ${email}.`
-                : "A login attempt failed.",
+                ? `Falló un intento de inicio de sesión para ${email}.`
+                : "Falló un intento de inicio de sesión.",
             },
           });
 
@@ -229,7 +229,7 @@ export const auth = betterAuth({
               ctx.context.newSession.session.ipAddress ?? ipAddress ?? null,
             metadata: {
               email: ctx.context.newSession.user.email,
-              summary: `${ctx.context.newSession.user.email} signed in successfully.`,
+              summary: `${ctx.context.newSession.user.email} inició sesión correctamente.`,
             },
             userId: ctx.context.newSession.user.id,
           });
@@ -250,7 +250,7 @@ export const auth = betterAuth({
           ipAddress: ctx.context.session.session.ipAddress ?? ipAddress ?? null,
           metadata: {
             email: ctx.context.session.user.email,
-            summary: `${ctx.context.session.user.email} signed out successfully.`,
+            summary: `${ctx.context.session.user.email} cerró sesión correctamente.`,
           },
           userId: ctx.context.session.user.id,
         });
@@ -271,7 +271,7 @@ export const auth = betterAuth({
             ctx.context.newSession.session.ipAddress ?? ipAddress ?? null,
           metadata: {
             email: ctx.context.newSession.user.email,
-            summary: `${ctx.context.newSession.user.email} registered a new account.`,
+            summary: `${ctx.context.newSession.user.email} registró una cuenta nueva.`,
           },
           userId: ctx.context.newSession.user.id,
         });
@@ -327,6 +327,6 @@ export const appendAuthHeaders = (
   });
 };
 
-logger.info("Better Auth configured.", {
+logger.info("Better Auth quedó configurado.", {
   baseUrl: env.BETTER_AUTH_URL,
 });

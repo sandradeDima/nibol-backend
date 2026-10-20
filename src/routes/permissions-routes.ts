@@ -14,7 +14,7 @@ permissionsRouter.get(
     const userId = request.authSession?.user.id;
 
     if (!userId) {
-      sendError(response, "Authentication required.", 401);
+      sendError(response, "Debe iniciar sesión para continuar.", 401);
       return;
     }
 

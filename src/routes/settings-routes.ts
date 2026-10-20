@@ -57,7 +57,7 @@ settingsRouter.put(
     const file = request.file;
 
     if (!file) {
-      throw new AppError("Logo file is required.", 400);
+      throw new AppError("Debe seleccionar un archivo de logotipo.", 400);
     }
 
     const metadata = logoUploadSchema.parse({

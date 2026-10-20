@@ -479,7 +479,7 @@ const validateNodeConfiguration = (
       ) {
         addIssue(result, {
           code: "START_PROCESS_MISMATCH",
-          message: "El proceso del nodo Inicio debe coincidir con el workflow.",
+          message: "El proceso del nodo Inicio debe coincidir con el flujo de trabajo.",
           nodeId: getNodeId(node),
           nodeKey: node.nodeKey,
         });
@@ -1142,7 +1142,7 @@ export const validateWorkflowGraph = (
     addIssue(result, {
       code: "WORKFLOW_ARCHIVED",
       message:
-        "Los workflows archivados no pueden prepararse para publicación.",
+        "Los flujos de trabajo archivados no se pueden preparar para su publicación.",
     });
   }
   if (

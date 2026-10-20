@@ -48,7 +48,7 @@ const getRequiredId = (
     throw new AppError(
       field === "versionId"
         ? "El id de la versión es obligatorio."
-        : "El id del workflow es obligatorio.",
+        : "El ID del flujo de trabajo es obligatorio.",
       400,
     );
   }

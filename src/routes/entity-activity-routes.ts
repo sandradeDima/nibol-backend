@@ -44,13 +44,13 @@ const getQueryValue = (value: unknown): string | undefined => {
 
 const getParamValue = (value: string | string[] | undefined): string => {
   const result = Array.isArray(value) ? value[0] : value;
-  if (!result) throw new AppError("Entity parameter is required.", 400);
+  if (!result) throw new AppError("Se requiere el parámetro de entidad.", 400);
   return result;
 };
 
 const getAccess = (request: Request) => {
   if (!request.authorizationSummary)
-    throw new AppError("Authorization required.", 401);
+    throw new AppError("Se requiere autorización.", 401);
   return request.authorizationSummary;
 };
 

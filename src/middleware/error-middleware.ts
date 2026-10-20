@@ -19,7 +19,7 @@ export const errorMiddleware: ErrorRequestHandler = (
   }
 
   if (error instanceof ZodError) {
-    logger.warn("Request validation failed.", {
+    logger.warn("Falló la validación de la solicitud.", {
       issues: error.flatten().fieldErrors,
     });
 
@@ -72,8 +72,8 @@ export const errorMiddleware: ErrorRequestHandler = (
     return;
   }
 
-  logger.error("Unhandled application error.", {
-    message: error instanceof Error ? error.message : "Unknown error",
+  logger.error("Error de aplicación no controlado.", {
+    message: error instanceof Error ? error.message : "Error desconocido",
   });
 
   sendError(

@@ -15,7 +15,7 @@ type ListInput = {
 
 const duplicate = (error: unknown): never => {
   if ((error as { code?: string }).code === "P2002")
-    throw new AppError("A catalog entry with that name already exists.", 409);
+    throw new AppError("Ya existe una entrada del catálogo con ese nombre.", 409);
   throw error;
 };
 
@@ -114,7 +114,7 @@ export const observationCatalogsService = {
     const record = await prisma.observationDictionary.findUnique({
       where: { id },
     });
-    if (!record) throw new AppError("Dictionary entry not found.", 404);
+    if (!record) throw new AppError("No se encontró la entrada del diccionario.", 404);
     try {
       return await prisma.observationDictionary.update({
         data: {
@@ -132,7 +132,7 @@ export const observationCatalogsService = {
   },
   async updateRisk(id: string, input: CatalogInput) {
     const record = await prisma.risk.findUnique({ where: { id } });
-    if (!record) throw new AppError("Risk not found.", 404);
+    if (!record) throw new AppError("No se encontró el riesgo.", 404);
     try {
       return await prisma.risk.update({
         data: {

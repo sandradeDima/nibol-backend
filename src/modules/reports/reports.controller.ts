@@ -38,7 +38,7 @@ const auditTemplateLabels = {
 
 const getAccess = (request: Request): AuthorizationSummary => {
   if (!request.authorizationSummary) {
-    throw new AppError("Authorization required.", 401);
+    throw new AppError("Se requiere autorización.", 401);
   }
   return request.authorizationSummary;
 };

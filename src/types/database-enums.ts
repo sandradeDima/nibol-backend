@@ -257,5 +257,5 @@ export const parseDatabaseEnum = <T extends Record<string, string>>(
   field: string,
 ): T[keyof T] => {
   if (isDatabaseEnumValue(values, value)) return value;
-  throw new Error(`Invalid value stored in ${field}.`);
+  throw new Error(`El valor almacenado en ${field} no es válido.`);
 };

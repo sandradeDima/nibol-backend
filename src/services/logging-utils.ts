@@ -66,7 +66,7 @@ const toJsonCompatibleValue = (
 export const toDatabaseJson = (value: unknown): string => {
   const serialized = JSON.stringify(toJsonCompatibleValue(value));
   if (serialized === undefined) {
-    throw new TypeError("Value cannot be serialized as JSON.");
+    throw new TypeError("El valor no se puede serializar como JSON.");
   }
   return serialized;
 };
@@ -82,7 +82,7 @@ export const parseDatabaseJson = <T = unknown>(
   try {
     value = JSON.parse(serialized);
   } catch (cause) {
-    throw new Error(`Invalid JSON stored in ${field}.`, { cause });
+    throw new Error(`El JSON almacenado en ${field} no es válido.`, { cause });
   }
 
   return validate ? validate(value) : (value as T);
@@ -95,7 +95,7 @@ export const parseDatabaseJsonArray = (
   const value = parseDatabaseJson(serialized, field);
   if (value === null) return [];
   if (!Array.isArray(value))
-    throw new Error(`Invalid array stored in ${field}.`);
+    throw new Error(`El arreglo almacenado en ${field} no es válido.`);
   return value;
 };
 

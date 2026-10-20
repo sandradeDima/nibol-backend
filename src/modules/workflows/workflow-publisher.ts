@@ -32,7 +32,7 @@ export const assertWorkflowPublicationPreconditions = ({
   versionStatus: string;
 }): void => {
   if (definitionStatus === "ARCHIVED") {
-    throw new AppError("No se puede publicar un workflow archivado.", 409);
+    throw new AppError("No se puede publicar un flujo de trabajo archivado.", 409);
   }
   if (versionStatus !== "DRAFT") {
     throw new AppError(
@@ -67,7 +67,7 @@ export const publishWorkflowVersionState = async (
     where: { id: definitionId },
   });
   if (!definition) {
-    throw new AppError("La definición del workflow no existe.", 404);
+    throw new AppError("La definición del flujo de trabajo no existe.", 404);
   }
 
   const version = await db.workflowVersion.findUnique({
@@ -79,7 +79,7 @@ export const publishWorkflowVersionState = async (
     where: { id: versionId },
   });
   if (!version) {
-    throw new AppError("La versión del workflow no existe.", 404);
+    throw new AppError("La versión del flujo de trabajo no existe.", 404);
   }
 
   assertWorkflowPublicationPreconditions({

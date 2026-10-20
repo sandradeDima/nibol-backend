@@ -18,7 +18,7 @@ const roleDescriptionSchema = z
     return trimmedValue.length > 0 ? trimmedValue : null;
   })
   .refine((value) => value === null || value.length <= 255, {
-    message: "Description must be 255 characters or fewer.",
+    message: "La descripción no puede superar los 255 caracteres.",
   });
 
 export const roleIdParamSchema = z.object({

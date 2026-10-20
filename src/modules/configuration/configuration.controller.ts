@@ -45,7 +45,7 @@ const getRequiredRecordId = (value: string | string[] | undefined): string => {
   const id = Array.isArray(value) ? value[0] : value;
 
   if (!id) {
-    throw new AppError("Record id is required.", 400);
+    throw new AppError("Se requiere el identificador del registro.", 400);
   }
 
   return recordIdParamSchema.parse({ id }).id;
@@ -55,7 +55,7 @@ const getRequiredAuthorizationSummary = (
   request: Request,
 ): AuthorizationSummary => {
   if (!request.authorizationSummary) {
-    throw new AppError("Authorization required.", 401);
+    throw new AppError("Se requiere autorización.", 401);
   }
 
   return request.authorizationSummary;

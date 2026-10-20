@@ -156,7 +156,7 @@ export const loadPinnedWorkflowGraph = async (
   if (!version) {
     throw new WorkflowRuntimeError(
       WORKFLOW_RUNTIME_ERROR_CODES.VERSION_NOT_PUBLISHED,
-      "La versión fijada del workflow ya no está disponible para ejecución.",
+      "La versión fijada del flujo de trabajo ya no está disponible para ejecución.",
       409,
     );
   }

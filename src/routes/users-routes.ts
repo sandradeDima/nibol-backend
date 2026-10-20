@@ -50,7 +50,7 @@ const getRequiredUserId = (value: string | string[] | undefined): string => {
   const userId = Array.isArray(value) ? value[0] : value;
 
   if (!userId) {
-    throw new AppError("User id is required.", 400);
+    throw new AppError("Se requiere el identificador del usuario.", 400);
   }
 
   return userIdParamSchema.parse({
@@ -62,7 +62,7 @@ const getAuthenticatedUserId = (request: Request): string => {
   const userId = request.authSession?.user.id;
 
   if (!userId) {
-    throw new AppError("Authentication required.", 401);
+    throw new AppError("Debe iniciar sesión para continuar.", 401);
   }
 
   return userId;
@@ -122,7 +122,7 @@ usersRouter.post(
     const file = request.file;
 
     if (!file) {
-      throw new AppError("Avatar file is required.", 400);
+      throw new AppError("Debe seleccionar una imagen de perfil.", 400);
     }
 
     const metadata = avatarUploadSchema.parse({

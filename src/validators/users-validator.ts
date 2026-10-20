@@ -11,7 +11,7 @@ const userSortFields = [
 
 const passwordSchema = z
   .string()
-  .min(8, "Password must be at least 8 characters long.");
+  .min(8, "La contraseña debe tener al menos 8 caracteres.");
 
 const booleanFilterSchema = z
   .enum(["false", "true"])

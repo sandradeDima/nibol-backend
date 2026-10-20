@@ -34,7 +34,7 @@ const getRequiredNotificationId = (
   const notificationId = Array.isArray(value) ? value[0] : value;
 
   if (!notificationId) {
-    throw new AppError("Notification id is required.", 400);
+    throw new AppError("Se requiere el identificador de la notificación.", 400);
   }
 
   return notificationIdParamSchema.parse({
@@ -46,7 +46,7 @@ const getAuthenticatedUserId = (request: Request): string => {
   const userId = request.authSession?.user.id;
 
   if (!userId) {
-    throw new AppError("Authentication required.", 401);
+    throw new AppError("Debe iniciar sesión para continuar.", 401);
   }
 
   return userId;

@@ -1072,7 +1072,7 @@ export const dashboardService = {
     query: RoleDashboardQuery,
   ): Promise<RoleDashboardData> {
     if (!roleDashboardRoles.has(access.roleCode as RoleDashboardRole))
-      throw new AppError("Este dashboard no está disponible para su rol.", 403);
+      throw new AppError("Este panel no está disponible para su rol.", 403);
 
     const roleCode = access.roleCode as RoleDashboardRole;
     const roleQuery = { ...query, search: query.search ?? "" };
