@@ -97,6 +97,8 @@ notificationsRouter.post(
   asyncHandler(async (request, response) => {
     const payload = createNotificationSchema.parse(request.body);
     const notification = await notificationService.create(payload);
+    if (!notification)
+      throw new AppError("La categoría de notificación está desactivada.", 409);
 
     sendSuccess(response, notification, 201);
   }),

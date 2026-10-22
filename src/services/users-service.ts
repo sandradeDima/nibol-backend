@@ -1342,6 +1342,7 @@ export const usersService = {
 
           await notificationService.create(
             {
+              eventType: "USER_ROLES_UPDATED",
               message: `Sus roles de acceso cambiaron de ${previousSnapshot.roleNames.join(", ") || "ninguno"} a ${nextSnapshot.roleNames.join(", ") || "ninguno"}.`,
               title: "Roles actualizados",
               type: "warning",

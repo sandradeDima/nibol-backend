@@ -17,6 +17,7 @@ import {
 } from "../../utils/notification-links.js";
 import { logger } from "../../utils/logger.js";
 import { entityActivityService } from "../../services/entity-activity-service.js";
+import { isNotificationEventEnabled } from "../../services/notification-preferences.js";
 import { getEffectiveActionPlanDueDate } from "../../modules/reports/reporting-definitions.js";
 import {
   AUTOMATIC_NOTIFICATION_TYPES,
@@ -323,6 +324,7 @@ const emitEvent = async (
   recipient: Recipient,
   cycle: string,
 ): Promise<void> => {
+  if (!(await isNotificationEventEnabled(event.eventType))) return;
   const baseKey = `${event.eventType}:${event.entityType}:${event.entityId}:${recipient.id}:${cycle}`;
 
   if (context.parameters.notify_in_app) {

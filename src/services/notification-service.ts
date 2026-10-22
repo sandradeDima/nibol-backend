@@ -11,6 +11,7 @@ import {
 
 import { AppError } from "../utils/app-error.js";
 import { toDatabaseJson } from "./logging-utils.js";
+import { isNotificationEventEnabled } from "./notification-preferences.js";
 import { resolveNotificationTarget } from "../utils/notification-links.js";
 import { prisma } from "../utils/prisma.js";
 import type {
@@ -31,6 +32,7 @@ type NotificationWriter = {
     | "update"
     | "updateMany"
   >;
+  systemParameter: Pick<typeof prisma.systemParameter, "findUnique">;
 };
 
 type NotificationDeliveryWriter = Pick<
@@ -198,6 +200,8 @@ export const notificationService = {
     options?: { db?: NotificationWriter },
   ) {
     const db = options?.db ?? prisma;
+    if (!(await isNotificationEventEnabled(input.eventType, db.systemParameter)))
+      return null;
     const targetUrl =
       input.targetUrl !== undefined
         ? input.targetUrl
@@ -233,10 +237,11 @@ export const notificationService = {
   ) {
     const db = options?.db ?? prisma;
     const userIds = Array.from(new Set(input.userIds.filter(Boolean)));
-
     if (userIds.length === 0) {
-      return { createdCount: 0 };
+      return { createdCount: 0, suppressed: false };
     }
+    if (!(await isNotificationEventEnabled(null, db.systemParameter)))
+      return { createdCount: 0, suppressed: true };
 
     const created = await db.notification.createMany({
       data: userIds.map((userId) => ({
@@ -248,7 +253,7 @@ export const notificationService = {
       })),
     });
 
-    return { createdCount: created.count };
+    return { createdCount: created.count, suppressed: false };
   },
 
   async createDelivery(
@@ -292,7 +297,35 @@ export const notificationService = {
     }
   },
 
-  async claimEmailDelivery(deliveryId: string) {
+  async claimEmailDelivery(deliveryId: string, eventType?: string | null) {
+    const delivery = await prisma.notificationDelivery.findUnique({
+      select: { notification: { select: { eventType: true } } },
+      where: { id: deliveryId },
+    });
+    if (
+      delivery &&
+      !(await isNotificationEventEnabled(
+        eventType !== undefined ? eventType : delivery.notification?.eventType,
+      ))
+    ) {
+      await prisma.notificationDelivery.updateMany({
+        data: {
+          errorMessage: "La categoría de notificación está desactivada.",
+          status: NotificationDeliveryStatus.SKIPPED,
+        },
+        where: {
+          channel: NotificationDeliveryChannel.EMAIL,
+          id: deliveryId,
+          status: {
+            in: [
+              NotificationDeliveryStatus.PENDING,
+              NotificationDeliveryStatus.FAILED,
+            ],
+          },
+        },
+      });
+      return false;
+    }
     const now = new Date();
     const claimed = await prisma.notificationDelivery.updateMany({
       data: {

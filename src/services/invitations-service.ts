@@ -591,6 +591,7 @@ export const invitationsService = {
 
         await notificationService.create(
           {
+            eventType: "INVITATION_ACCEPTED",
             message: `${nextInvitationSnapshot.email} aceptó la invitación para el rol ${nextInvitationSnapshot.roleName}.`,
             title: "Invitación aceptada",
             type: "success",

@@ -19,11 +19,23 @@ import {
 } from "../jobs/deadline-monitor/deadline-reminder.constants.js";
 import { DEADLINE_MONITOR_PARAMETER_DEFAULTS } from "../jobs/deadline-monitor/deadline-monitor.constants.js";
 import { workflowTimerService } from "../modules/workflows/workflow-timer.service.js";
+import {
+  getNotificationCatalog,
+  NOTIFICATION_CATALOG,
+  NOTIFICATION_PREFERENCE_DEFAULTS,
+} from "../services/notification-preferences.js";
 
 const AUTOMATIC_NOTIFICATION_RULE_DEFAULTS = {
   ...DEADLINE_MONITOR_PARAMETER_DEFAULTS,
   ...DEADLINE_REMINDER_ALERT_DEFAULTS,
+  ...NOTIFICATION_PREFERENCE_DEFAULTS,
 };
+const NOTIFICATION_RULE_METADATA = Object.fromEntries(
+  NOTIFICATION_CATALOG.map((item) => [
+    item.key,
+    { description: item.description, name: item.name },
+  ]),
+);
 const REMINDER_ALERT_RULE_METADATA: Record<
   string,
   { description: string; name: string }
@@ -347,6 +359,14 @@ automaticJobsRouter.post(
 );
 
 automaticJobsRouter.get(
+  "/automatic-jobs/notification-catalog",
+  requirePermission("automatic_jobs.view"),
+  asyncHandler(async (_request, response) => {
+    sendSuccess(response, await getNotificationCatalog());
+  }),
+);
+
+automaticJobsRouter.get(
   "/automatic-jobs/rules",
   requirePermission("automatic_jobs.view"),
   asyncHandler(async (_request, response) => {
@@ -388,7 +408,9 @@ automaticJobsRouter.get(
               ? "number"
               : "boolean",
         }),
-        ...(REMINDER_ALERT_RULE_METADATA[key] ?? {}),
+        ...(REMINDER_ALERT_RULE_METADATA[key] ??
+          NOTIFICATION_RULE_METADATA[key] ??
+          {}),
         defaultValue: String(
           AUTOMATIC_NOTIFICATION_RULE_DEFAULTS[
             key as keyof typeof AUTOMATIC_NOTIFICATION_RULE_DEFAULTS
@@ -447,12 +469,14 @@ automaticJobsRouter.patch(
             active: true,
             description:
               REMINDER_ALERT_RULE_METADATA[key]?.description ??
+              NOTIFICATION_RULE_METADATA[key]?.description ??
               "Regla de notificaciones automáticas del monitor de vencimientos.",
             editable: true,
             group: "notificaciones_automaticas",
             key,
             name:
               REMINDER_ALERT_RULE_METADATA[key]?.name ??
+              NOTIFICATION_RULE_METADATA[key]?.name ??
               key.replaceAll("_", " "),
             value: payload.value,
             valueType:

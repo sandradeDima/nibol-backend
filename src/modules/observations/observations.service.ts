@@ -1075,6 +1075,7 @@ export const observationsService = {
           },
           { db: tx },
         );
+        if (!notification) continue;
         await notificationService.createDelivery(
           {
             channel: NotificationDeliveryChannel.IN_APP,

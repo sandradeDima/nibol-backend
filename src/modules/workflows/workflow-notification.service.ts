@@ -15,6 +15,7 @@ import {
 } from "../../utils/notification-links.js";
 import { prisma } from "../../utils/prisma.js";
 import { toDatabaseJson } from "../../services/logging-utils.js";
+import { isNotificationEventEnabled } from "../../services/notification-preferences.js";
 import type { WorkflowRuntimeContext } from "./workflow-runtime-context.js";
 import { restoreWorkflowRuntimeContext } from "./workflow-runtime-context.js";
 import {
@@ -355,6 +356,8 @@ export const createWorkflowNotificationIntent = async (
   event: WorkflowNotificationEvent,
 ): Promise<{ createdDeliveries: string[]; recipientCount: number }> => {
   const recipients = uniqueRecipients(event.recipients);
+  if (!(await isNotificationEventEnabled(event.eventType, db.systemParameter)))
+    return { createdDeliveries: [], recipientCount: 0 };
   const channel = event.channel ?? "INTERNAL";
   const baseKey = dedupePrefix(event);
   const entityId = event.entityId ?? event.instanceId;
@@ -519,6 +522,24 @@ export const deliverWorkflowNotificationDelivery = async (
   );
   if (deliveryStatus === NotificationDeliveryStatus.SENT) {
     return { attempted: false, deliveryId, status: deliveryStatus };
+  }
+  if (
+    delivery.notification &&
+    !(await isNotificationEventEnabled(delivery.notification.eventType))
+  ) {
+    await prisma.notificationDelivery.update({
+      data: {
+        errorMessage: "La categoría de notificación está desactivada.",
+        lastAttemptAt: new Date(),
+        status: NotificationDeliveryStatus.SKIPPED,
+      },
+      where: { id: deliveryId },
+    });
+    return {
+      attempted: false,
+      deliveryId,
+      status: NotificationDeliveryStatus.SKIPPED,
+    };
   }
   if (
     deliveryStatus === NotificationDeliveryStatus.FAILED &&
