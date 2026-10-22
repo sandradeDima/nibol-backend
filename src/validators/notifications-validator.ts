@@ -42,7 +42,14 @@ export const createNotificationSchema = z.object({
   userId: z.uuid(),
 });
 
+export const createNotificationsSchema = createNotificationSchema
+  .pick({ message: true, title: true, type: true, priority: true })
+  .extend({ userIds: z.array(z.uuid()).min(1) });
+
 export type CreateNotificationInput = z.infer<typeof createNotificationSchema>;
+export type CreateNotificationsInput = z.infer<
+  typeof createNotificationsSchema
+>;
 export type ListNotificationsQuery = z.infer<
   typeof listNotificationsQuerySchema
 >;

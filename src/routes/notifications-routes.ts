@@ -8,6 +8,7 @@ import { AppError } from "../utils/app-error.js";
 import { sendPaginated, sendSuccess } from "../utils/response.js";
 import {
   createNotificationSchema,
+  createNotificationsSchema,
   listNotificationsQuerySchema,
   notificationIdParamSchema,
 } from "../validators/notifications-validator.js";
@@ -76,6 +77,17 @@ notificationsRouter.get(
     );
 
     sendPaginated(response, result.data, result.pagination);
+  }),
+);
+
+notificationsRouter.post(
+  "/notifications/bulk",
+  requirePermission("notifications.create"),
+  asyncHandler(async (request, response) => {
+    const payload = createNotificationsSchema.parse(request.body);
+    const result = await notificationService.createMany(payload);
+
+    sendSuccess(response, result, 201);
   }),
 );
 

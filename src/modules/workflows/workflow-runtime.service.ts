@@ -80,6 +80,7 @@ const ensureHumanTask = async ({
   actor,
   context,
   db,
+  instance,
   instanceId,
   node,
   now,
@@ -87,6 +88,7 @@ const ensureHumanTask = async ({
   actor: RuntimeExecutionActor | null;
   context: WorkflowRuntimeContext;
   db: RuntimeDatabase;
+  instance: { entityId: string; processType: string };
   instanceId: string;
   node: Awaited<ReturnType<typeof getRuntimeNode>>;
   now: Date;
@@ -189,7 +191,8 @@ const ensureHumanTask = async ({
   );
   const assignmentNotification = await createTaskAssignedNotification({
     db,
-    instance: { id: instanceId },
+    context,
+    instance: { ...instance, id: instanceId },
     recipients: assignmentRecipients,
     task: {
       dueAt: timerSetup.dueAt,
@@ -531,6 +534,7 @@ const executeAutomaticNodesInternal = async ({
         actor,
         context,
         db,
+        instance,
         instanceId,
         node: currentNode,
         now,

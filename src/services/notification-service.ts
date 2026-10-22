@@ -69,7 +69,7 @@ type NotificationRecord = {
 
 type CreateManyNotificationInput = {
   message: string;
-  priority?: NotificationPriority;
+  priority?: NotificationPriority | undefined;
   title: string;
   type?: NotificationType;
   userIds: string[];
