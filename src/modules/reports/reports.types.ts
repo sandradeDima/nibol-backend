@@ -240,6 +240,7 @@ export type ReportDashboardData = {
 };
 
 export type ReportPreviewData = {
+  actionPlanRows?: ReportActionPlanRow[];
   charts: ReportDashboardData["charts"];
   columns: string[];
   filters: Record<string, string | number | boolean | null>;

@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 
 import type { AuthorizationSummary } from "../../services/authorization-service.js";
 import { AppError } from "../../utils/app-error.js";
+import { env } from "../../utils/env.js";
 import { sendPaginated, sendSuccess } from "../../utils/response.js";
 import {
   buildExcelWorkbook,
@@ -64,6 +65,7 @@ const reportQueryInput = (request: Request) => ({
   hasEvidence: getQueryValue(request.query["filter.hasEvidence"]),
   hasExtension: getQueryValue(request.query["filter.hasExtension"]),
   hasPlan: getQueryValue(request.query["filter.hasPlan"]),
+  includeActionPlans: getQueryValue(request.query.includeActionPlans),
   overdue: getQueryValue(request.query["filter.overdue"]),
   page: getQueryValue(request.query.page),
   perPage: getQueryValue(request.query.perPage),
@@ -197,8 +199,12 @@ export const reportsController = {
 
   async exportReport(request: Request, response: Response) {
     const query = reportExportQuerySchema.parse(reportQueryInput(request));
-    const report = await reportsService.getPreview(query, getAccess(request));
     const format = getQueryValue(request.query.format) ?? "excel";
+    const report = await reportsService.getPreview(
+      query,
+      getAccess(request),
+      format === "pdf" && query.includeActionPlans,
+    );
     const filters = report.filters;
 
     if (format === "pdf") {
@@ -223,6 +229,15 @@ export const reportsController = {
           preview: report,
           reportName: report.reportName,
           ...(staticDashboard ? { staticDashboard } : {}),
+          ...(report.actionPlanRows
+            ? {
+                actionPlanRows: report.actionPlanRows.map((row) => ({
+                  ...row,
+                  href: new URL(row.href, env.FRONTEND_URL).toString(),
+                })),
+              }
+            : {}),
+          includeActionPlans: query.includeActionPlans,
           view: query.pdfView,
         }),
         "application/pdf",

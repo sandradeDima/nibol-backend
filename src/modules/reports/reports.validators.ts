@@ -120,6 +120,7 @@ export const auditReportQuerySchema = z.object({
 });
 
 export const reportExportQuerySchema = reportPreviewQuerySchema.extend({
+  includeActionPlans: booleanFilter.default(true),
   pdfView: z
     .enum(["REPORTS", "DASHBOARD", "GENERATOR", "ATTENTION"])
     .default("GENERATOR"),

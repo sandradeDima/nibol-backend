@@ -3085,6 +3085,7 @@ export const reportsService = {
   async getPreview(
     query: ReportPreviewQuery,
     access: AuthorizationSummary,
+    includeActionPlanRows = false,
   ): Promise<ReportPreviewData> {
     assertReportFilterAccess(query, access);
     const dashboard =
@@ -3103,6 +3104,9 @@ export const reportsService = {
       reportName: query.reportName,
       reportType: query.type,
       rows: report.rows,
+      ...(includeActionPlanRows && query.type === "ACTION_PLANS"
+        ? { actionPlanRows: dashboard.rows }
+        : {}),
       summary: dashboard.summary,
       total: report.total,
     };

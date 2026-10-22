@@ -4,6 +4,7 @@ import puppeteer from "puppeteer";
 
 import type {
   AuditReportData,
+  ReportActionPlanRow,
   ReportChartItem,
   ReportDashboardData,
   ReportPreviewData,
@@ -13,8 +14,10 @@ export type PdfView = "REPORTS" | "DASHBOARD" | "GENERATOR" | "ATTENTION";
 
 export type PdfInput = {
   audit?: AuditReportData;
+  actionPlanRows?: ReportActionPlanRow[];
   dashboard?: ReportDashboardData;
   filters: Record<string, unknown>;
+  includeActionPlans?: boolean;
   preview?: ReportPreviewData;
   reportName: string;
   staticDashboard?: ReportDashboardData;
@@ -75,12 +78,13 @@ const chartColor = (item: ReportChartItem): string => {
   if (token === "VENCIDO" || key === "VENCIDO") return "#D71920";
   if (token === "SI" || key === "SI") return "#F59E0B";
   if (token === "NO" || key === "NO") return "#6B7280";
-  if (token === "VIGENTE" || key === "VIGENTE" || key === "CONCLUDED")
-    return "#0F766E";
-  if (key === "STARTED" || key === "INICIADO") return "#1D4ED8";
+  if (key === "CONCLUDED") return "#1DB65F";
+  if (token === "VIGENTE" || key === "VIGENTE") return "#0F766E";
+  if (key === "STARTED" || key === "INICIADO") return "#38B6E9";
   if (key === "WITH_PROGRESS" || key === "CON_AVANCE" || key === "SI")
-    return "#F59E0B";
-  if (key === "NOT_STARTED" || key === "NO") return "#6B7280";
+    return "#FFBA00";
+  if (key === "NOT_STARTED") return "#EFF000";
+  if (key === "NO") return "#6B7280";
   return "#07142D";
 };
 
@@ -150,6 +154,10 @@ const table = (
   rows: Array<Record<string, unknown>>,
   title: string,
   grouped = false,
+  renderCell: (row: Record<string, unknown>, label: string) => string = (
+    row,
+    label,
+  ) => escapeHtml(formatCell(row[label])),
 ): string => {
   if (!rows.length)
     return panel(
@@ -206,7 +214,7 @@ const table = (
               .slice(start, end)
               .map(
                 (row) =>
-                  `<tr>${chunk.map(({ label }) => `<td>${escapeHtml(formatCell(row[label]))}</td>`).join("")}</tr>`,
+                  `<tr>${chunk.map(({ label }) => `<td>${renderCell(row, label)}</td>`).join("")}</tr>`,
               )
               .join("")}</tbody></table>`,
           ),
@@ -216,6 +224,35 @@ const table = (
     })
     .join("");
 };
+
+const actionPlanTable = (
+  rows: ReportActionPlanRow[],
+  title: string,
+): string =>
+  table(
+    [
+      "Número de observación",
+      "Observación principal",
+      "Área",
+      "Nivel de riesgo",
+      "Estado del plan de acción",
+      "Ver plan",
+    ],
+    rows.map((row) => ({
+      Área: row.area.name,
+      "Estado del plan de acción": row.officialProgress.label,
+      "Nivel de riesgo": row.riskLevel.name,
+      "Número de observación": row.observation.number,
+      "Observación principal": row.observation.mainObservation,
+      "Enlace al plan": row.href,
+    })),
+    title,
+    false,
+    (row, label) =>
+      label === "Ver plan" && typeof row["Enlace al plan"] === "string"
+        ? `<a href="${escapeHtml(row["Enlace al plan"])}" style="color:#2F5597;text-decoration:underline">Ver plan</a>`
+        : escapeHtml(formatCell(row[label])),
+  );
 
 const observationDistribution = (
   rows: ReportDashboardData["rows"],
@@ -256,21 +293,37 @@ const reportContent = (input: PdfInput): string => {
     return `${overview}${timeline}${table(audit.columns, audit.rows, "Registros de auditoría")}`;
   }
   if (!preview) return "";
-  if (input.view === "GENERATOR")
-    return `<div class="kpis">${kpi(preview.reportType === "OBSERVATIONS" ? "Planes de acción" : "Registros", preview.total, "accent")}${preview.reportType !== "OBSERVATIONS" ? kpi("Cumplimiento", `${Math.round(preview.summary.compliancePercent)}%`) : ""}</div>${table(preview.columns, preview.rows, "Registros del reporte", preview.reportType === "OBSERVATIONS")}`;
+  const actionPlanList = (title: string) =>
+    input.includeActionPlans === false
+      ? ""
+      : input.actionPlanRows === undefined
+        ? table(preview.columns, preview.rows, title)
+        : actionPlanTable(input.actionPlanRows, title);
+  if (input.view === "GENERATOR") {
+    const rows =
+      preview.reportType === "ACTION_PLANS"
+        ? actionPlanList("Registros del reporte")
+        : table(
+            preview.columns,
+            preview.rows,
+            "Registros del reporte",
+            preview.reportType === "OBSERVATIONS",
+          );
+    return `<div class="kpis">${kpi(preview.reportType === "OBSERVATIONS" ? "Planes de acción" : "Registros", preview.total, "accent")}${preview.reportType !== "OBSERVATIONS" ? kpi("Cumplimiento", `${Math.round(preview.summary.compliancePercent)}%`) : ""}</div>${rows}`;
+  }
   if (input.view === "ATTENTION") {
     const summary = preview.summary;
-    return `<div class="kpis">${kpi("Vigentes", summary.vigentes)}${kpi("Próximas a vencer", summary.dueSoon)}${kpi("Vencidos", summary.vencidos, "danger")}</div>${table(preview.columns, preview.rows, "Bandeja de atención")}`;
+    return `<div class="kpis">${kpi("Vigentes", summary.vigentes)}${kpi("Próximas a vencer", summary.dueSoon)}${kpi("Vencidos", summary.vencidos, "danger")}</div>${actionPlanList("Bandeja de atención")}`;
   }
   if (!dashboard)
-    return table(preview.columns, preview.rows, "Registros del reporte");
+    return actionPlanList("Registros del reporte");
   const charts = dashboard.charts;
   const summary = dashboard.summary;
   const staticSummary = input.staticDashboard?.summary ?? summary;
   const observationKpis = `<div class="kpis">${kpi("Total observaciones", staticSummary.totalObservations, "accent")}${kpi("Pendientes", staticSummary.pendingObservations)}${kpi("Cerradas", staticSummary.closedObservations)}</div>`;
   if (input.view === "REPORTS") {
     const planKpis = `<div class="kpis four">${kpi("Total de planes", staticSummary.total, "accent")}${kpi("No iniciado", staticSummary.noIniciado)}${kpi("Iniciado", staticSummary.iniciado)}${kpi("Con avance", staticSummary.conAvance)}${kpi("Concluido", staticSummary.concluido)}${kpi("Vigentes", staticSummary.vigentes)}${kpi("Vencidos", staticSummary.vencidos, "danger")}${kpi("Reprogramados", staticSummary.reprogramados)}</div>`;
-    return `<h2 class="section-title">Observaciones</h2>${observationKpis}<h2 class="section-title">Planes de acción</h2>${planKpis}<div class="grid two">${panel("Lectura del corte", dashboard.insights.map((insight) => `<p>${escapeHtml(insight)}</p>`).join("") || "<p>No hay planes dentro del corte.</p>")}${panel("Cumplimiento del corte", `<strong class="big-number">${summary.compliancePercent}%</strong><p>Planes concluidos dentro de plazo</p>`)}</div><div class="grid two">${panel("Distribución por estado del plan de acción", bars(charts.progressDistribution))}${panel("Distribución por estado según plazo", bars(charts.deadlineDistribution))}${panel("Distribución por riesgo", donut(charts.riskDistribution))}${panel("Reprogramación", bars(charts.reprogrammedDistribution))}${panel("Planes por área", bars(charts.areaDistribution))}${panel("Planes por dueño del proceso", bars(charts.processOwnerDistribution))}${panel("Planes por responsable de área", bars(charts.areaResponsibleDistribution))}${panel("Planes por ejecutor", bars(charts.executorDistribution))}</div>${table(preview.columns, preview.rows, "Planes de acción")}`;
+    return `<h2 class="section-title">Observaciones</h2>${observationKpis}<h2 class="section-title">Planes de acción</h2>${planKpis}<div class="grid two">${panel("Lectura del corte", dashboard.insights.map((insight) => `<p>${escapeHtml(insight)}</p>`).join("") || "<p>No hay planes dentro del corte.</p>")}${panel("Cumplimiento del corte", `<strong class="big-number">${summary.compliancePercent}%</strong><p>Planes concluidos dentro de plazo</p>`)}</div><div class="grid two">${panel("Distribución por estado del plan de acción", bars(charts.progressDistribution))}${panel("Distribución por estado según plazo", bars(charts.deadlineDistribution))}${panel("Distribución por riesgo", donut(charts.riskDistribution))}${panel("Reprogramación", bars(charts.reprogrammedDistribution))}${panel("Planes por área", bars(charts.areaDistribution))}${panel("Planes por dueño del proceso", bars(charts.processOwnerDistribution))}${panel("Planes por responsable de área", bars(charts.areaResponsibleDistribution))}${panel("Planes por ejecutor", bars(charts.executorDistribution))}</div>${actionPlanList("Planes de acción")}`;
   }
   const byRisk = observationDistribution(dashboard.rows, (row) => ({
     ...row.riskLevel,
@@ -329,7 +382,7 @@ const reportContent = (input: PdfInput): string => {
     "Avance oficial": `${item.progress.percent}%`,
   }));
   const planTotals = `<p class="summary-line">Total ${formatCell(summary.total)} · Vigentes ${formatCell(summary.vigentes)} · Vencidos ${formatCell(summary.vencidos)} · Reprogramados ${formatCell(summary.reprogramados)}</p>`;
-  return `<h2 class="section-title">01 · Resumen de observaciones</h2>${observationKpis}<div class="grid two">${panel("Nivel de riesgo", donut(byRisk, true))}${panel("Estado según plazo", donut(charts.deadlineDistribution, true))}</div><h2 class="section-title">02 · Planes de acción</h2>${panel("Estado del plan de acción", progressCards)}<h2 class="section-title">03 · Observaciones por…</h2><div class="grid two">${panel("Estado de observación", bars(charts.statusDistribution))}${panel("Observaciones por área", bars(byArea))}${panel("Observaciones por Responsable de Área", bars(byResponsible))}${panel("Observaciones por Dueño del Proceso", bars(byOwner))}${panel("Observaciones por Ejecutor", bars(byExecutor))}</div><h2 class="section-title">04 · Planes por…</h2>${planTotals}<div class="grid two">${panel("Planes por área", bars(charts.areaDistribution))}${panel("Planes por Responsable de Área", bars(charts.areaResponsibleDistribution))}${panel("Planes por Dueño del Proceso", bars(charts.processOwnerDistribution))}${panel("Planes por Ejecutor", bars(charts.executorDistribution))}</div><h2 class="section-title">05 · Analítica complementaria</h2><div class="grid two">${panel("Tendencia mensual", trend(charts.trend))}${panel("Top responsables con mayor carga", bars(charts.topResponsibleWorkload ?? []))}${panel("Top áreas con más vencimientos", bars((charts.topOverdueAreas ?? []).map((item) => ({ ...item, colorToken: "VENCIDO" }))))}</div><h2 class="section-title">06 · Operación</h2>${table(Object.keys(criticalRows[0] ?? { "Número de observación": "", "Observación principal": "", "Título de observación": "" }), criticalRows, "Observaciones críticas o vencidas")}${table(Object.keys(upcomingRows[0] ?? { "Número de observación": "", "Observación principal": "", "Plan de acción": "" }), upcomingRows, "Planes próximos a vencer")}${table(preview.columns, preview.rows, "Planes de acción")}`;
+  return `<h2 class="section-title">01 · Resumen de observaciones</h2>${observationKpis}<div class="grid two">${panel("Nivel de riesgo", donut(byRisk, true))}${panel("Estado según plazo", donut(charts.deadlineDistribution, true))}</div><h2 class="section-title">02 · Planes de acción</h2>${panel("Estado del plan de acción", progressCards)}<h2 class="section-title">03 · Observaciones por…</h2><div class="grid two">${panel("Estado de observación", bars(charts.statusDistribution))}${panel("Observaciones por área", bars(byArea))}${panel("Observaciones por Responsable de Área", bars(byResponsible))}${panel("Observaciones por Dueño del Proceso", bars(byOwner))}${panel("Observaciones por Ejecutor", bars(byExecutor))}</div><h2 class="section-title">04 · Planes por…</h2>${planTotals}<div class="grid two">${panel("Planes por área", bars(charts.areaDistribution))}${panel("Planes por Responsable de Área", bars(charts.areaResponsibleDistribution))}${panel("Planes por Dueño del Proceso", bars(charts.processOwnerDistribution))}${panel("Planes por Ejecutor", bars(charts.executorDistribution))}</div><h2 class="section-title">05 · Analítica complementaria</h2><div class="grid two">${panel("Tendencia mensual", trend(charts.trend))}${panel("Top responsables con mayor carga", bars(charts.topResponsibleWorkload ?? []))}${panel("Top áreas con más vencimientos", bars((charts.topOverdueAreas ?? []).map((item) => ({ ...item, colorToken: "VENCIDO" }))))}</div><h2 class="section-title">06 · Operación</h2>${table(Object.keys(criticalRows[0] ?? { "Número de observación": "", "Observación principal": "", "Título de observación": "" }), criticalRows, "Observaciones críticas o vencidas")}${table(Object.keys(upcomingRows[0] ?? { "Número de observación": "", "Observación principal": "", "Plan de acción": "" }), upcomingRows, "Planes próximos a vencer")}${actionPlanList("Planes de acción")}`;
 };
 
 const styles = `
