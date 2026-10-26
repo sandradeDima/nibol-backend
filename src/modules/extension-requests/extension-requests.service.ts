@@ -323,7 +323,11 @@ const find = async (
     include,
     where: { deletedAt: null, id, ...accessWhere(access) },
   });
-  if (!record) throw new AppError("No se encontró la solicitud de ampliación de plazo.", 404);
+  if (!record)
+    throw new AppError(
+      "No se encontró la solicitud de ampliación de plazo.",
+      404,
+    );
   return record;
 };
 
@@ -352,7 +356,11 @@ const findReviewable = async (
           ],
         },
       });
-  if (!record) throw new AppError("No se encontró la solicitud de ampliación de plazo.", 404);
+  if (!record)
+    throw new AppError(
+      "No se encontró la solicitud de ampliación de plazo.",
+      404,
+    );
   return record;
 };
 
@@ -361,7 +369,11 @@ const findById = async (id: string): Promise<ExtensionRecord> => {
     include,
     where: { deletedAt: null, id },
   });
-  if (!record) throw new AppError("No se encontró la solicitud de ampliación de plazo.", 404);
+  if (!record)
+    throw new AppError(
+      "No se encontró la solicitud de ampliación de plazo.",
+      404,
+    );
   return record;
 };
 
@@ -426,7 +438,8 @@ export const extensionRequestsService = {
     });
     if (!authorizationService.can(access, "deadline_extensions.request"))
       throw new AppError("No tiene permiso para solicitar ampliaciones.", 403);
-    if (!actionPlan) throw new AppError("No se encontró el plan de acción.", 404);
+    if (!actionPlan)
+      throw new AppError("No se encontró el plan de acción.", 404);
     if (!access.isAdmin && actionPlan.responsibleUserId !== access.userId)
       throw new AppError(
         "Solo puede solicitar ampliaciones de sus planes asignados.",
@@ -824,7 +837,10 @@ export const extensionRequestsService = {
         previous: format(previous, access),
       };
     if (previous.status !== "SENT_TO_MANAGER")
-      throw new AppError("Esta solicitud no está pendiente de revisión por Gerencia.", 409);
+      throw new AppError(
+        "Esta solicitud no está pendiente de revisión por Gerencia.",
+        409,
+      );
     if (!approved && !input.comment)
       throw new AppError(
         "Debe ingresar un comentario para rechazar la ampliación.",
@@ -898,19 +914,33 @@ export const extensionRequestsService = {
           });
       });
     }
-    if (!usedWorkflow && previous.requestedByUserId !== access.userId)
-      await notificationService.create({
-        entityId: previous.id,
-        entityType: "DEADLINE_EXTENSION_REQUEST",
-        eventType: approved ? "EXTENSION_APPROVED" : "EXTENSION_REJECTED",
-        message: approved
-          ? `La ampliación fue aprobada hasta el ${previous.proposedDueDate.toISOString().slice(0, 10)}.`
-          : "La solicitud de ampliación fue rechazada.",
-        title: "Solicitud de ampliación revisada",
-        targetUrl: extensionTargetUrl(previous),
-        type: approved ? "success" : "warning",
-        userId: previous.requestedByUserId,
-      });
+    if (!usedWorkflow && previous.requestedByUserId !== access.userId) {
+      const eventType = approved ? "EXTENSION_APPROVED" : "EXTENSION_REJECTED";
+      const message = approved
+        ? `La ampliación fue aprobada hasta el ${previous.proposedDueDate.toISOString().slice(0, 10)}.`
+        : "La solicitud de ampliación fue rechazada.";
+      const title = "Solicitud de ampliación revisada";
+      const targetUrl = extensionTargetUrl(previous);
+      await Promise.all([
+        notificationService.create({
+          entityId: previous.id,
+          entityType: "DEADLINE_EXTENSION_REQUEST",
+          eventType,
+          message,
+          title,
+          targetUrl,
+          type: approved ? "success" : "warning",
+          userId: previous.requestedByUserId,
+        }),
+        notificationService.sendEmailNotification({
+          eventType,
+          message,
+          title,
+          targetUrl,
+          userId: previous.requestedByUserId,
+        }),
+      ]);
+    }
     return {
       current: format(await findById(id), access),
       previous: format(previous, access),

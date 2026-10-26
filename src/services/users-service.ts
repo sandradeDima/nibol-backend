@@ -154,7 +154,10 @@ const assertUserCanLoseActiveAccess = async (userId: string): Promise<void> => {
   });
 
   if (remainingAdminCount === 0) {
-    throw new AppError("No se puede desactivar al último usuario administrador.", 400);
+    throw new AppError(
+      "No se puede desactivar al último usuario administrador.",
+      400,
+    );
   }
 };
 
@@ -688,10 +691,14 @@ export const usersService = {
         });
       } catch (error) {
         if (isUniqueConstraintError(error)) {
-          throw new AppError("Ya existe un usuario con ese correo electrónico.", 400, {
-            email: input.email,
-            fields: error.meta?.target,
-          });
+          throw new AppError(
+            "Ya existe un usuario con ese correo electrónico.",
+            400,
+            {
+              email: input.email,
+              fields: error.meta?.target,
+            },
+          );
         }
 
         throw error;
@@ -793,10 +800,14 @@ export const usersService = {
       });
     } catch (error) {
       if (isUniqueConstraintError(error)) {
-        throw new AppError("Ya existe un usuario con ese correo electrónico.", 400, {
-          email: input.email,
-          fields: error.meta?.target,
-        });
+        throw new AppError(
+          "Ya existe un usuario con ese correo electrónico.",
+          400,
+          {
+            email: input.email,
+            fields: error.meta?.target,
+          },
+        );
       }
 
       throw error;
@@ -1245,6 +1256,7 @@ export const usersService = {
       await assertUserCanLoseActiveAccess(userId);
     }
 
+    let roleUpdateMessage: string | null = null;
     await prisma.$transaction(async (transaction) => {
       const previousSnapshot = await getUserAuditSnapshot(transaction, userId);
 
@@ -1340,10 +1352,11 @@ export const usersService = {
             },
           );
 
+          roleUpdateMessage = `Sus roles de acceso cambiaron de ${previousSnapshot.roleNames.join(", ") || "ninguno"} a ${nextSnapshot.roleNames.join(", ") || "ninguno"}.`;
           await notificationService.create(
             {
               eventType: "USER_ROLES_UPDATED",
-              message: `Sus roles de acceso cambiaron de ${previousSnapshot.roleNames.join(", ") || "ninguno"} a ${nextSnapshot.roleNames.join(", ") || "ninguno"}.`,
+              message: roleUpdateMessage,
               title: "Roles actualizados",
               type: "warning",
               userId,
@@ -1355,6 +1368,14 @@ export const usersService = {
         }
       }
     });
+
+    if (roleUpdateMessage)
+      await notificationService.sendEmailNotification({
+        eventType: "USER_ROLES_UPDATED",
+        message: roleUpdateMessage,
+        title: "Roles actualizados",
+        userId,
+      });
 
     return this.getUserById(userId);
   },

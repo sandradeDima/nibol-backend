@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { type Prisma } from "../../generated/prisma/client.js";
 import {
   NotificationDeliveryChannel,
@@ -10,8 +12,9 @@ import {
 } from "../types/database-enums.js";
 
 import { AppError } from "../utils/app-error.js";
+import { buildFrontendUrl } from "../utils/notification-links.js";
 import { toDatabaseJson } from "./logging-utils.js";
-import { isNotificationEventEnabled } from "./notification-preferences.js";
+import { isNotificationChannelEnabled } from "./notification-preferences.js";
 import { resolveNotificationTarget } from "../utils/notification-links.js";
 import { prisma } from "../utils/prisma.js";
 import type {
@@ -32,7 +35,7 @@ type NotificationWriter = {
     | "update"
     | "updateMany"
   >;
-  systemParameter: Pick<typeof prisma.systemParameter, "findUnique">;
+  systemParameter: Pick<typeof prisma.systemParameter, "findMany">;
 };
 
 type NotificationDeliveryWriter = Pick<
@@ -200,8 +203,12 @@ export const notificationService = {
     options?: { db?: NotificationWriter },
   ) {
     const db = options?.db ?? prisma;
-    if (!(await isNotificationEventEnabled(input.eventType, db.systemParameter)))
-      return null;
+    const internalEnabled = await isNotificationChannelEnabled(
+      input.eventType,
+      "internal",
+      db.systemParameter,
+    );
+    if (!internalEnabled) return null;
     const targetUrl =
       input.targetUrl !== undefined
         ? input.targetUrl
@@ -238,22 +245,97 @@ export const notificationService = {
     const db = options?.db ?? prisma;
     const userIds = Array.from(new Set(input.userIds.filter(Boolean)));
     if (userIds.length === 0) {
-      return { createdCount: 0, suppressed: false };
+      return { createdCount: 0, emailCount: 0, suppressed: false };
     }
-    if (!(await isNotificationEventEnabled(null, db.systemParameter)))
-      return { createdCount: 0, suppressed: true };
+    const [internalEnabled, emailEnabled] = await Promise.all([
+      isNotificationChannelEnabled(null, "internal", db.systemParameter),
+      isNotificationChannelEnabled(null, "email", db.systemParameter),
+    ]);
+    const created = internalEnabled
+      ? await db.notification.createMany({
+          data: userIds.map((userId) => ({
+            message: input.message.trim(),
+            priority: toPrismaNotificationPriority(input.priority),
+            title: input.title.trim(),
+            type: toPrismaNotificationType(input.type),
+            userId,
+          })),
+        })
+      : { count: 0 };
+    let emailCount = 0;
+    if (emailEnabled && !options?.db) {
+      const batchId = randomUUID();
+      const results = await Promise.all(
+        userIds.map((userId) =>
+          notificationService.sendEmailNotification({
+            dedupeKey: `manual:${batchId}:${userId}`,
+            eventType: null,
+            message: input.message,
+            title: input.title,
+            userId,
+          }),
+        ),
+      );
+      emailCount = results.filter(Boolean).length;
+    }
 
-    const created = await db.notification.createMany({
-      data: userIds.map((userId) => ({
-        message: input.message.trim(),
-        priority: toPrismaNotificationPriority(input.priority),
-        title: input.title.trim(),
-        type: toPrismaNotificationType(input.type),
-        userId,
-      })),
+    return {
+      createdCount: created.count,
+      emailCount,
+      suppressed: !internalEnabled && !emailEnabled,
+    };
+  },
+
+  async sendEmailNotification(input: {
+    dedupeKey?: string | null;
+    eventType?: string | null;
+    message: string;
+    notificationId?: string;
+    targetUrl?: string | null;
+    title: string;
+    userId: string;
+  }): Promise<boolean> {
+    if (!(await isNotificationChannelEnabled(input.eventType, "email")))
+      return false;
+    const recipient = await prisma.user.findFirst({
+      select: { email: true, name: true },
+      where: { deletedAt: null, id: input.userId, isActive: true },
     });
-
-    return { createdCount: created.count, suppressed: false };
+    if (!recipient?.email) return false;
+    const delivery = await notificationService.createDelivery({
+      channel: NotificationDeliveryChannel.EMAIL,
+      dedupeKey: `${input.dedupeKey ?? randomUUID()}:${input.userId}:EMAIL`,
+      ...(input.notificationId ? { notificationId: input.notificationId } : {}),
+      payloadJson: {
+        eventType: input.eventType ?? null,
+        message: input.message,
+        targetUrl: input.targetUrl ?? "/notificaciones",
+        title: input.title,
+      },
+      recipientEmail: recipient.email,
+      recipientUserId: input.userId,
+    });
+    if (
+      !(await notificationService.claimEmailDelivery(
+        delivery.id,
+        input.eventType,
+      ))
+    )
+      return false;
+    const { emailService } = await import("../emails/EmailService.js");
+    const result = await emailService.sendTemplate({
+      template: "genericNotification",
+      to: recipient.email,
+      variables: {
+        actionLabel: "Ver notificación",
+        actionLink: buildFrontendUrl(input.targetUrl ?? "/notificaciones"),
+        message: input.message,
+        title: input.title,
+        userName: recipient.name,
+      },
+    });
+    await notificationService.completeEmailDelivery(delivery.id, result);
+    return result.success;
   },
 
   async createDelivery(
@@ -304,8 +386,9 @@ export const notificationService = {
     });
     if (
       delivery &&
-      !(await isNotificationEventEnabled(
+      !(await isNotificationChannelEnabled(
         eventType !== undefined ? eventType : delivery.notification?.eventType,
+        "email",
       ))
     ) {
       await prisma.notificationDelivery.updateMany({

@@ -30,7 +30,7 @@ import {
   type AuthorizationSummary,
 } from "../../services/authorization-service.js";
 import { notificationService } from "../../services/notification-service.js";
-import { isNotificationEventEnabled } from "../../services/notification-preferences.js";
+import { isNotificationChannelEnabled } from "../../services/notification-preferences.js";
 import { prisma } from "../../utils/prisma.js";
 import {
   buildFrontendUrl,
@@ -131,7 +131,6 @@ type ReminderFailure = {
 };
 
 type ReminderAlertSettings = {
-  enabled: boolean;
   includeOverdue: boolean;
   includeDueToday: boolean;
   includeUpcoming: boolean;
@@ -322,7 +321,7 @@ const readPolicies = async (): Promise<StoredPolicy[]> => {
 };
 
 const readAlertSettings = async (): Promise<ReminderAlertSettings> => {
-  const [records, enabled] = await Promise.all([
+  const [records, internalEnabled, emailEnabled] = await Promise.all([
     prisma.systemParameter.findMany({
       select: { key: true, value: true },
       where: {
@@ -337,11 +336,11 @@ const readAlertSettings = async (): Promise<ReminderAlertSettings> => {
         },
       },
     }),
-    isNotificationEventEnabled(DEADLINE_REMINDER_EVENT_TYPE),
+    isNotificationChannelEnabled(DEADLINE_REMINDER_EVENT_TYPE, "internal"),
+    isNotificationChannelEnabled(DEADLINE_REMINDER_EVENT_TYPE, "email"),
   ]);
   const values = new Map(records.map((record) => [record.key, record.value]));
   return {
-    enabled,
     includeOverdue: parseBoolean(
       values.get("include_reminder_overdue"),
       DEADLINE_REMINDER_ALERT_DEFAULTS.include_reminder_overdue,
@@ -354,8 +353,10 @@ const readAlertSettings = async (): Promise<ReminderAlertSettings> => {
       values.get("include_reminder_upcoming"),
       DEADLINE_REMINDER_ALERT_DEFAULTS.include_reminder_upcoming,
     ),
-    notifyByEmail: parseBoolean(values.get("notify_by_email"), true),
-    notifyInApp: parseBoolean(values.get("notify_in_app"), true),
+    notifyByEmail:
+      parseBoolean(values.get("notify_by_email"), true) && emailEnabled,
+    notifyInApp:
+      parseBoolean(values.get("notify_in_app"), true) && internalEnabled,
   };
 };
 
@@ -697,16 +698,6 @@ const deliverReminderEmailDelivery = async (
   if (deliveryStatus === NotificationDeliveryStatus.SENT) {
     return { attempted: false, status: deliveryStatus };
   }
-  if (!alertSettings.enabled) {
-    await prisma.notificationDelivery.update({
-      data: {
-        errorMessage: "La categoría de notificación está desactivada.",
-        status: NotificationDeliveryStatus.SKIPPED,
-      },
-      where: { id: deliveryId },
-    });
-    return { attempted: false, status: NotificationDeliveryStatus.SKIPPED };
-  }
   if (!delivery.payloadJson || !delivery.recipientEmail) {
     await prisma.notificationDelivery.update({
       data: {
@@ -727,7 +718,9 @@ const deliverReminderEmailDelivery = async (
         !Array.isArray((value as ReminderPayload).plans) ||
         typeof (value as ReminderPayload).platformLink !== "string"
       ) {
-        throw new Error("La carga útil del recordatorio tiene un formato no válido.");
+        throw new Error(
+          "La carga útil del recordatorio tiene un formato no válido.",
+        );
       }
       return value as ReminderPayload;
     },
@@ -984,7 +977,6 @@ const notifyDigest = async (input: {
   runType: string;
   summary: DeadlineReminderRunSummary;
 }): Promise<void> => {
-  if (!input.channels.enabled) return;
   const payload = makePayload({
     cutoffDateKey: input.cutoffDateKey,
     digest: input.digest,
@@ -1322,7 +1314,7 @@ export const deadlineReminderService = {
     );
     return {
       channels: {
-        enabled: channels.enabled,
+        enabled: channels.notifyByEmail || channels.notifyInApp,
         notifyByEmail: channels.notifyByEmail,
         notifyInApp: channels.notifyInApp,
       },

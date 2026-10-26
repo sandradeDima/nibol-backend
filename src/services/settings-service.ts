@@ -291,6 +291,10 @@ export class SettingsService {
     context?: LogActorContext,
   ) {
     const currentSnapshot = await this.getSnapshot(true);
+    let adminUserIds: string[] = [];
+    const notificationMessage =
+      "Se actualizaron los ajustes de la aplicación. Revise la marca, los datos del remitente y las preferencias de idioma y formato.";
+    const notificationDedupeKey = `settings-updated:${randomUUID()}`;
 
     await prisma.$transaction(async (transaction) => {
       await this.persistSettings(input, currentSnapshot, transaction);
@@ -334,13 +338,13 @@ export class SettingsService {
         },
       );
 
+      adminUserIds = await listActiveAdminUserIds(transaction);
       await notificationService.createMany(
         {
-          message:
-            "Se actualizaron los ajustes de la aplicación. Revise la marca, los datos del remitente y las preferencias de idioma y formato.",
+          message: notificationMessage,
           title: "Ajustes actualizados",
           type: "info",
-          userIds: await listActiveAdminUserIds(transaction),
+          userIds: adminUserIds,
         },
         {
           db: transaction,
@@ -349,6 +353,17 @@ export class SettingsService {
     });
 
     this.clearCache();
+    await Promise.all(
+      adminUserIds.map((userId) =>
+        notificationService.sendEmailNotification({
+          dedupeKey: notificationDedupeKey,
+          eventType: null,
+          message: notificationMessage,
+          title: "Ajustes actualizados",
+          userId,
+        }),
+      ),
+    );
 
     return this.getSettings();
   }
@@ -363,6 +378,10 @@ export class SettingsService {
     const currentSnapshot = await this.getSnapshot(true);
     const fileName = buildLogoFileName(file.originalName);
     const destination = path.join(logoUploadsDir, fileName);
+    let adminUserIds: string[] = [];
+    const notificationMessage =
+      "Se actualizaron los ajustes de la aplicación. Cambiaron el logotipo y los recursos visuales compartidos.";
+    const notificationDedupeKey = `settings-updated:${randomUUID()}`;
 
     await writeFile(destination, file.buffer);
 
@@ -426,13 +445,13 @@ export class SettingsService {
         },
       );
 
+      adminUserIds = await listActiveAdminUserIds(transaction);
       await notificationService.createMany(
         {
-          message:
-            "Se actualizaron los ajustes de la aplicación. Cambiaron el logotipo y los recursos visuales compartidos.",
+          message: notificationMessage,
           title: "Ajustes actualizados",
           type: "info",
-          userIds: await listActiveAdminUserIds(transaction),
+          userIds: adminUserIds,
         },
         {
           db: transaction,
@@ -442,6 +461,17 @@ export class SettingsService {
 
     await removePreviousLogoIfLocal(currentSnapshot.logo);
     this.clearCache();
+    await Promise.all(
+      adminUserIds.map((userId) =>
+        notificationService.sendEmailNotification({
+          dedupeKey: notificationDedupeKey,
+          eventType: null,
+          message: notificationMessage,
+          title: "Ajustes actualizados",
+          userId,
+        }),
+      ),
+    );
 
     return this.getSettings();
   }

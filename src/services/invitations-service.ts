@@ -448,6 +448,9 @@ export const invitationsService = {
 
     const passwordHash = await bcrypt.hash(input.password, 12);
     const acceptedAt = new Date();
+    const acceptedNotification: {
+      current: { message: string; userId: string } | null;
+    } = { current: null };
 
     await prisma.$transaction(async (transaction) => {
       const previousInvitationSnapshot = await getInvitationAuditSnapshot(
@@ -589,20 +592,31 @@ export const invitationsService = {
           },
         );
 
+        acceptedNotification.current = {
+          message: `${nextInvitationSnapshot.email} aceptó la invitación para el rol ${nextInvitationSnapshot.roleName}.`,
+          userId: invitation.createdBy.id,
+        };
+        const notification = acceptedNotification.current;
         await notificationService.create(
           {
             eventType: "INVITATION_ACCEPTED",
-            message: `${nextInvitationSnapshot.email} aceptó la invitación para el rol ${nextInvitationSnapshot.roleName}.`,
+            message: notification.message,
             title: "Invitación aceptada",
             type: "success",
-            userId: invitation.createdBy.id,
+            userId: notification.userId,
           },
-          {
-            db: transaction,
-          },
+          { db: transaction },
         );
       }
     });
+
+    if (acceptedNotification.current)
+      await notificationService.sendEmailNotification({
+        eventType: "INVITATION_ACCEPTED",
+        message: acceptedNotification.current.message,
+        title: "Invitación aceptada",
+        userId: acceptedNotification.current.userId,
+      });
 
     void emailService.sendTemplate({
       template: "welcome",

@@ -14,6 +14,7 @@ import {
   type AuthorizationSummary,
 } from "../../services/authorization-service.js";
 import { notificationService } from "../../services/notification-service.js";
+import { isNotificationChannelEnabled } from "../../services/notification-preferences.js";
 import { emailService } from "../../emails/EmailService.js";
 import { AppError } from "../../utils/app-error.js";
 import { logger } from "../../utils/logger.js";
@@ -26,6 +27,7 @@ import {
   observationAggregationService,
 } from "./observation-aggregation.service.js";
 import { observationDeadlineService } from "./observation-deadline.service.js";
+import { notifyActionPlanAssigned } from "../remediation/action-plan-notification.service.js";
 import type {
   CreateObservationInput,
   ListObservationsQuery,
@@ -437,7 +439,7 @@ const requireEntities = async (input: {
   const [auditReport, mainObservation, riskLevel, risks, areas, users] =
     await Promise.all([
       prisma.auditReport.findFirst({
-        select: { id: true, reportDate: true },
+        select: { id: true, reportDate: true, reportNumber: true },
         where: { deletedAt: null, id: input.auditReportId },
       }),
       prisma.observationDictionary.findFirst({
@@ -814,7 +816,23 @@ export const observationsService = {
         }
         return observation;
       });
-      return formatRecord(await findRecord(created.id, access));
+      const record = await findRecord(created.id, access);
+      await Promise.all(
+        input.actionPlans.map((plan, index) =>
+          notifyActionPlanAssigned({
+            dedupeKey: `action-plan-created-with-observation:${created.id}:${index}`,
+            entityId: created.id,
+            entityType: "OBSERVATION",
+            eventType: "ACTION_PLAN_CREATED_WITH_OBSERVATION",
+            observationDisplayCode: `${auditReport.reportNumber} / OBS-${String(record.observationNumber).padStart(3, "0")}`,
+            observationId: created.id,
+            observationTitle: record.title,
+            planDescription: plan.description,
+            userId: plan.responsibleUserId,
+          }),
+        ),
+      );
+      return formatRecord(record);
     } catch (error) {
       if ((error as { code?: string }).code === "P2002") {
         throw new AppError(
@@ -1046,6 +1064,11 @@ export const observationsService = {
       });
       if (updated.count !== uniqueIds.length)
         throw new AppError("Una o más observaciones ya fueron enviadas.", 409);
+      const emailEnabled = await isNotificationChannelEnabled(
+        "OBSERVATION_ASSIGNMENT",
+        "email",
+        tx.systemParameter,
+      );
       for (const group of groups) {
         const targetUrl =
           group.observationIds.length === 1
@@ -1075,43 +1098,51 @@ export const observationsService = {
           },
           { db: tx },
         );
-        if (!notification) continue;
-        await notificationService.createDelivery(
-          {
-            channel: NotificationDeliveryChannel.IN_APP,
-            dedupeKey: buildObservationSendDedupeKey(
-              operationId,
-              group.userId,
-              "IN_APP",
-            ),
-            notificationId: notification.id,
-            recipientEmail: group.email,
-            recipientUserId: group.userId,
-            status: NotificationDeliveryStatus.SENT,
-          },
-          { db: tx.notificationDelivery },
-        );
-        const delivery = await notificationService.createDelivery(
-          {
-            channel: NotificationDeliveryChannel.EMAIL,
-            dedupeKey: buildObservationSendDedupeKey(
-              operationId,
-              group.userId,
-              "EMAIL",
-            ),
-            notificationId: notification.id,
-            recipientEmail: group.email,
-            recipientUserId: group.userId,
-            status: NotificationDeliveryStatus.PENDING,
-          },
-          { db: tx.notificationDelivery },
-        );
-        emailDeliveries.push({ deliveryId: delivery.id, group });
+        if (notification)
+          await notificationService.createDelivery(
+            {
+              channel: NotificationDeliveryChannel.IN_APP,
+              dedupeKey: buildObservationSendDedupeKey(
+                operationId,
+                group.userId,
+                "IN_APP",
+              ),
+              notificationId: notification.id,
+              recipientEmail: group.email,
+              recipientUserId: group.userId,
+              status: NotificationDeliveryStatus.SENT,
+            },
+            { db: tx.notificationDelivery },
+          );
+        if (emailEnabled) {
+          const delivery = await notificationService.createDelivery(
+            {
+              channel: NotificationDeliveryChannel.EMAIL,
+              dedupeKey: buildObservationSendDedupeKey(
+                operationId,
+                group.userId,
+                "EMAIL",
+              ),
+              ...(notification ? { notificationId: notification.id } : {}),
+              recipientEmail: group.email,
+              recipientUserId: group.userId,
+              status: NotificationDeliveryStatus.PENDING,
+            },
+            { db: tx.notificationDelivery },
+          );
+          emailDeliveries.push({ deliveryId: delivery.id, group });
+        }
       }
     });
     void Promise.all(
       emailDeliveries.map(async ({ deliveryId, group }) => {
-        if (!(await notificationService.claimEmailDelivery(deliveryId))) return;
+        if (
+          !(await notificationService.claimEmailDelivery(
+            deliveryId,
+            "OBSERVATION_ASSIGNMENT",
+          ))
+        )
+          return;
         const targetUrl =
           group.observationIds.length === 1
             ? `/observaciones/${group.observationIds[0]}?tab=summary`
@@ -1130,9 +1161,12 @@ export const observationsService = {
         await notificationService.completeEmailDelivery(deliveryId, result);
       }),
     ).catch((error) => {
-      logger.error("Falló la entrega del correo de asignación de la observación.", {
-        message: error instanceof Error ? error.message : "Error desconocido",
-      });
+      logger.error(
+        "Falló la entrega del correo de asignación de la observación.",
+        {
+          message: error instanceof Error ? error.message : "Error desconocido",
+        },
+      );
     });
     const current = await Promise.all(
       uniqueIds.map((observationId) => findRecord(observationId, access)),

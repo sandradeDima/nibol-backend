@@ -21,6 +21,7 @@ import { DEADLINE_MONITOR_PARAMETER_DEFAULTS } from "../jobs/deadline-monitor/de
 import { workflowTimerService } from "../modules/workflows/workflow-timer.service.js";
 import {
   getNotificationCatalog,
+  getNotificationChannelPreferenceKeys,
   NOTIFICATION_CATALOG,
   NOTIFICATION_PREFERENCE_DEFAULTS,
 } from "../services/notification-preferences.js";
@@ -31,10 +32,26 @@ const AUTOMATIC_NOTIFICATION_RULE_DEFAULTS = {
   ...NOTIFICATION_PREFERENCE_DEFAULTS,
 };
 const NOTIFICATION_RULE_METADATA = Object.fromEntries(
-  NOTIFICATION_CATALOG.map((item) => [
-    item.key,
-    { description: item.description, name: item.name },
-  ]),
+  NOTIFICATION_CATALOG.flatMap((item) => {
+    const keys = getNotificationChannelPreferenceKeys(item.key);
+    return [
+      [item.key, { description: item.description, name: item.name }],
+      [
+        keys.internal,
+        {
+          description: `Activar o pausar ${item.name.toLowerCase()} en la plataforma.`,
+          name: `${item.name} · Plataforma`,
+        },
+      ],
+      [
+        keys.email,
+        {
+          description: `Activar o pausar ${item.name.toLowerCase()} por correo.`,
+          name: `${item.name} · Correo`,
+        },
+      ],
+    ];
+  }),
 );
 const REMINDER_ALERT_RULE_METADATA: Record<
   string,
@@ -452,7 +469,10 @@ automaticJobsRouter.patch(
     const key =
       typeof request.params.key === "string" ? request.params.key : "";
     if (!(key in AUTOMATIC_NOTIFICATION_RULE_DEFAULTS)) {
-      throw new AppError("No se encontró la regla de notificación automática.", 404);
+      throw new AppError(
+        "No se encontró la regla de notificación automática.",
+        404,
+      );
     }
     const payload = ruleUpdateSchema.parse(request.body);
     const userId = getUserId(request);

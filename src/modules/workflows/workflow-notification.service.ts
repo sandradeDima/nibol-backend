@@ -15,7 +15,7 @@ import {
 } from "../../utils/notification-links.js";
 import { prisma } from "../../utils/prisma.js";
 import { toDatabaseJson } from "../../services/logging-utils.js";
-import { isNotificationEventEnabled } from "../../services/notification-preferences.js";
+import { isNotificationChannelEnabled } from "../../services/notification-preferences.js";
 import type { WorkflowRuntimeContext } from "./workflow-runtime-context.js";
 import { restoreWorkflowRuntimeContext } from "./workflow-runtime-context.js";
 import {
@@ -102,6 +102,7 @@ const createNotificationIfMissing = async (
     eventType: string;
     message: string;
     priority: NotificationPriority;
+    hideFromInApp: boolean;
     targetUrl: string | null;
     title: string;
     userId: string;
@@ -121,6 +122,7 @@ const createNotificationIfMissing = async (
         eventType: input.eventType,
         message: input.message,
         priority: input.priority,
+        ...(input.hideFromInApp ? { deletedAt: new Date() } : {}),
         targetUrl: input.targetUrl,
         title: input.title,
         type:
@@ -356,9 +358,23 @@ export const createWorkflowNotificationIntent = async (
   event: WorkflowNotificationEvent,
 ): Promise<{ createdDeliveries: string[]; recipientCount: number }> => {
   const recipients = uniqueRecipients(event.recipients);
-  if (!(await isNotificationEventEnabled(event.eventType, db.systemParameter)))
-    return { createdDeliveries: [], recipientCount: 0 };
   const channel = event.channel ?? "INTERNAL";
+  const [internalEnabled, emailEnabled] = await Promise.all([
+    (channel === "INTERNAL" || channel === "BOTH") &&
+      isNotificationChannelEnabled(
+        event.eventType,
+        "internal",
+        db.systemParameter,
+      ),
+    (channel === "EMAIL" || channel === "BOTH") &&
+      isNotificationChannelEnabled(
+        event.eventType,
+        "email",
+        db.systemParameter,
+      ),
+  ]);
+  if (!internalEnabled && !emailEnabled)
+    return { createdDeliveries: [], recipientCount: 0 };
   const baseKey = dedupePrefix(event);
   const entityId = event.entityId ?? event.instanceId;
   const entityType = event.entityType ?? "workflow_instance";
@@ -381,12 +397,13 @@ export const createWorkflowNotificationIntent = async (
       eventType: event.eventType,
       message: event.message,
       priority,
+      hideFromInApp: !internalEnabled,
       targetUrl,
       title: event.title,
       userId: recipient.id,
     });
 
-    if (channel === "INTERNAL" || channel === "BOTH") {
+    if (internalEnabled) {
       const delivery = await createDeliveryIfMissing(db, {
         channel: NotificationDeliveryChannel.IN_APP,
         dedupeKey: buildWorkflowNotificationDedupeKey(
@@ -400,7 +417,7 @@ export const createWorkflowNotificationIntent = async (
       createdDeliveries.push(delivery.id);
     }
 
-    if ((channel === "EMAIL" || channel === "BOTH") && recipient.email) {
+    if (emailEnabled && recipient.email) {
       const delivery = await createDeliveryIfMissing(db, {
         channel: NotificationDeliveryChannel.EMAIL,
         dedupeKey: buildWorkflowNotificationDedupeKey(
@@ -488,11 +505,14 @@ const recordNotificationFailure = async (
       metadata: { instanceId, message },
     });
   } catch (failure) {
-    logger.warn("No se pudo registrar el evento de fallo de notificación del flujo de trabajo.", {
-      deliveryId,
-      errorCode: "WORKFLOW_NOTIFICATION_FAILURE_EVENT_FAILED",
-      message: safeErrorMessage(failure),
-    });
+    logger.warn(
+      "No se pudo registrar el evento de fallo de notificación del flujo de trabajo.",
+      {
+        deliveryId,
+        errorCode: "WORKFLOW_NOTIFICATION_FAILURE_EVENT_FAILED",
+        message: safeErrorMessage(failure),
+      },
+    );
   }
 };
 
@@ -525,7 +545,10 @@ export const deliverWorkflowNotificationDelivery = async (
   }
   if (
     delivery.notification &&
-    !(await isNotificationEventEnabled(delivery.notification.eventType))
+    !(await isNotificationChannelEnabled(
+      delivery.notification.eventType,
+      "email",
+    ))
   ) {
     await prisma.notificationDelivery.update({
       data: {
@@ -1025,10 +1048,9 @@ export const createWorkflowCompletionNotification = async ({
       : NotificationPriority.HIGH,
     recipients,
     targetUrl: targetUrl ?? buildWorkflowInstanceUrl(instanceId),
-    title: (
-      approved
-        ? `Aprobación completada: ${subject}`
-        : `Aprobación finalizada: ${subject}`
+    title: (approved
+      ? `Aprobación completada: ${subject}`
+      : `Aprobación finalizada: ${subject}`
     ).slice(0, 191),
     visitSequence: 0,
   });

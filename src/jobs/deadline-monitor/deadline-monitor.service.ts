@@ -17,7 +17,7 @@ import {
 } from "../../utils/notification-links.js";
 import { logger } from "../../utils/logger.js";
 import { entityActivityService } from "../../services/entity-activity-service.js";
-import { isNotificationEventEnabled } from "../../services/notification-preferences.js";
+import { isNotificationChannelEnabled } from "../../services/notification-preferences.js";
 import { getEffectiveActionPlanDueDate } from "../../modules/reports/reporting-definitions.js";
 import {
   AUTOMATIC_NOTIFICATION_TYPES,
@@ -324,10 +324,16 @@ const emitEvent = async (
   recipient: Recipient,
   cycle: string,
 ): Promise<void> => {
-  if (!(await isNotificationEventEnabled(event.eventType))) return;
+  const [internalEnabled, emailEnabled] = await Promise.all([
+    context.parameters.notify_in_app &&
+      isNotificationChannelEnabled(event.eventType, "internal"),
+    context.parameters.notify_by_email &&
+      isNotificationChannelEnabled(event.eventType, "email"),
+  ]);
+  if (!internalEnabled && !emailEnabled) return;
   const baseKey = `${event.eventType}:${event.entityType}:${event.entityId}:${recipient.id}:${cycle}`;
 
-  if (context.parameters.notify_in_app) {
+  if (internalEnabled) {
     const dedupeKey = `${baseKey}:IN_APP`;
     let notification = await prisma.notification.findUnique({
       where: { dedupeKey },
@@ -376,7 +382,7 @@ const emitEvent = async (
     });
   }
 
-  if (!context.parameters.notify_by_email || !recipient.email) return;
+  if (!emailEnabled || !recipient.email) return;
 
   const emailDelivery = await createDelivery({
     channel: NotificationDeliveryChannel.EMAIL,

@@ -22,6 +22,7 @@ import {
 } from "../../services/authorization-service.js";
 import { emailService } from "../../emails/EmailService.js";
 import { notificationService } from "../../services/notification-service.js";
+import { isNotificationChannelEnabled } from "../../services/notification-preferences.js";
 import { AppError } from "../../utils/app-error.js";
 import { logger } from "../../utils/logger.js";
 import { buildObservationUrl } from "../../utils/observation-links.js";
@@ -248,6 +249,7 @@ type EvidenceNotificationRecipient = {
 
 type EvidenceNotificationDelivery = {
   deliveryId: string;
+  eventType: string;
   message: string;
   recipient: EvidenceNotificationRecipient;
   targetUrl: string;
@@ -259,8 +261,18 @@ const deliverEvidenceNotificationEmails = async (
 ) => {
   await Promise.all(
     deliveries.map(
-      async ({ deliveryId, message, recipient, targetUrl, title }) => {
-        if (!(await notificationService.claimEmailDelivery(deliveryId))) return;
+      async ({
+        deliveryId,
+        eventType,
+        message,
+        recipient,
+        targetUrl,
+        title,
+      }) => {
+        if (
+          !(await notificationService.claimEmailDelivery(deliveryId, eventType))
+        )
+          return;
         const result = await emailService.sendTemplate({
           template: "genericNotification",
           to: recipient.email,
@@ -304,35 +316,44 @@ const queueEvidenceNotifications = async (input: {
         },
         { db: tx },
       );
-      if (!notification) continue;
-      await notificationService.createDelivery(
-        {
-          channel: NotificationDeliveryChannel.IN_APP,
-          dedupeKey: `${input.operationKey}:${recipient.id}:IN_APP`,
-          notificationId: notification.id,
-          recipientEmail: recipient.email,
-          recipientUserId: recipient.id,
-          status: NotificationDeliveryStatus.SENT,
-        },
-        { db: tx.notificationDelivery },
-      );
-      const delivery = await notificationService.createDelivery(
-        {
-          channel: NotificationDeliveryChannel.EMAIL,
-          dedupeKey: `${input.operationKey}:${recipient.id}:EMAIL`,
-          notificationId: notification.id,
-          recipientEmail: recipient.email,
-          recipientUserId: recipient.id,
-        },
-        { db: tx.notificationDelivery },
-      );
-      emailDeliveries.push({
-        deliveryId: delivery.id,
-        message: input.message,
-        recipient,
-        targetUrl: input.targetUrl,
-        title: input.title,
-      });
+      if (notification)
+        await notificationService.createDelivery(
+          {
+            channel: NotificationDeliveryChannel.IN_APP,
+            dedupeKey: `${input.operationKey}:${recipient.id}:IN_APP`,
+            notificationId: notification.id,
+            recipientEmail: recipient.email,
+            recipientUserId: recipient.id,
+            status: NotificationDeliveryStatus.SENT,
+          },
+          { db: tx.notificationDelivery },
+        );
+      if (
+        await isNotificationChannelEnabled(
+          input.eventType,
+          "email",
+          tx.systemParameter,
+        )
+      ) {
+        const delivery = await notificationService.createDelivery(
+          {
+            channel: NotificationDeliveryChannel.EMAIL,
+            dedupeKey: `${input.operationKey}:${recipient.id}:EMAIL`,
+            ...(notification ? { notificationId: notification.id } : {}),
+            recipientEmail: recipient.email,
+            recipientUserId: recipient.id,
+          },
+          { db: tx.notificationDelivery },
+        );
+        emailDeliveries.push({
+          deliveryId: delivery.id,
+          eventType: input.eventType,
+          message: input.message,
+          recipient,
+          targetUrl: input.targetUrl,
+          title: input.title,
+        });
+      }
     }
   });
   void deliverEvidenceNotificationEmails(emailDeliveries).catch((error) => {
@@ -1029,21 +1050,34 @@ export const progressService = {
         );
     });
     if (previous.submittedByUser.id !== access.userId) {
-      await notificationService.create({
-        entityId: id,
-        entityType: "PROGRESS_EVALUATION",
-        eventType:
-          next === "APPROVED" ? "PROGRESS_APPROVED" : "PROGRESS_RETURNED",
-        message: `La evaluación de avance del plan de acción fue ${next === "APPROVED" ? "aprobada" : "devuelta"}.`,
-        title: "Evaluación de avance revisada",
-        targetUrl: progressEvaluationTargetUrl(
-          previous.actionPlan.observation.id,
-          previous.actionPlan.id,
-          id,
-        ),
-        type: next === "APPROVED" ? "success" : "warning",
-        userId: previous.submittedByUser.id,
-      });
+      const eventType =
+        next === "APPROVED" ? "PROGRESS_APPROVED" : "PROGRESS_RETURNED";
+      const message = `La evaluación de avance del plan de acción fue ${next === "APPROVED" ? "aprobada" : "devuelta"}.`;
+      const title = "Evaluación de avance revisada";
+      const targetUrl = progressEvaluationTargetUrl(
+        previous.actionPlan.observation.id,
+        previous.actionPlan.id,
+        id,
+      );
+      await Promise.all([
+        notificationService.create({
+          entityId: id,
+          entityType: "PROGRESS_EVALUATION",
+          eventType,
+          message,
+          title,
+          targetUrl,
+          type: next === "APPROVED" ? "success" : "warning",
+          userId: previous.submittedByUser.id,
+        }),
+        notificationService.sendEmailNotification({
+          eventType,
+          message,
+          targetUrl,
+          title,
+          userId: previous.submittedByUser.id,
+        }),
+      ]);
     }
     return {
       current: formatEvaluation(await findEvaluation(id, access), access),
@@ -1121,21 +1155,34 @@ export const progressService = {
     }
     const auditorId = previous.actionPlan.observation.auditorUserId;
     if (auditorId && auditorId !== access.userId) {
-      await notificationService.create({
-        entityId: id,
-        entityType: "PROGRESS_EVALUATION",
-        eventType: "PROGRESS_PENDING_REVIEW",
-        message:
-          "Hay una evaluación de avance pendiente para un plan de acción.",
-        title: "Avance pendiente de revisión",
-        targetUrl: progressEvaluationTargetUrl(
-          previous.actionPlan.observation.id,
-          previous.actionPlan.id,
-          id,
-        ),
-        type: "info",
-        userId: auditorId,
-      });
+      const eventType = "PROGRESS_PENDING_REVIEW";
+      const message =
+        "Hay una evaluación de avance pendiente para un plan de acción.";
+      const title = "Avance pendiente de revisión";
+      const targetUrl = progressEvaluationTargetUrl(
+        previous.actionPlan.observation.id,
+        previous.actionPlan.id,
+        id,
+      );
+      await Promise.all([
+        notificationService.create({
+          entityId: id,
+          entityType: "PROGRESS_EVALUATION",
+          eventType,
+          message,
+          title,
+          targetUrl,
+          type: "info",
+          userId: auditorId,
+        }),
+        notificationService.sendEmailNotification({
+          eventType,
+          message,
+          targetUrl,
+          title,
+          userId: auditorId,
+        }),
+      ]);
     }
     return {
       current: formatEvaluation(await findEvaluation(id, access), access),
@@ -1249,7 +1296,10 @@ export const progressService = {
       input.context !== expectedContext &&
       !["FINDING", "CLOSURE"].includes(input.context)
     )
-      throw new AppError("El contexto de la evidencia no coincide con el destino.", 400);
+      throw new AppError(
+        "El contexto de la evidencia no coincide con el destino.",
+        400,
+      );
     const observation = await prisma.observation.findFirst({
       select: { id: true },
       where: {
@@ -1401,7 +1451,10 @@ export const progressService = {
       );
     const evaluation = await findEvaluation(progressEvaluationId, access);
     if (!canEdit(evaluation, access))
-      throw new AppError("No tiene permiso para adjuntar evidencia a esta evaluación.", 403);
+      throw new AppError(
+        "No tiene permiso para adjuntar evidencia a esta evaluación.",
+        403,
+      );
     return this.uploadEvidence(
       {
         actionPlanId: evaluation.actionPlan.id,
@@ -1845,7 +1898,10 @@ export const progressService = {
     });
     if (!record) throw new AppError("No se encontró el comentario.", 404);
     if (!access.isAdmin && record.authorUserId !== access.userId)
-      throw new AppError("No tiene permiso para eliminar este comentario.", 403);
+      throw new AppError(
+        "No tiene permiso para eliminar este comentario.",
+        403,
+      );
     await prisma.observationComment.update({
       data: { deletedAt: new Date() },
       where: { id },

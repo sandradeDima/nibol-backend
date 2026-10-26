@@ -19,6 +19,10 @@ import {
   lockObservationForActionPlanUpdate,
   recalculateObservationFromActionPlans,
 } from "../observations/observation-aggregation.service.js";
+import {
+  notifyActionPlanAssigned,
+  notifyActionPlanExecutorChanged,
+} from "./action-plan-notification.service.js";
 import { observationDeadlineService } from "../observations/observation-deadline.service.js";
 import { workflowIntegrationService } from "../workflows/workflow-integration.service.js";
 import {
@@ -677,7 +681,19 @@ export const remediationService = {
       await recalculateObservationFromActionPlans(tx, observationId);
       return actionPlan;
     });
-    return format(await find(created.id, access));
+    const actionPlan = await find(created.id, access);
+    await notifyActionPlanAssigned({
+      dedupeKey: `action-plan-created-after-observation:${actionPlan.id}`,
+      entityId: actionPlan.id,
+      entityType: "ACTION_PLAN",
+      eventType: "ACTION_PLAN_CREATED_AFTER_OBSERVATION",
+      observationDisplayCode: `${actionPlan.observation.auditReport.reportNumber} / OBS-${String(actionPlan.observation.observationNumber).padStart(3, "0")}`,
+      observationId: actionPlan.observation.id,
+      observationTitle: actionPlan.observation.title,
+      planDescription: actionPlan.description,
+      userId: actionPlan.responsibleUser.id,
+    });
+    return format(actionPlan);
   },
 
   async deleteActionPlan(id: string, access: AuthorizationSummary) {
@@ -1170,8 +1186,24 @@ export const remediationService = {
       },
       where: { id },
     });
+    const current = await find(id, access);
+    if (
+      hasAssignmentChange &&
+      current.responsibleUser.id !== previous.responsibleUser.id
+    ) {
+      const observationDisplayCode = `${previous.observation.auditReport.reportNumber} / OBS-${String(previous.observation.observationNumber).padStart(3, "0")}`;
+      await notifyActionPlanExecutorChanged({
+        actionPlanId: id,
+        newExecutor: current.responsibleUser,
+        observationDisplayCode,
+        observationId: previous.observation.id,
+        observationTitle: previous.observation.title,
+        planDescription: current.description,
+        previousExecutor: previous.responsibleUser,
+      });
+    }
     return {
-      current: format(await find(id, access)),
+      current: format(current),
       previous: format(previous),
     };
   },
