@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { mock } from "node:test";
 
 import {
   authorizationService,
+  buildAssignedObservationAreaScopeWhere,
   buildActionPlanScopeWhere,
   buildAuthorizationSummaryFromRoles,
   buildEvidenceScopeWhere,
   buildExtensionRequestScopeWhere,
+  buildObservationAreaScopeWhere,
   buildObservationScopeWhere,
+  buildRemediationPlanScopeWhere,
   type AuthorizationSummary,
 } from "./authorization-service.js";
 import {
@@ -15,6 +18,7 @@ import {
   ROLE_DEFINITIONS,
   ROLE_PERMISSION_NAMES,
 } from "../permissions/definitions.js";
+import { prisma } from "../utils/prisma.js";
 
 const access = (
   roleCode: AuthorizationSummary["roleCode"],
@@ -31,18 +35,8 @@ const access = (
   userId: "user-1",
 });
 
-test("los permisos se unen entre todos los roles sin perder el scope asignado", () => {
+test("el alcance del dueño de proceso usa solo sus asignaciones de DP y EJ", () => {
   const summary = buildAuthorizationSummaryFromRoles("user-1", [
-    {
-      code: "CUSTOM_REVIEWER",
-      name: "Revisor personalizado",
-      permissions: ["deadline_extensions.approve"],
-    },
-    {
-      code: "EXECUTOR",
-      name: "Ejecutor",
-      permissions: ["action_plans.submit_to_audit"],
-    },
     {
       code: "PROCESS_OWNER",
       name: "Dueño del proceso",
@@ -50,26 +44,19 @@ test("los permisos se unen entre todos los roles sin perder el scope asignado", 
     },
   ]);
 
-  assert.deepEqual(summary.permissions, [
-    "action_plans.submit_to_audit",
-    "action_plans.view",
-    "deadline_extensions.approve",
-  ]);
-  assert.deepEqual(summary.roleCodes, ["PROCESS_OWNER", "EXECUTOR"]);
-  assert.deepEqual(summary.roles, [
-    "Revisor personalizado",
-    "Ejecutor",
-    "Dueño del proceso",
-  ]);
+  assert.deepEqual(summary.permissions, ["action_plans.view"]);
+  assert.deepEqual(summary.roleCodes, ["PROCESS_OWNER"]);
+  assert.deepEqual(summary.roles, ["Dueño del proceso"]);
   assert.equal(summary.dataScope, "AREA");
   assert.equal(
     authorizationService.can(summary, "deadline_extensions.approve"),
-    true,
+    false,
   );
   assert.equal(
     authorizationService.can(summary, "deadline_extensions.reject"),
     false,
   );
+  assert.equal(authorizationService.can(summary, "action_plans.view"), true);
   assert.deepEqual(buildActionPlanScopeWhere(summary), {
     AND: [
       {
@@ -83,25 +70,7 @@ test("los permisos se unen entre todos los roles sin perder el scope asignado", 
     observation: { deletedAt: null },
     OR: [
       {
-        observationArea: {
-          observation: { deletedAt: null },
-          OR: [
-            { processOwnerUserId: "user-1" },
-            { areaResponsibleUserId: "user-1" },
-            {
-              actionPlans: {
-                some: {
-                  OR: [
-                    { remediationPlanId: null },
-                    { remediationPlan: { deletedAt: null } },
-                  ],
-                  deletedAt: null,
-                  responsibleUserId: "user-1",
-                },
-              },
-            },
-          ],
-        },
+        observationArea: { processOwnerUserId: "user-1" },
       },
       { responsibleUserId: "user-1" },
     ],
@@ -152,16 +121,6 @@ test("un rol personalizado conserva el scope de sus asignaciones directas", () =
     deletedAt: null,
     OR: [
       {
-        areaAssignments: {
-          some: {
-            OR: [
-              { processOwnerUserId: "user-1" },
-              { areaResponsibleUserId: "user-1" },
-            ],
-          },
-        },
-      },
-      {
         actionPlans: {
           some: {
             OR: [
@@ -177,7 +136,7 @@ test("un rol personalizado conserva el scope de sus asignaciones directas", () =
   });
   assert.ok(
     JSON.stringify(buildExtensionRequestScopeWhere(custom)).includes(
-      "areaResponsibleUserId",
+      '"requestedByUserId":"user-1"',
     ),
   );
 });
@@ -206,44 +165,61 @@ test("cada rol NIBOL usa el scope de datos esperado", () => {
   assert.deepEqual(
     buildObservationScopeWhere(access("PROCESS_OWNER", "AREA")),
     {
-      areaAssignments: {
-        some: {
-          OR: [
-            { processOwnerUserId: "user-1" },
-            { areaResponsibleUserId: "user-1" },
-          ],
-        },
-      },
       deletedAt: null,
+      OR: [
+        {
+          areaAssignments: {
+            some: { processOwnerUserId: "user-1" },
+          },
+        },
+        {
+          actionPlans: {
+            some: {
+              OR: [
+                { remediationPlanId: null },
+                { remediationPlan: { deletedAt: null } },
+              ],
+              deletedAt: null,
+              responsibleUserId: "user-1",
+            },
+          },
+        },
+      ],
     },
   );
   assert.deepEqual(
     buildObservationScopeWhere(access("AREA_RESPONSIBLE", "AREA")),
     {
-      areaAssignments: {
-        some: {
-          OR: [
-            { processOwnerUserId: "user-1" },
-            { areaResponsibleUserId: "user-1" },
-          ],
-        },
-      },
       deletedAt: null,
+      OR: [
+        {
+          areaAssignments: {
+            some: {
+              OR: [
+                { areaResponsibleUserId: "user-1" },
+                { processOwnerUserId: "user-1" },
+              ],
+            },
+          },
+        },
+        {
+          actionPlans: {
+            some: {
+              OR: [
+                { remediationPlanId: null },
+                { remediationPlan: { deletedAt: null } },
+              ],
+              deletedAt: null,
+              responsibleUserId: "user-1",
+            },
+          },
+        },
+      ],
     },
   );
   assert.deepEqual(buildObservationScopeWhere(access("EXECUTOR", "ASSIGNED")), {
     deletedAt: null,
     OR: [
-      {
-        areaAssignments: {
-          some: {
-            OR: [
-              { processOwnerUserId: "user-1" },
-              { areaResponsibleUserId: "user-1" },
-            ],
-          },
-        },
-      },
       {
         actionPlans: {
           some: {
@@ -267,12 +243,8 @@ test("el scope de executor evita IDOR en planes, evidencias y ampliaciones", () 
   const extensionWhere = buildExtensionRequestScopeWhere(executor);
 
   assert.ok(planWhere.OR?.some((filter) => "responsibleUserId" in filter));
-  assert.ok(
-    JSON.stringify(planWhere).includes('"processOwnerUserId":"user-1"'),
-  );
-  assert.ok(
-    JSON.stringify(planWhere).includes('"areaResponsibleUserId":"user-1"'),
-  );
+  assert.ok(!JSON.stringify(planWhere).includes("processOwnerUserId"));
+  assert.ok(!JSON.stringify(planWhere).includes("areaResponsibleUserId"));
   assert.equal(evidenceWhere.deletedAt, null);
   assert.equal(evidenceWhere.observation?.deletedAt, null);
   assert.ok(
@@ -282,9 +254,82 @@ test("el scope de executor evita IDOR en planes, evidencias y ampliaciones", () 
   assert.ok(
     JSON.stringify(extensionWhere).includes('"requestedByUserId":"user-1"'),
   );
+  assert.deepEqual(buildAssignedObservationAreaScopeWhere(executor), {
+    observation: { deletedAt: null },
+    id: { in: [] },
+  });
   assert.ok(
-    JSON.stringify(extensionWhere).includes('"areaResponsibleUserId":"user-1"'),
+    JSON.stringify(buildObservationAreaScopeWhere(executor)).includes(
+      '"responsibleUserId":"user-1"',
+    ),
   );
+  assert.deepEqual(buildRemediationPlanScopeWhere(executor).area, {
+    observationAreas: { some: { id: { in: [] } } },
+  });
+});
+
+test("el scope de DP y RA cubre solo las áreas donde están asignados", () => {
+  assert.deepEqual(
+    buildAssignedObservationAreaScopeWhere(access("PROCESS_OWNER", "AREA")),
+    {
+      observation: { deletedAt: null },
+      processOwnerUserId: "user-1",
+    },
+  );
+  assert.deepEqual(
+    buildAssignedObservationAreaScopeWhere(access("AREA_RESPONSIBLE", "AREA")),
+    {
+      observation: { deletedAt: null },
+      OR: [
+        { areaResponsibleUserId: "user-1" },
+        { processOwnerUserId: "user-1" },
+      ],
+    },
+  );
+});
+
+test("la herencia contextual requiere el slot asignado y excluye cambios de asignación", async () => {
+  let inheritedRoleCodes: string[] = [];
+  mock.method(
+    prisma.role,
+    "findMany" as never,
+    (async (args: unknown) => {
+      inheritedRoleCodes = (args as { where: { code: { in: string[] } } }).where
+        .code.in;
+      return [{ rolePermissions: [{}] }];
+    }) as never,
+  );
+
+  try {
+    const areaResponsible = access("AREA_RESPONSIBLE", "AREA");
+    assert.equal(
+      await authorizationService.canForAssignments(
+        areaResponsible,
+        "deadline_extensions.request",
+        { processOwnerUserId: "user-1" },
+      ),
+      true,
+    );
+    assert.deepEqual(inheritedRoleCodes, ["PROCESS_OWNER"]);
+    assert.equal(
+      await authorizationService.canForAssignments(
+        areaResponsible,
+        "action_plans.assign_executor",
+        { processOwnerUserId: "user-1" },
+      ),
+      false,
+    );
+    assert.equal(
+      await authorizationService.canForAssignments(
+        areaResponsible,
+        "deadline_extensions.request",
+        { processOwnerUserId: "someone-else" },
+      ),
+      false,
+    );
+  } finally {
+    mock.restoreAll();
+  }
 });
 
 test("los permisos sensibles quedan separados por rol", () => {

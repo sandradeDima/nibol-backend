@@ -7,8 +7,8 @@ import {
 
 import {
   authorizationService,
+  buildAssignedObservationAreaScopeWhere,
   buildActionPlanScopeWhere,
-  buildObservationAreaScopeWhere,
   buildObservationScopeWhere,
   buildRemediationPlanScopeWhere,
   type AuthorizationSummary,
@@ -193,6 +193,12 @@ const format = (record: ActionPlanRecord): ActionPlanDetail => {
   };
 };
 
+const assignmentContext = (record: ActionPlanRecord) => ({
+  areaResponsibleUserId: record.observationArea.areaResponsible.id,
+  executorUserId: record.responsibleUser.id,
+  processOwnerUserId: record.observationArea.processOwner.id,
+});
+
 const accessWhere = (
   access: AuthorizationSummary,
 ): Prisma.ActionPlanWhereInput => buildActionPlanScopeWhere(access);
@@ -296,11 +302,15 @@ const validateAssignment = async (
 ) => {
   const [observationArea, user] = await Promise.all([
     prisma.observationArea.findFirst({
-      select: { id: true },
+      select: {
+        areaResponsibleUserId: true,
+        id: true,
+        processOwnerUserId: true,
+      },
       where: {
         id: observationAreaId,
         observationId,
-        ...buildObservationAreaScopeWhere(access),
+        ...buildAssignedObservationAreaScopeWhere(access),
       },
     }),
     prisma.user.findFirst({
@@ -318,6 +328,7 @@ const validateAssignment = async (
       "El ejecutor seleccionado no existe o está inactivo.",
       400,
     );
+  return observationArea;
 };
 
 const remediationPlanInclude = {
@@ -364,7 +375,7 @@ const findRemediationPlan = async (
       where: {
         observationId: record.observationId,
         areaId: record.area.id,
-        ...buildObservationAreaScopeWhere(access),
+        ...buildAssignedObservationAreaScopeWhere(access),
       },
     });
     if (!allowedArea)
@@ -394,7 +405,7 @@ export const remediationService = {
             id: observationId,
             ...buildObservationScopeWhere(access),
           },
-          ...buildObservationAreaScopeWhere(access),
+          ...buildAssignedObservationAreaScopeWhere(access),
         },
       }),
       input.ownerUserId
@@ -622,8 +633,6 @@ export const remediationService = {
     input: CreateActionPlanInput,
     access: AuthorizationSummary,
   ): Promise<ActionPlanDetail> {
-    if (!authorizationService.can(access, "action_plans.create"))
-      throw new AppError("No tiene permiso para crear planes de acción.", 403);
     const observation = await prisma.observation.findFirst({
       select: { id: true },
       where: {
@@ -634,18 +643,34 @@ export const remediationService = {
     });
     if (!observation) throw new AppError("No se encontró la observación.", 404);
     await validateDueDate(observationId, input.dueDate);
-    if (
-      access.dataScope === "ASSIGNED" &&
-      input.responsibleUserId !== access.userId
-    ) {
-      throw new AppError("No puede asignar un plan a otro ejecutor.", 403);
-    }
-    await validateAssignment(
+    const areaAssignment = await validateAssignment(
       observationId,
       input.observationAreaId,
       input.responsibleUserId,
       access,
     );
+    const assignments = {
+      areaResponsibleUserId: areaAssignment.areaResponsibleUserId,
+      processOwnerUserId: areaAssignment.processOwnerUserId,
+    };
+    if (
+      !(await authorizationService.canForAssignments(
+        access,
+        "action_plans.create",
+        assignments,
+      ))
+    )
+      throw new AppError("No tiene permiso para crear planes de acción.", 403);
+    if (
+      input.responsibleUserId !== access.userId &&
+      !(await authorizationService.canForAssignments(
+        access,
+        "action_plans.assign_executor",
+        assignments,
+        false,
+      ))
+    )
+      throw new AppError("No puede asignar un plan a otro ejecutor.", 403);
     const created = await prisma.$transaction(async (tx) => {
       await lockObservationForActionPlanUpdate(tx, observationId);
       const actionPlan = await tx.actionPlan.create({
@@ -697,12 +722,19 @@ export const remediationService = {
   },
 
   async deleteActionPlan(id: string, access: AuthorizationSummary) {
-    if (!authorizationService.can(access, "action_plans.delete"))
+    const previous = await find(id, access);
+    if (
+      !(await authorizationService.canForAssignments(
+        access,
+        "action_plans.delete",
+        assignmentContext(previous),
+        false,
+      ))
+    )
       throw new AppError(
         "No tiene permiso para eliminar planes de acción.",
         403,
       );
-    const previous = await find(id, access);
     const deletedAt = new Date();
     await prisma.$transaction(async (tx) => {
       const [evaluations, evidence, extensions] = await Promise.all([
@@ -828,7 +860,7 @@ export const remediationService = {
           ...(query.observationId
             ? { observationId: query.observationId }
             : {}),
-          ...buildObservationAreaScopeWhere(access),
+          ...buildAssignedObservationAreaScopeWhere(access),
         },
       });
       if (!observationArea)
@@ -1111,40 +1143,46 @@ export const remediationService = {
   ) {
     const previous = await find(id, access);
     const isRecommendedPlan = Boolean(previous.remediationPlanId);
-    const canEditRecommendedPlan = authorizationService.can(
+    const assignments = assignmentContext(previous);
+    const canEditRecommendedPlan = await authorizationService.canForAssignments(
       access,
       "recommended_action_plans.edit",
+      assignments,
     );
     if (
       input.observationAreaId !== undefined &&
       input.observationAreaId !== previous.observationAreaId
     )
       throw new AppError("El área del plan no puede cambiarse.", 403);
-    const hasAssignmentChange = input.responsibleUserId !== undefined;
+    const hasAssignmentChange =
+      input.responsibleUserId !== undefined &&
+      input.responsibleUserId !== previous.responsibleUser.id;
     const hasContentChange = Object.keys(input).some(
       (key) => !["observationAreaId", "responsibleUserId"].includes(key),
     );
     if (
       hasContentChange &&
-      (!authorizationService.can(access, "action_plans.edit") ||
+      (!(await authorizationService.canForAssignments(
+        access,
+        "action_plans.edit",
+        assignments,
+      )) ||
         (isRecommendedPlan && !canEditRecommendedPlan))
     )
       throw new AppError("No tiene permiso para editar este plan.", 403);
     if (
       hasAssignmentChange &&
-      !authorizationService.can(access, "action_plans.assign_executor")
+      !(await authorizationService.canForAssignments(
+        access,
+        "action_plans.assign_executor",
+        assignments,
+        false,
+      ))
     )
       throw new AppError(
         "No tiene permisos para reasignar este plan de acción.",
         403,
       );
-    if (
-      input.responsibleUserId !== undefined &&
-      input.responsibleUserId !== access.userId &&
-      access.dataScope === "ASSIGNED"
-    ) {
-      throw new AppError("No puede cambiar el ejecutor del plan.", 403);
-    }
     await validateAssignment(
       previous.observation.id,
       input.observationAreaId ?? previous.observationAreaId,

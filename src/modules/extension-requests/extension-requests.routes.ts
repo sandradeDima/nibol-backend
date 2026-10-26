@@ -3,6 +3,7 @@ import { Router } from "express";
 import { asyncHandler } from "../../middleware/async-handler.js";
 import {
   requireAnyPermission,
+  requireAuth,
   requirePermission,
 } from "../../middleware/authorization-middleware.js";
 import { EXTENSION_REQUESTS_PERMISSIONS as permissions } from "./extension-requests.constants.js";
@@ -11,7 +12,7 @@ import { extensionRequestsController as controller } from "./extension-requests.
 export const extensionRequestsRouter = Router();
 extensionRequestsRouter.get(
   "/deadline-extension-classifications",
-  requirePermission(permissions.request),
+  requireAuth(),
   asyncHandler(controller.listClassifications),
 );
 extensionRequestsRouter.get(
@@ -36,17 +37,17 @@ extensionRequestsRouter.get(
 );
 extensionRequestsRouter.post(
   "/action-plans/:id/extension-requests",
-  requirePermission(permissions.create),
+  requireAuth(),
   asyncHandler(controller.createForActionPlan),
 );
 extensionRequestsRouter.patch(
   "/extension-requests/:id",
-  requirePermission(permissions.request),
+  requireAuth(),
   asyncHandler(controller.update),
 );
 extensionRequestsRouter.post(
   "/extension-requests/:id/submit",
-  requirePermission(permissions.request),
+  requireAuth(),
   asyncHandler(controller.sendToManager),
 );
 extensionRequestsRouter.post(

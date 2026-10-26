@@ -5,6 +5,7 @@ import { asyncHandler } from "../../middleware/async-handler.js";
 import {
   requireAllPermissions,
   requireAnyPermission,
+  requireAuth,
   requirePermission,
 } from "../../middleware/authorization-middleware.js";
 import { progressController as controller } from "./progress.controller.js";
@@ -35,7 +36,7 @@ progressRouter.get(
 );
 progressRouter.post(
   "/action-plans/:id/evaluations",
-  requirePermission("action_plans.submit_to_audit"),
+  requireAuth(),
   asyncHandler(controller.createProgressEvaluation),
 );
 progressRouter.delete(
@@ -45,12 +46,12 @@ progressRouter.delete(
 );
 progressRouter.patch(
   "/progress-evaluations/:id",
-  requirePermission("action_plans.submit_to_audit"),
+  requireAuth(),
   asyncHandler(controller.updateProgressEvaluation),
 );
 progressRouter.post(
   "/progress-evaluations/:id/submit",
-  requirePermission("action_plans.submit_to_audit"),
+  requireAuth(),
   asyncHandler(controller.sendProgressEvaluationToAudit),
 );
 progressRouter.post(

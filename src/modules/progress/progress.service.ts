@@ -12,9 +12,9 @@ import {
 
 import {
   authorizationService,
+  buildAssignedObservationAreaScopeWhere,
   buildActionPlanScopeWhere,
   buildEvidenceScopeWhere,
-  buildObservationAreaScopeWhere,
   buildObservationScopeWhere,
   buildProgressEvaluationScopeWhere,
   buildRemediationPlanScopeWhere,
@@ -645,11 +645,22 @@ const findEvaluationById = async (id: string): Promise<EvaluationRecord> => {
   return record;
 };
 
-const canEdit = (
+const canEdit = async (
   record: EvaluationRecord,
   access: AuthorizationSummary,
-): boolean =>
-  authorizationService.can(access, "action_plans.submit_to_audit") &&
+  inheritDownward = true,
+): Promise<boolean> =>
+  (await authorizationService.canForAssignments(
+    access,
+    "action_plans.submit_to_audit",
+    {
+      areaResponsibleUserId:
+        record.actionPlan.observationArea.areaResponsible.id,
+      executorUserId: record.actionPlan.responsibleUser.id,
+      processOwnerUserId: record.actionPlan.observationArea.processOwner.id,
+    },
+    inheritDownward,
+  )) &&
   record.submittedByUserId === access.userId &&
   EDITABLE_PROGRESS_STATUSES.has(record.reviewStatus);
 
@@ -737,6 +748,9 @@ const requireActionPlan = async (id: string, access: AuthorizationSummary) => {
     select: {
       id: true,
       observationAreaId: true,
+      observationArea: {
+        select: { areaResponsibleUserId: true, processOwnerUserId: true },
+      },
       observation: { select: { auditorUserId: true, id: true } },
       responsibleUserId: true,
       status: true,
@@ -762,10 +776,15 @@ export const progressService = {
         "No se pueden registrar avances en un plan concluido.",
         409,
       );
-    const allowed =
-      access.isAdmin ||
-      actionPlan.responsibleUserId === access.userId ||
-      authorizationService.can(access, "action_plans.submit_to_audit");
+    const allowed = await authorizationService.canForAssignments(
+      access,
+      "action_plans.submit_to_audit",
+      {
+        areaResponsibleUserId: actionPlan.observationArea.areaResponsibleUserId,
+        executorUserId: actionPlan.responsibleUserId,
+        processOwnerUserId: actionPlan.observationArea.processOwnerUserId,
+      },
+    );
     if (!allowed)
       throw new AppError(
         "No tiene permisos para registrar avances en este plan de acción.",
@@ -1090,7 +1109,7 @@ export const progressService = {
     access: AuthorizationSummary,
   ) {
     const previous = await findEvaluation(id, access);
-    if (!canEdit(previous, access))
+    if (!(await canEdit(previous, access)))
       throw new AppError("No tiene permisos para enviar esta evaluación.", 403);
     if (!canSubmitProgressEvaluationForPlan(previous.actionPlan.status))
       throw new AppError(
@@ -1196,7 +1215,7 @@ export const progressService = {
     access: AuthorizationSummary,
   ) {
     const previous = await findEvaluation(id, access);
-    if (!canEdit(previous, access))
+    if (!(await canEdit(previous, access)))
       throw new AppError("No tiene permiso para editar esta evaluación.", 403);
     await prisma.progressEvaluation.update({
       data: {
@@ -1221,7 +1240,7 @@ export const progressService = {
         "Solo se pueden eliminar evaluaciones que aún están en borrador.",
         409,
       );
-    if (!canEdit(previous, access))
+    if (!(await canEdit(previous, access, false)))
       throw new AppError(
         "No tiene permisos para eliminar esta evaluación.",
         403,
@@ -1309,18 +1328,80 @@ export const progressService = {
       },
     });
     if (!observation) throw new AppError("No se encontró la observación.", 404);
+    let assignments: {
+      areaResponsibleUserId?: string | null;
+      executorUserId?: string | null;
+      processOwnerUserId?: string | null;
+    } = {};
     if (target.observationAreaId) {
       const observationArea = await prisma.observationArea.findFirst({
-        select: { id: true },
+        select: {
+          areaResponsibleUserId: true,
+          id: true,
+          processOwnerUserId: true,
+        },
         where: {
           id: target.observationAreaId,
           observationId: target.observationId,
-          ...buildObservationAreaScopeWhere(access),
+          ...buildAssignedObservationAreaScopeWhere(access),
         },
       });
       if (!observationArea)
         throw new AppError("El área no pertenece a la observación.", 400);
+      assignments = {
+        areaResponsibleUserId: observationArea.areaResponsibleUserId,
+        processOwnerUserId: observationArea.processOwnerUserId,
+      };
+    } else if (!target.actionPlanId) {
+      const observationArea = await prisma.observationArea.findFirst({
+        select: {
+          areaResponsibleUserId: true,
+          processOwnerUserId: true,
+        },
+        where: {
+          observationId: target.observationId,
+          ...buildAssignedObservationAreaScopeWhere(access),
+        },
+      });
+      if (observationArea) {
+        assignments = {
+          areaResponsibleUserId: observationArea.areaResponsibleUserId,
+          processOwnerUserId: observationArea.processOwnerUserId,
+        };
+      }
     }
+    if (target.actionPlanId) {
+      const actionPlan = await prisma.actionPlan.findFirst({
+        select: {
+          observationArea: {
+            select: {
+              areaResponsibleUserId: true,
+              processOwnerUserId: true,
+            },
+          },
+          responsibleUserId: true,
+        },
+        where: {
+          ...buildActionPlanScopeWhere(access),
+          id: target.actionPlanId,
+        },
+      });
+      if (!actionPlan)
+        throw new AppError("No se encontró el plan de acción.", 404);
+      assignments = {
+        areaResponsibleUserId: actionPlan.observationArea.areaResponsibleUserId,
+        executorUserId: actionPlan.responsibleUserId,
+        processOwnerUserId: actionPlan.observationArea.processOwnerUserId,
+      };
+    }
+    if (
+      !(await authorizationService.canForAssignments(
+        access,
+        "evidence.create",
+        assignments,
+      ))
+    )
+      throw new AppError("No tiene permiso para cargar evidencia.", 403);
     const prepared = await prepareFiles(files);
     try {
       const records = await prisma.$transaction((tx) =>
@@ -1450,7 +1531,7 @@ export const progressService = {
         400,
       );
     const evaluation = await findEvaluation(progressEvaluationId, access);
-    if (!canEdit(evaluation, access))
+    if (!(await canEdit(evaluation, access)))
       throw new AppError(
         "No tiene permiso para adjuntar evidencia a esta evaluación.",
         403,
@@ -1736,8 +1817,40 @@ export const progressService = {
   async deleteEvidence(id: string, access: AuthorizationSummary) {
     const record = await prisma.evidenceFile.findFirst({
       include: {
+        actionPlan: {
+          select: {
+            observationArea: {
+              select: {
+                areaResponsibleUserId: true,
+                processOwnerUserId: true,
+              },
+            },
+            responsibleUserId: true,
+          },
+        },
+        observationArea: {
+          select: {
+            areaResponsibleUserId: true,
+            processOwnerUserId: true,
+          },
+        },
         observation: { select: { id: true } },
-        progressEvaluation: { select: { reviewStatus: true } },
+        progressEvaluation: {
+          select: {
+            actionPlan: {
+              select: {
+                observationArea: {
+                  select: {
+                    areaResponsibleUserId: true,
+                    processOwnerUserId: true,
+                  },
+                },
+                responsibleUserId: true,
+              },
+            },
+            reviewStatus: true,
+          },
+        },
       },
       where: {
         deletedAt: null,
@@ -1746,6 +1859,27 @@ export const progressService = {
       },
     });
     if (!record) throw new AppError("No se encontró la evidencia.", 404);
+    const actionPlan =
+      record.actionPlan ?? record.progressEvaluation?.actionPlan;
+    if (
+      !(await authorizationService.canForAssignments(
+        access,
+        "evidence.delete",
+        {
+          areaResponsibleUserId:
+            actionPlan?.observationArea.areaResponsibleUserId ??
+            record.observationArea?.areaResponsibleUserId ??
+            null,
+          executorUserId: actionPlan?.responsibleUserId ?? null,
+          processOwnerUserId:
+            actionPlan?.observationArea.processOwnerUserId ??
+            record.observationArea?.processOwnerUserId ??
+            null,
+        },
+        false,
+      ))
+    )
+      throw new AppError("No tiene permiso para eliminar esta evidencia.", 403);
     if (["PENDING", "APPROVED"].includes(record.reviewStatus))
       throw new AppError(
         "No se puede eliminar evidencia pendiente o aprobada.",

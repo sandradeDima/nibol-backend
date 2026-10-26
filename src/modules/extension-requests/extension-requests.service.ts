@@ -63,6 +63,8 @@ const include = {
       observationArea: {
         select: {
           area: { select: { id: true, name: true } },
+          areaResponsibleUserId: true,
+          processOwnerUserId: true,
           areaResponsible: { select: userSelect },
           processOwner: { select: userSelect },
         },
@@ -109,6 +111,8 @@ const include = {
   observationArea: {
     select: {
       area: { select: { id: true, managerUserId: true, name: true } },
+      areaResponsibleUserId: true,
+      processOwnerUserId: true,
       areaResponsible: { select: userSelect },
       processOwner: { select: userSelect },
     },
@@ -126,6 +130,30 @@ type ReviewTaskSummary = {
   id: string | null;
   status: string;
 };
+
+const assignmentContext = (record: ExtensionRecord) => ({
+  areaResponsibleUserId:
+    record.actionPlan?.observationArea.areaResponsibleUserId ??
+    record.observationArea?.areaResponsibleUserId ??
+    null,
+  executorUserId: record.actionPlan?.responsibleUser.id ?? null,
+  processOwnerUserId:
+    record.actionPlan?.observationArea.processOwnerUserId ??
+    record.observationArea?.processOwnerUserId ??
+    null,
+});
+
+const canManageRequest = async (
+  access: AuthorizationSummary,
+  record: ExtensionRecord,
+) =>
+  record.actionPlan
+    ? authorizationService.canForAssignments(
+        access,
+        "deadline_extensions.request",
+        assignmentContext(record),
+      )
+    : authorizationService.can(access, "deadline_extensions.request");
 
 export const getEffectiveExtensionDueDate = (input: {
   actionPlanDueDate?: Date | null;
@@ -235,6 +263,40 @@ const legacyReviewTask = (
   };
 };
 
+const restrictReviewTaskToAssignedRole = (
+  record: ExtensionRecord,
+  access: AuthorizationSummary,
+  reviewTask: ReviewTaskSummary | null,
+): ReviewTaskSummary | null => {
+  if (
+    !reviewTask ||
+    !["AREA_RESPONSIBLE", "PROCESS_OWNER", "EXECUTOR"].includes(
+      access.roleCode ?? "",
+    )
+  )
+    return reviewTask;
+  const isAssignedAsAreaResponsible = Boolean(
+    record.actionPlan?.observationArea.areaResponsibleUserId ===
+      access.userId ||
+    record.observationArea?.areaResponsibleUserId === access.userId ||
+    record.observation?.areaAssignments.some(
+      (assignment) => assignment.areaResponsibleUserId === access.userId,
+    ) ||
+    record.actionPlan?.observation.areaAssignments.some(
+      (assignment) => assignment.areaResponsibleUserId === access.userId,
+    ),
+  );
+  const canAct =
+    access.roleCode === "AREA_RESPONSIBLE" &&
+    isAssignedAsAreaResponsible &&
+    reviewTask.canAct;
+  return {
+    ...reviewTask,
+    allowedActions: canAct ? reviewTask.allowedActions : [],
+    canAct,
+  };
+};
+
 const formatWithReviewTask = async (
   record: ExtensionRecord,
   access: AuthorizationSummary,
@@ -251,7 +313,11 @@ const formatWithReviewTask = async (
   return format(
     record,
     access,
-    workflowTask ?? legacyReviewTask(record, access),
+    restrictReviewTaskToAssignedRole(
+      record,
+      access,
+      workflowTask ?? legacyReviewTask(record, access),
+    ),
   );
 };
 
@@ -404,8 +470,38 @@ const attachEvidence = async (
 
 export const extensionRequestsService = {
   async listClassifications(access: AuthorizationSummary) {
-    if (!authorizationService.can(access, "deadline_extensions.request"))
-      throw new AppError("No tiene permiso para solicitar ampliaciones.", 403);
+    if (!access.isAdmin) {
+      const assignedActionPlan = await prisma.actionPlan.findFirst({
+        select: {
+          observationArea: {
+            select: { areaResponsibleUserId: true, processOwnerUserId: true },
+          },
+          responsibleUserId: true,
+        },
+        where: {
+          ...buildActionPlanScopeWhere(access),
+          responsibleUserId: access.userId,
+        },
+      });
+      if (
+        !assignedActionPlan ||
+        !(await authorizationService.canForAssignments(
+          access,
+          "deadline_extensions.request",
+          {
+            areaResponsibleUserId:
+              assignedActionPlan.observationArea.areaResponsibleUserId,
+            executorUserId: assignedActionPlan.responsibleUserId,
+            processOwnerUserId:
+              assignedActionPlan.observationArea.processOwnerUserId,
+          },
+        ))
+      )
+        throw new AppError(
+          "No tiene permiso para solicitar ampliaciones.",
+          403,
+        );
+    }
     return prisma.deadlineExtensionClassification.findMany({
       orderBy: { name: "asc" },
       select: {
@@ -429,6 +525,9 @@ export const extensionRequestsService = {
         id: true,
         observationAreaId: true,
         observationId: true,
+        observationArea: {
+          select: { areaResponsibleUserId: true, processOwnerUserId: true },
+        },
         responsibleUserId: true,
       },
       where: {
@@ -436,11 +535,20 @@ export const extensionRequestsService = {
         id: actionPlanId,
       },
     });
-    if (!authorizationService.can(access, "deadline_extensions.request"))
-      throw new AppError("No tiene permiso para solicitar ampliaciones.", 403);
     if (!actionPlan)
       throw new AppError("No se encontró el plan de acción.", 404);
-    if (!access.isAdmin && actionPlan.responsibleUserId !== access.userId)
+    if (
+      !(await authorizationService.canForAssignments(
+        access,
+        "deadline_extensions.request",
+        {
+          areaResponsibleUserId:
+            actionPlan.observationArea.areaResponsibleUserId,
+          executorUserId: actionPlan.responsibleUserId,
+          processOwnerUserId: actionPlan.observationArea.processOwnerUserId,
+        },
+      ))
+    )
       throw new AppError(
         "Solo puede solicitar ampliaciones de sus planes asignados.",
         403,
@@ -645,7 +753,11 @@ export const extensionRequestsService = {
           record,
           access,
           query.reviewQueue
-            ? (reviewTasks.get(record.id) ?? legacyReviewTask(record, access))
+            ? restrictReviewTaskToAssignedRole(
+                record,
+                access,
+                reviewTasks.get(record.id) ?? legacyReviewTask(record, access),
+              )
             : null,
         ),
       ),
@@ -663,9 +775,9 @@ export const extensionRequestsService = {
     input: UpdateExtensionRequestInput,
     access: AuthorizationSummary,
   ) {
-    if (!authorizationService.can(access, "deadline_extensions.request"))
-      throw new AppError("No tiene permiso para gestionar ampliaciones.", 403);
     const previous = await find(id, access);
+    if (!(await canManageRequest(access, previous)))
+      throw new AppError("No tiene permiso para gestionar ampliaciones.", 403);
     if (
       !access.isAdmin &&
       previous.actionPlan &&
@@ -755,9 +867,9 @@ export const extensionRequestsService = {
   },
 
   async submit(id: string, access: AuthorizationSummary) {
-    if (!authorizationService.can(access, "deadline_extensions.request"))
-      throw new AppError("No tiene permiso para enviar ampliaciones.", 403);
     const previous = await find(id, access);
+    if (!(await canManageRequest(access, previous)))
+      throw new AppError("No tiene permiso para enviar ampliaciones.", 403);
     if (
       !access.isAdmin &&
       previous.actionPlan &&
@@ -820,14 +932,15 @@ export const extensionRequestsService = {
     input: ReviewExtensionRequestInput,
     access: AuthorizationSummary,
   ) {
+    const previous = await findReviewable(id, access);
     if (
-      !authorizationService.can(
+      !(await authorizationService.canForAssignments(
         access,
         approved ? "deadline_extensions.approve" : "deadline_extensions.reject",
-      )
+        assignmentContext(previous),
+      ))
     )
       throw new AppError("No tiene permiso para revisar esta ampliación.", 403);
-    const previous = await findReviewable(id, access);
     const alreadyReviewedStatus = approved
       ? "MANAGER_APPROVED"
       : "MANAGER_REJECTED";
