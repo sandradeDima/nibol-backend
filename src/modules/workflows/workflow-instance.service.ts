@@ -28,7 +28,7 @@ import {
   toDatabaseJson,
 } from "../../services/logging-utils.js";
 import { cancelWorkflowInstanceTimers } from "./workflow-timer.service.js";
-import { deliverWorkflowNotificationsForInstance } from "./workflow-notification.service.js";
+import { deliverWorkflowNotificationsInBackground } from "./workflow-notification.service.js";
 import { getWorkflowEntityAdapter } from "./workflow-entity-adapters.js";
 import { WORKFLOW_INSTANCE_PERMISSIONS } from "./workflows.permissions.js";
 
@@ -471,7 +471,7 @@ export const workflowInstanceService = {
       where: { id: createdId },
     });
     if (!options?.deferNotifications) {
-      await deliverWorkflowNotificationsForInstance(created.id);
+      deliverWorkflowNotificationsInBackground(created.id);
     }
     if (options?.internal) return created;
     return this.getInstance(created.id, access);
@@ -646,7 +646,7 @@ export const workflowInstanceService = {
       });
       await executeAutomaticNodes({ actor, db, instanceId, now });
     });
-    await deliverWorkflowNotificationsForInstance(instanceId);
+    deliverWorkflowNotificationsInBackground(instanceId);
     return this.getInstance(instanceId, access);
   },
 

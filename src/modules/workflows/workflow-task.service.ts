@@ -30,7 +30,7 @@ import {
 import { getWorkflowEntityAdapter } from "./workflow-entity-adapters.js";
 import {
   createWorkflowDecisionNotification,
-  deliverWorkflowNotificationsForInstance,
+  deliverWorkflowNotificationsInBackground,
 } from "./workflow-notification.service.js";
 import { cancelWorkflowTaskTimers } from "./workflow-timer.service.js";
 import { WORKFLOW_DEFAULT_DUE_SOON_HOURS } from "./workflows.constants.js";
@@ -855,7 +855,7 @@ export const workflowTaskService = {
         task: mapTask(refreshed, access, false),
       };
     });
-    await deliverWorkflowNotificationsForInstance(result.instanceId);
+    deliverWorkflowNotificationsInBackground(result.instanceId);
     return result.task;
   },
 

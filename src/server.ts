@@ -5,6 +5,7 @@ import { env } from "./utils/env.js";
 import { logger } from "./utils/logger.js";
 import { workflowTimerScheduler } from "./jobs/workflow-timer-scheduler.js";
 import { deadlineReminderScheduler } from "./jobs/deadline-monitor/deadline-reminder-scheduler.js";
+import { notificationEmailScheduler } from "./jobs/notification-email-scheduler.js";
 import { prisma } from "./utils/prisma.js";
 
 const server = createServer(app);
@@ -29,15 +30,18 @@ server.listen(env.PORT, () => {
   logger.info(`Servidor de la API disponible en http://localhost:${env.PORT}`);
   workflowTimerScheduler.start();
   deadlineReminderScheduler.start();
+  notificationEmailScheduler.start();
 });
 
 process.on("SIGINT", () => {
   workflowTimerScheduler.stop();
   deadlineReminderScheduler.stop();
+  notificationEmailScheduler.stop();
   shutdown("SIGINT");
 });
 process.on("SIGTERM", () => {
   workflowTimerScheduler.stop();
   deadlineReminderScheduler.stop();
+  notificationEmailScheduler.stop();
   shutdown("SIGTERM");
 });

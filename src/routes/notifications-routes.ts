@@ -96,7 +96,7 @@ notificationsRouter.post(
   requirePermission("notifications.create"),
   asyncHandler(async (request, response) => {
     const payload = createNotificationSchema.parse(request.body);
-    const [notification, emailSent] = await Promise.all([
+    const [notification, emailQueued] = await Promise.all([
       notificationService.create(payload),
       notificationService.sendEmailNotification({
         ...(payload.dedupeKey !== undefined
@@ -113,7 +113,7 @@ notificationsRouter.post(
         userId: payload.userId,
       }),
     ]);
-    if (!notification && !emailSent)
+    if (!notification && !emailQueued)
       throw new AppError("La categoría de notificación está desactivada.", 409);
 
     sendSuccess(response, notification, 201);

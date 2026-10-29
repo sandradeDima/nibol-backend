@@ -780,6 +780,22 @@ export const deliverPendingWorkflowNotificationDeliveries = async (
   return outcomes;
 };
 
+export const deliverWorkflowNotificationsInBackground = (
+  instanceId: string,
+): void => {
+  void deliverWorkflowNotificationsForInstance(instanceId).catch(
+    (error: unknown) => {
+      logger.warn(
+        "No se pudo iniciar la entrega de notificaciones del flujo.",
+        {
+          error: safeErrorMessage(error),
+          instanceId,
+        },
+      );
+    },
+  );
+};
+
 export const buildWorkflowTaskUrl = (taskId: string): string =>
   `/aprobaciones/flujos/${taskId}`;
 

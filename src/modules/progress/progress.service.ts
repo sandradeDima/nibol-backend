@@ -15,6 +15,7 @@ import {
   buildAssignedObservationAreaScopeWhere,
   buildActionPlanScopeWhere,
   buildEvidenceScopeWhere,
+  buildObservationAreaScopeWhere,
   buildObservationScopeWhere,
   buildProgressEvaluationScopeWhere,
   buildRemediationPlanScopeWhere,
@@ -1343,7 +1344,9 @@ export const progressService = {
         where: {
           id: target.observationAreaId,
           observationId: target.observationId,
-          ...buildAssignedObservationAreaScopeWhere(access),
+          ...(target.actionPlanId
+            ? buildObservationAreaScopeWhere(access)
+            : buildAssignedObservationAreaScopeWhere(access)),
         },
       });
       if (!observationArea)

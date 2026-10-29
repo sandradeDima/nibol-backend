@@ -6,7 +6,7 @@ import { workflowInstanceService } from "./workflow-instance.service.js";
 import { getWorkflowEntityAdapter } from "./workflow-entity-adapters.js";
 import type { WorkflowActorContext } from "./workflows.types.js";
 import type { WorkflowInstanceStartInput } from "./workflow-runtime.validators.js";
-import { deliverWorkflowNotificationsForInstance } from "./workflow-notification.service.js";
+import { deliverWorkflowNotificationsInBackground } from "./workflow-notification.service.js";
 
 type ProcessType = WorkflowInstanceStartInput["processType"];
 
@@ -347,7 +347,7 @@ export const workflowIntegrationService = {
       }
       throw new AppError("No se pudo vincular el flujo de trabajo al registro.", 409);
     }
-    await deliverWorkflowNotificationsForInstance(started.id);
+    deliverWorkflowNotificationsInBackground(started.id);
     return { instanceId: started.id, started: true, status: started.status };
   },
 

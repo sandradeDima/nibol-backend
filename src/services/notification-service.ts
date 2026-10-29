@@ -13,7 +13,8 @@ import {
 
 import { AppError } from "../utils/app-error.js";
 import { buildFrontendUrl } from "../utils/notification-links.js";
-import { toDatabaseJson } from "./logging-utils.js";
+import { logger } from "../utils/logger.js";
+import { parseDatabaseJson, toDatabaseJson } from "./logging-utils.js";
 import { isNotificationChannelEnabled } from "./notification-preferences.js";
 import { resolveNotificationTarget } from "../utils/notification-links.js";
 import { prisma } from "../utils/prisma.js";
@@ -56,6 +57,14 @@ export type CreateNotificationDeliveryInput = {
 const notificationDeliveryMaxAttempts = 3;
 const notificationDeliveryClaimLeaseMs = 15 * 60_000;
 const notificationDeliveryRetryDelayMs = 5 * 60_000;
+
+type NotificationEmailPayload = {
+  eventType: string | null;
+  message: string;
+  targetUrl: string;
+  title: string;
+  userName?: string;
+};
 
 type NotificationRecord = {
   createdAt: Date;
@@ -311,31 +320,27 @@ export const notificationService = {
         message: input.message,
         targetUrl: input.targetUrl ?? "/notificaciones",
         title: input.title,
+        userName: recipient.name,
       },
       recipientEmail: recipient.email,
       recipientUserId: input.userId,
     });
-    if (
-      !(await notificationService.claimEmailDelivery(
-        delivery.id,
-        input.eventType,
-      ))
-    )
-      return false;
-    const { emailService } = await import("../emails/EmailService.js");
-    const result = await emailService.sendTemplate({
-      template: "genericNotification",
-      to: recipient.email,
-      variables: {
-        actionLabel: "Ver notificación",
-        actionLink: buildFrontendUrl(input.targetUrl ?? "/notificaciones"),
-        message: input.message,
-        title: input.title,
-        userName: recipient.name,
-      },
-    });
-    await notificationService.completeEmailDelivery(delivery.id, result);
-    return result.success;
+    if (delivery.status === NotificationDeliveryStatus.SKIPPED) return false;
+    if (delivery.status === NotificationDeliveryStatus.SENT) return true;
+    if (delivery.attempts >= notificationDeliveryMaxAttempts) return false;
+
+    void notificationService
+      .deliverEmailNotification(delivery.id)
+      .catch((error: unknown) => {
+        logger.warn(
+          "No se pudo iniciar la entrega de una notificación por correo.",
+          {
+            deliveryId: delivery.id,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
+      });
+    return true;
   },
 
   async createDelivery(
@@ -460,6 +465,141 @@ export const notificationService = {
           },
       where: { id: deliveryId },
     });
+  },
+
+  async deliverEmailNotification(deliveryId: string): Promise<boolean> {
+    const delivery = await prisma.notificationDelivery.findUnique({
+      select: {
+        payloadJson: true,
+        recipientEmail: true,
+        recipientUser: { select: { name: true } },
+      },
+      where: { id: deliveryId },
+    });
+    if (!delivery) return false;
+
+    let payload: NotificationEmailPayload | null;
+    try {
+      payload = parseDatabaseJson<NotificationEmailPayload>(
+        delivery.payloadJson,
+        "notification_deliveries.payload_json",
+        (value) => {
+          if (
+            typeof value !== "object" ||
+            value === null ||
+            (typeof (value as NotificationEmailPayload).eventType !==
+              "string" &&
+              (value as NotificationEmailPayload).eventType !== null) ||
+            typeof (value as NotificationEmailPayload).message !== "string" ||
+            typeof (value as NotificationEmailPayload).targetUrl !== "string" ||
+            typeof (value as NotificationEmailPayload).title !== "string"
+          ) {
+            throw new Error("La carga útil de notificación no es válida.");
+          }
+          return value as NotificationEmailPayload;
+        },
+      );
+    } catch (error) {
+      await prisma.notificationDelivery.update({
+        data: {
+          errorMessage: error instanceof Error ? error.message : String(error),
+          status: NotificationDeliveryStatus.SKIPPED,
+        },
+        where: { id: deliveryId },
+      });
+      return false;
+    }
+    if (!payload || !delivery.recipientEmail) {
+      await prisma.notificationDelivery.update({
+        data: {
+          errorMessage: "La entrega no tiene destinatario o carga útil válida.",
+          status: NotificationDeliveryStatus.SKIPPED,
+        },
+        where: { id: deliveryId },
+      });
+      return false;
+    }
+    if (
+      !(await notificationService.claimEmailDelivery(
+        deliveryId,
+        payload.eventType,
+      ))
+    )
+      return false;
+
+    try {
+      const { emailService } = await import("../emails/EmailService.js");
+      const result = await emailService.sendTemplate({
+        template: "genericNotification",
+        to: delivery.recipientEmail,
+        variables: {
+          actionLabel: "Ver notificación",
+          actionLink: buildFrontendUrl(payload.targetUrl),
+          message: payload.message,
+          title: payload.title,
+          userName: payload.userName ?? delivery.recipientUser?.name ?? "",
+        },
+      });
+      await notificationService.completeEmailDelivery(deliveryId, result);
+      return result.success;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      try {
+        await notificationService.completeEmailDelivery(deliveryId, {
+          error: message,
+          success: false,
+        });
+      } catch (completionError) {
+        logger.error("No se pudo actualizar el estado de entrega del correo.", {
+          deliveryId,
+          error:
+            completionError instanceof Error
+              ? completionError.message
+              : String(completionError),
+        });
+      }
+      logger.warn("Falló la entrega de una notificación por correo.", {
+        deliveryId,
+        error: message,
+      });
+      return false;
+    }
+  },
+
+  async deliverPendingEmailNotifications(limit = 100): Promise<number> {
+    const now = new Date();
+    const deliveries = await prisma.notificationDelivery.findMany({
+      orderBy: [{ lastAttemptAt: "asc" }, { createdAt: "asc" }],
+      select: { id: true },
+      take: Math.max(1, Math.min(500, limit)),
+      where: {
+        attempts: { lt: notificationDeliveryMaxAttempts },
+        channel: NotificationDeliveryChannel.EMAIL,
+        dedupeKey: { not: { startsWith: "deadline-reminder:" } },
+        OR: [
+          { lastAttemptAt: null, status: NotificationDeliveryStatus.PENDING },
+          {
+            lastAttemptAt: {
+              lt: new Date(now.getTime() - notificationDeliveryClaimLeaseMs),
+            },
+            status: NotificationDeliveryStatus.PENDING,
+          },
+          {
+            lastAttemptAt: {
+              lt: new Date(now.getTime() - notificationDeliveryRetryDelayMs),
+            },
+            status: NotificationDeliveryStatus.FAILED,
+          },
+        ],
+        payloadJson: { not: null },
+      },
+    });
+    let sentCount = 0;
+    for (const delivery of deliveries) {
+      if (await notificationService.deliverEmailNotification(delivery.id))
+        sentCount += 1;
+    }
+    return sentCount;
   },
 
   async delete(notificationId: string, userId: string) {
