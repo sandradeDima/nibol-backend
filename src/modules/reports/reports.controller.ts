@@ -73,12 +73,14 @@ const reportQueryInput = (request: Request) => ({
   progressMax: getQueryValue(request.query["filter.progressMax"]),
   progressMin: getQueryValue(request.query["filter.progressMin"]),
   progressStatus: getQueryValue(request.query["filter.progressStatus"]),
+  progressStatuses: getQueryValue(request.query["filter.progressStatuses"]),
   processOwnerId: getQueryValue(request.query["filter.processOwnerId"]),
   reprogrammed: getQueryValue(request.query["filter.reprogrammed"]),
   reportName: getQueryValue(request.query.reportName),
   pdfView: getQueryValue(request.query.pdfView),
   responsibleUserId: getQueryValue(request.query["filter.responsibleUserId"]),
   riskLevelId: getQueryValue(request.query["filter.riskLevelId"]),
+  riskLevelIds: getQueryValue(request.query["filter.riskLevelIds"]),
   search:
     getQueryValue(request.query["filter.search"]) ??
     getQueryValue(request.query.search),

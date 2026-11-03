@@ -267,7 +267,10 @@ export const ROLE_PERMISSION_NAMES: Record<RoleCode, readonly string[]> = {
     "notifications.view",
     "notifications.view_module",
   ],
-  PROCESS_OWNER: withModuleViewPermissions(AREA_PERMISSIONS),
+  PROCESS_OWNER: withModuleViewPermissions([
+    ...AREA_PERMISSIONS,
+    "action_plans.evaluate",
+  ]),
   AREA_RESPONSIBLE: withModuleViewPermissions([
     ...AREA_PERMISSIONS,
     "workflow_tasks.approve",

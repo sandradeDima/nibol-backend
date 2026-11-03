@@ -259,7 +259,9 @@ const buildObservationWhere = (
       status: { isFinal: filters.globalStatus === "CLOSED" },
     });
   if (filters.activeOnly) conditions.push({ status: { isFinal: false } });
-  if (filters.riskLevelId)
+  if (filters.riskLevelIds?.length)
+    conditions.push({ riskLevelId: { in: filters.riskLevelIds } });
+  else if (filters.riskLevelId)
     conditions.push({ riskLevelId: filters.riskLevelId });
   if (filters.observationStatusIds?.length)
     conditions.push({ statusId: { in: filters.observationStatusIds } });
@@ -592,7 +594,11 @@ export const buildActionPlanWhere = (
     if (executorIds.length)
       conditions.push({ responsibleUserId: { in: executorIds } });
   }
-  if (filters.riskLevelId)
+  if (filters.riskLevelIds?.length)
+    conditions.push({
+      observation: { riskLevelId: { in: filters.riskLevelIds } },
+    });
+  else if (filters.riskLevelId)
     conditions.push({ observation: { riskLevelId: filters.riskLevelId } });
   if (filters.globalStatus)
     conditions.push({
@@ -604,7 +610,9 @@ export const buildActionPlanWhere = (
     });
   else if (filters.statusId)
     conditions.push({ observation: { statusId: filters.statusId } });
-  if (filters.progressStatus)
+  if (filters.progressStatuses?.length)
+    conditions.push({ status: { in: filters.progressStatuses } });
+  else if (filters.progressStatus)
     conditions.push({ status: filters.progressStatus });
   if (filters.activeOnly)
     conditions.push({ observation: { status: { isFinal: false } } });
@@ -1739,14 +1747,16 @@ const buildFilterLabelMap = (
         : filters.globalStatus === "CLOSED"
           ? "Cerrada"
           : "Todos",
-    "Estado del plan de acción": filters.progressStatus
-      ? {
-          CONCLUDED: "Concluido",
-          NOT_STARTED: "No iniciado",
-          STARTED: "Iniciado",
-          WITH_PROGRESS: "Con avance",
-        }[filters.progressStatus]
-      : "Todos",
+    "Estado del plan de acción": filters.progressStatuses?.length
+      ? `${filters.progressStatuses.length} estados seleccionados`
+      : filters.progressStatus
+        ? {
+            CONCLUDED: "Concluido",
+            NOT_STARTED: "No iniciado",
+            STARTED: "Iniciado",
+            WITH_PROGRESS: "Con avance",
+          }[filters.progressStatus]
+        : "Todos",
     "Estado según plazo": filters.deadlineStatuses?.length
       ? filters.deadlineStatuses
           .map((status) => (status === "VENCIDO" ? "Vencido" : "Vigente"))
@@ -1766,7 +1776,11 @@ const buildFilterLabelMap = (
       filters.dateFrom || filters.dateTo
         ? `${filters.dateFrom ?? "Inicio"} – ${filters.dateTo ?? "Hoy"}`
         : "Período actual",
-    Riesgo: filters.riskLevelId ? "Nivel seleccionado" : "Todos",
+    Riesgo: filters.riskLevelIds?.length
+      ? `${filters.riskLevelIds.length} niveles seleccionados`
+      : filters.riskLevelId
+        ? "Nivel seleccionado"
+        : "Todos",
     "Responsable de área": filters.areaResponsibleId?.length
       ? "Responsable seleccionado"
       : "Todos",
@@ -2130,7 +2144,9 @@ export const mapObservationDetailRows = (
             area.areaResponsible.id,
             area.processOwner.id,
           ].includes(query.responsibleUserId)) &&
-        (!query.progressStatus || plan.status === query.progressStatus) &&
+        (!query.progressStatuses?.length
+          ? !query.progressStatus || plan.status === query.progressStatus
+          : query.progressStatuses.includes(plan.status)) &&
         (!query.deadlineStatus || deadline === query.deadlineStatus) &&
         (!query.deadlineStatuses?.length ||
           query.deadlineStatuses.includes(deadline)) &&
@@ -2291,6 +2307,11 @@ const getReportRows = async (
           AND: [
             buildActionPlanScopeWhere(access),
             { observation: observationWhere },
+            ...(query.progressStatuses?.length
+              ? [{ status: { in: query.progressStatuses } }]
+              : query.progressStatus
+                ? [{ status: query.progressStatus }]
+                : []),
           ],
         },
       });
@@ -2313,7 +2334,9 @@ const getReportRows = async (
             "Plan de acción": actionPlan.description,
             "Fecha límite": effectiveDueDate.toISOString(),
             Estado: actionPlan.status,
-            "Número de observación": observationDisplayNumber(actionPlan.observation),
+            "Número de observación": observationDisplayNumber(
+              actionPlan.observation,
+            ),
             "Observación principal": actionPlan.observation.mainObservation.name,
             "Título de observación": actionPlan.observation.title,
             "Responsable de área": actionPlan.observationArea.areaResponsible?.name ?? "Sin asignar",

@@ -13,7 +13,7 @@ The repository defines six built-in roles. These are source/seed defaults, not a
 | SYSTEM_ADMIN | Administrador del sistema | 178 |
 | AUDITOR | Auditor | 37 |
 | AUDIT_CHIEF | Jefe Auditor | 17 |
-| PROCESS_OWNER | Dueño del proceso | 16 |
+| PROCESS_OWNER | Dueño del proceso | 17 |
 | AREA_RESPONSIBLE | Responsable de área | 22 |
 | EXECUTOR | Ejecutor | 16 |
 
@@ -187,7 +187,7 @@ The repository defines six built-in roles. These are source/seed defaults, not a
 | `recommended_action_plans.submit_to_audit` | ✓ | ✓ | — | — | — | — |
 | `action_plans.assign_executor` | ✓ | ✓ | — | ✓ | ✓ | — |
 | `action_plans.submit_to_audit` | ✓ | ✓ | — | — | ✓ | ✓ |
-| `action_plans.evaluate` | ✓ | ✓ | — | — | — | — |
+| `action_plans.evaluate` | ✓ | ✓ | — | ✓ | — | — |
 | `action_plans.approve` | ✓ | ✓ | — | — | — | — |
 | `action_plans.return` | ✓ | ✓ | — | — | — | — |
 | `action_plans.complete` | ✓ | — | — | — | — | — |
