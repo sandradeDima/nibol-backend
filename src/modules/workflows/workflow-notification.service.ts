@@ -403,7 +403,7 @@ export const createWorkflowNotificationIntent = async (
       hideFromInApp: !internalEnabled,
       targetUrl,
       title: event.title,
-      type: event.type,
+      ...(event.type !== undefined ? { type: event.type } : {}),
       userId: recipient.id,
     });
 
