@@ -35,6 +35,14 @@ const riskScheduleColor = (label: string): string => {
   return "#6b7d91";
 };
 
+const assignmentRiskColor = (
+  risk: string,
+  colorToken?: string | null,
+): string => {
+  const color = emailRiskColor(risk, colorToken);
+  return color === "#DC6803" ? "#FFC000" : color;
+};
+
 const riskScheduleRank = (label: string): number => {
   const normalized = label.toLowerCase();
   if (normalized.includes("alto") || normalized.includes("high")) return 0;
@@ -61,20 +69,26 @@ export const observationAssignmentEmailTemplate: EmailTemplateDefinition<"observ
         )
         .join("; ");
       const observationRows = observations
-        .map(
-          (item, index) => `
+        .map((item, index) => {
+          const riskColor = assignmentRiskColor(
+            item.risk,
+            item.riskColorToken,
+          );
+          const riskTextColor =
+            riskColor === "#FFC000" ? "#26384d" : "#ffffff";
+          return `
             <tr>
               <td style="border-bottom:1px solid #e4edf6;padding:8px 10px;vertical-align:middle;width:34px;">
                 <span style="background:#eef5fd;border-radius:50%;color:#52759e;display:inline-block;font-weight:700;line-height:24px;text-align:center;width:24px;">${index + 1}</span>
               </td>
               <td style="border-bottom:1px solid #e4edf6;color:#42668f;font-size:12px;font-weight:700;line-height:1.35;padding:8px 8px;vertical-align:middle;">${escapeHtml(item.title)}</td>
               <td style="border-bottom:1px solid #e4edf6;padding:8px 10px;text-align:left;vertical-align:middle;white-space:nowrap;">
-                <span style="background:${emailRiskColor(item.risk, item.riskColorToken)};border-radius:999px;color:#ffffff;display:inline-block;font-size:11px;font-weight:700;padding:6px 10px;">
+                <span style="background:${riskColor};border-radius:999px;color:${riskTextColor};display:inline-block;font-size:11px;font-weight:700;padding:6px 10px;">
                   <span style="background:#ffffff;border-radius:50%;display:inline-block;height:10px;margin-right:6px;vertical-align:-1px;width:10px;"></span>${escapeHtml(item.risk)}
                 </span>
               </td>
-            </tr>`,
-        )
+            </tr>`;
+        })
         .join("");
       const maxPeriodRows = parseMaxPeriods(variables.maxPeriods)
         .sort(

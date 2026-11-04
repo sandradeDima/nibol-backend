@@ -442,9 +442,17 @@ const completeAtEnd = async ({
     await createWorkflowCompletionNotification({
       context: nextContext,
       db,
+      ...(instance.processType === "DEADLINE_EXTENSION"
+        ? { entityId: instance.entityId }
+        : {}),
       finalResult,
       instanceId,
-      targetUrl: buildWorkflowInstanceUrl(instanceId),
+      targetUrl:
+        instance.processType === "DEADLINE_EXTENSION"
+          ? `/ampliaciones-plazo?extensionId=${encodeURIComponent(
+              instance.entityId,
+            )}`
+          : buildWorkflowInstanceUrl(instanceId),
     });
   }
   return status;

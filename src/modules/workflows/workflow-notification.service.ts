@@ -46,6 +46,7 @@ export type WorkflowNotificationEvent = {
   recipients: WorkflowNotificationRecipient[];
   targetUrl?: string | null;
   title: string;
+  type?: NotificationType;
   taskId?: string | null;
   visitSequence?: number | null;
 };
@@ -105,6 +106,7 @@ const createNotificationIfMissing = async (
     hideFromInApp: boolean;
     targetUrl: string | null;
     title: string;
+    type?: NotificationType;
     userId: string;
   },
 ) => {
@@ -126,11 +128,12 @@ const createNotificationIfMissing = async (
         targetUrl: input.targetUrl,
         title: input.title,
         type:
-          input.priority === NotificationPriority.CRITICAL
+          input.type ??
+          (input.priority === NotificationPriority.CRITICAL
             ? NotificationType.ERROR
             : input.priority === NotificationPriority.HIGH
               ? NotificationType.WARNING
-              : NotificationType.INFO,
+              : NotificationType.INFO),
         userId: input.userId,
       },
     });
@@ -400,6 +403,7 @@ export const createWorkflowNotificationIntent = async (
       hideFromInApp: !internalEnabled,
       targetUrl,
       title: event.title,
+      type: event.type,
       userId: recipient.id,
     });
 
@@ -1002,6 +1006,9 @@ export const createWorkflowDecisionNotification = async ({
   instanceId: string;
   task: { id: string; nodeName: string; visitSequence: number };
 }) => {
+  if (context.processType === "DEADLINE_EXTENSION") {
+    return { createdDeliveries: [], recipientCount: 0 };
+  }
   const subject = await getWorkflowApprovalSubject(db, context);
   const recipients = (
     await getWorkflowParticipantRecipients({ context, db, instanceId })
@@ -1024,7 +1031,7 @@ export const createWorkflowDecisionNotification = async ({
         : NotificationPriority.NORMAL,
     recipients,
     targetUrl: buildWorkflowTaskUrl(task.id),
-    title: `Actualización de aprobación: ${subject}`,
+    title: `Actualización de aprobación: ${subject}`.slice(0, 191),
     taskId: task.id,
     visitSequence: task.visitSequence,
   });
@@ -1033,12 +1040,14 @@ export const createWorkflowDecisionNotification = async ({
 export const createWorkflowCompletionNotification = async ({
   context,
   db,
+  entityId,
   finalResult,
   instanceId,
   targetUrl,
 }: {
   context: WorkflowRuntimeContext;
   db: WorkflowNotificationDb;
+  entityId?: string;
   finalResult: string;
   instanceId: string;
   targetUrl?: string | null;
@@ -1052,22 +1061,39 @@ export const createWorkflowCompletionNotification = async ({
     return { createdDeliveries: [], recipientCount: 0 };
   const subject = await getWorkflowApprovalSubject(db, context);
   const approved = ["APPROVED", "CLOSED"].includes(finalResult);
+  const extensionOutcome =
+    context.processType === "DEADLINE_EXTENSION" &&
+    ["APPROVED", "CLOSED", "REJECTED"].includes(finalResult);
   return createWorkflowNotificationIntent(db, {
     channel: "BOTH",
+    ...(extensionOutcome && entityId
+      ? { entityId, entityType: "DEADLINE_EXTENSION_REQUEST" }
+      : {}),
     eventType: "workflow.instance.completed",
     instanceId,
-    message: approved
-      ? `El flujo de aprobación fue completado correctamente para ${subject}.`
-      : `El flujo de aprobación finalizó con el resultado ${finalResult} para ${subject}.`,
+    message: extensionOutcome
+      ? `La solicitud de ampliación de plazo del plan de acción fue ${
+          approved ? "aprobada" : "rechazada"
+        }.`
+      : approved
+        ? `El flujo de aprobación fue completado correctamente para ${subject}.`
+        : `El flujo de aprobación finalizó con el resultado ${finalResult} para ${subject}.`,
     priority: approved
       ? NotificationPriority.NORMAL
       : NotificationPriority.HIGH,
     recipients,
     targetUrl: targetUrl ?? buildWorkflowInstanceUrl(instanceId),
-    title: (approved
-      ? `Aprobación completada: ${subject}`
-      : `Aprobación finalizada: ${subject}`
-    ).slice(0, 191),
+    title: extensionOutcome
+      ? `Ampliación de plazo ${approved ? "aprobada" : "rechazada"}`
+      : (approved
+          ? `Aprobación completada: ${subject}`
+          : `Aprobación finalizada: ${subject}`
+        ).slice(0, 191),
+    ...(extensionOutcome
+      ? {
+          type: approved ? NotificationType.SUCCESS : NotificationType.WARNING,
+        }
+      : {}),
     visitSequence: 0,
   });
 };

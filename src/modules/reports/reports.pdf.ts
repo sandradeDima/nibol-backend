@@ -471,7 +471,7 @@ export const buildReportPdf = async (input: PdfInput): Promise<Buffer> => {
     await page.setRequestInterception(true);
     page.on("request", (request) => void request.abort());
     await page.setContent(html, { waitUntil: "load" });
-    await page.emulateMediaType("screen");
+    await page.emulateMediaType("print");
     return Buffer.from(
       await page.pdf({
         printBackground: true,

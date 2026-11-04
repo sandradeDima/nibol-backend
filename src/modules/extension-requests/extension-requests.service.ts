@@ -9,7 +9,6 @@ import {
 } from "../../services/authorization-service.js";
 import { notificationService } from "../../services/notification-service.js";
 import { AppError } from "../../utils/app-error.js";
-import { resolveNotificationTarget } from "../../utils/notification-links.js";
 import { prisma } from "../../utils/prisma.js";
 import { workflowIntegrationService } from "../workflows/workflow-integration.service.js";
 import { workflowInstanceService } from "../workflows/workflow-instance.service.js";
@@ -163,10 +162,7 @@ export const getEffectiveExtensionDueDate = (input: {
   input.actionPlanDueDate ?? input.observationDueDate ?? input.previousDueDate;
 
 const extensionTargetUrl = (record: ExtensionRecord) =>
-  resolveNotificationTarget({
-    entityId: record.id,
-    entityType: "DEADLINE_EXTENSION_REQUEST",
-  }) ?? `/ampliaciones-plazo/${record.id}`;
+  `/ampliaciones-plazo?extensionId=${encodeURIComponent(record.id)}`;
 
 const format = (
   record: ExtensionRecord,
@@ -622,6 +618,8 @@ export const extensionRequestsService = {
     if (
       !authorizationService.can(access, "deadline_extensions.view") &&
       !authorizationService.can(access, "deadline_extensions.request") &&
+      !authorizationService.can(access, "deadline_extensions.approve") &&
+      !authorizationService.can(access, "deadline_extensions.reject") &&
       !query.reviewQueue
     )
       throw new AppError(
@@ -1029,10 +1027,10 @@ export const extensionRequestsService = {
     }
     if (!usedWorkflow && previous.requestedByUserId !== access.userId) {
       const eventType = approved ? "EXTENSION_APPROVED" : "EXTENSION_REJECTED";
-      const message = approved
-        ? `La ampliación fue aprobada hasta el ${previous.proposedDueDate.toISOString().slice(0, 10)}.`
-        : "La solicitud de ampliación fue rechazada.";
-      const title = "Solicitud de ampliación revisada";
+      const message = `La solicitud de ampliación de plazo del plan de acción fue ${
+        approved ? "aprobada" : "rechazada"
+      }.`;
+      const title = `Ampliación de plazo ${approved ? "aprobada" : "rechazada"}`;
       const targetUrl = extensionTargetUrl(previous);
       await Promise.all([
         notificationService.create({
