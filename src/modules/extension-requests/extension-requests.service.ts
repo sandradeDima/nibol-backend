@@ -303,6 +303,9 @@ const formatWithReviewTask = async (
     ? await findActiveWorkflowTaskForEntity({
         entityId: record.id,
         entityType: "deadline_extension_request",
+        ...(canReviewRecordAsProcessOwner(record, access)
+          ? { additionalAuthorizedEntityIds: [record.id] }
+          : {}),
         permissions: extensionWorkflowPermissions(access),
         processType: "DEADLINE_EXTENSION",
         userId: access.userId,
@@ -341,6 +344,28 @@ const extensionWorkflowPermissions = (access: AuthorizationSummary) => [
     ? ["workflow_tasks.reject"]
     : []),
 ];
+
+const canReviewAsProcessOwner = (access: AuthorizationSummary) =>
+  (access.roleCode === "PROCESS_OWNER" ||
+    access.roleCodes?.includes("PROCESS_OWNER")) &&
+  ["deadline_extensions.approve", "deadline_extensions.reject"].some(
+    (permission) => authorizationService.can(access, permission),
+  );
+
+const processOwnerRequestWhere = (access: AuthorizationSummary) => ({
+  OR: [
+    { observationArea: { processOwnerUserId: access.userId } },
+    { actionPlan: { observationArea: { processOwnerUserId: access.userId } } },
+  ],
+});
+
+const canReviewRecordAsProcessOwner = (
+  record: ExtensionRecord,
+  access: AuthorizationSummary,
+) =>
+  canReviewAsProcessOwner(access) &&
+  (record.observationArea?.processOwnerUserId === access.userId ||
+    record.actionPlan?.observationArea.processOwnerUserId === access.userId);
 
 const legacyReviewableWhere = (
   access: AuthorizationSummary,
@@ -399,9 +424,20 @@ const findReviewable = async (
   id: string,
   access: AuthorizationSummary,
 ): Promise<ExtensionRecord> => {
+  const processOwnerRequest = canReviewAsProcessOwner(access)
+    ? await prisma.deadlineExtensionRequest.findFirst({
+        select: { id: true },
+        where: {
+          deletedAt: null,
+          id,
+          ...processOwnerRequestWhere(access),
+        },
+      })
+    : null;
   const task = await findActiveWorkflowTaskForEntity({
     entityId: id,
     entityType: "deadline_extension_request",
+    ...(processOwnerRequest ? { additionalAuthorizedEntityIds: [id] } : {}),
     permissions: extensionWorkflowPermissions(access),
     processType: "DEADLINE_EXTENSION",
     userId: access.userId,
@@ -628,8 +664,25 @@ export const extensionRequestsService = {
         "Solo puede consultar la bandeja de ampliaciones pendientes.",
         403,
       );
+    const additionalAuthorizedEntityIds =
+      query.reviewQueue && canReviewAsProcessOwner(access)
+        ? (
+            await prisma.deadlineExtensionRequest.findMany({
+              select: { id: true },
+              where: {
+                ...processOwnerRequestWhere(access),
+                deletedAt: null,
+                status: "SENT_TO_MANAGER",
+                workflowInstanceId: { not: null },
+              },
+            })
+          ).map(({ id }) => id)
+        : undefined;
     const reviewTasks = query.reviewQueue
       ? await findActiveWorkflowTasksForEntities({
+          ...(additionalAuthorizedEntityIds
+            ? { additionalAuthorizedEntityIds }
+            : {}),
           entityType: "deadline_extension_request",
           permissions: extensionWorkflowPermissions(access),
           processType: "DEADLINE_EXTENSION",
@@ -989,6 +1042,9 @@ export const extensionRequestsService = {
       const task = await findActiveWorkflowTaskForEntity({
         entityId: id,
         entityType: "deadline_extension_request",
+        ...(canReviewRecordAsProcessOwner(previous, access)
+          ? { additionalAuthorizedEntityIds: [id] }
+          : {}),
         permissions: extensionWorkflowPermissions(access),
         processType: "DEADLINE_EXTENSION",
         userId: access.userId,

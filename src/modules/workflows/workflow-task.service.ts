@@ -86,9 +86,12 @@ const isTaskActor = async (
     assignedAreaId: string | null;
     assignedRoleId: string | null;
     assignedUserId: string | null;
+    instance: { entityId: string; entityType: string; processType: string };
   },
-  userId: string,
+  access: WorkflowActorContext,
+  action?: TaskAction,
 ): Promise<boolean> => {
+  const { userId } = access;
   if (task.assignedUserId === userId) return true;
   if (task.assignedRoleId) {
     const roleMembership = await db.userRole.findFirst({
@@ -103,6 +106,38 @@ const isTaskActor = async (
       where: { id: task.assignedAreaId, managerUserId: userId },
     });
     if (managedArea) return true;
+  }
+  if (
+    task.instance.processType === "DEADLINE_EXTENSION" &&
+    task.instance.entityType === "deadline_extension_request" &&
+    (access.roleCode === "PROCESS_OWNER" ||
+      access.roleCodes?.includes("PROCESS_OWNER")) &&
+    (action
+      ? action === "APPROVE"
+        ? access.permissions.includes("deadline_extensions.approve")
+        : action === "REJECT" &&
+          access.permissions.includes("deadline_extensions.reject")
+      : access.permissions.some((permission) =>
+          permission === "deadline_extensions.approve" ||
+          permission === "deadline_extensions.reject",
+        ))
+  ) {
+    const request = await db.deadlineExtensionRequest.findFirst({
+      select: {
+        actionPlan: {
+          select: {
+            observationArea: { select: { processOwnerUserId: true } },
+          },
+        },
+        observationArea: { select: { processOwnerUserId: true } },
+      },
+      where: { deletedAt: null, id: task.instance.entityId },
+    });
+    if (
+      request?.observationArea?.processOwnerUserId === userId ||
+      request?.actionPlan?.observationArea.processOwnerUserId === userId
+    )
+      return true;
   }
   return false;
 };
@@ -201,13 +236,27 @@ export type ActiveWorkflowTaskSummary = {
 };
 
 const activeTaskWhere = (input: {
+  additionalAuthorizedEntityIds?: readonly string[];
   entityIds?: readonly string[];
   entityType: string;
   processType: string;
   userId: string;
 }): Prisma.WorkflowTaskWhereInput => ({
   AND: [
-    taskAuthorizationWhere(input.userId),
+    {
+      OR: [
+        taskAuthorizationWhere(input.userId),
+        ...(input.additionalAuthorizedEntityIds?.length
+          ? [
+              {
+                instance: {
+                  entityId: { in: [...input.additionalAuthorizedEntityIds] },
+                },
+              },
+            ]
+          : []),
+      ],
+    },
     {
       instance: {
         entityType: input.entityType,
@@ -221,6 +270,7 @@ const activeTaskWhere = (input: {
 });
 
 export const findActiveWorkflowTasksForEntities = async (input: {
+  additionalAuthorizedEntityIds?: readonly string[];
   entityIds?: readonly string[];
   entityType: string;
   permissions?: readonly string[];
@@ -255,6 +305,7 @@ export const findActiveWorkflowTasksForEntities = async (input: {
 };
 
 export const findActiveWorkflowTaskForEntity = async (input: {
+  additionalAuthorizedEntityIds?: readonly string[];
   entityId: string;
   entityType: string;
   permissions?: readonly string[];
@@ -620,7 +671,7 @@ export const workflowTaskService = {
     const task = await getTaskRecord(prisma, taskId);
     if (!task) throw new AppError("No se encontró la tarea solicitada.", 404);
     const canAct = taskIsActionable(task.status)
-      ? await isTaskActor(prisma, task, access.userId)
+      ? await isTaskActor(prisma, task, access)
       : false;
     return mapTask(task, access, canAct);
   },
@@ -648,7 +699,7 @@ export const workflowTaskService = {
           "La instancia ya no está disponible para decisiones.",
         );
       }
-      if (!(await isTaskActor(db, task, access.userId))) {
+      if (!(await isTaskActor(db, task, access, action))) {
         throw new WorkflowRuntimeError(
           WORKFLOW_RUNTIME_ERROR_CODES.TASK_UNAUTHORIZED,
           "No está autorizado para actuar sobre esta tarea.",
