@@ -438,11 +438,16 @@ const completeAtEnd = async ({
     metadata: { finalResult, nodeKey: node.nodeKey },
     newValues: { completedAt: now.toISOString(), finalResult, status },
   });
-  if (node.configurationJson.notifyParticipants) {
+  if (
+    node.configurationJson.notifyParticipants ||
+    instance.processType === "DEADLINE_EXTENSION" ||
+    instance.processType === "OBSERVATION_CLOSURE"
+  ) {
     await createWorkflowCompletionNotification({
       context: nextContext,
       db,
-      ...(instance.processType === "DEADLINE_EXTENSION"
+      ...(instance.processType === "DEADLINE_EXTENSION" ||
+      instance.processType === "OBSERVATION_CLOSURE"
         ? { entityId: instance.entityId }
         : {}),
       finalResult,

@@ -12,6 +12,7 @@ import { AppError } from "../../utils/app-error.js";
 import { prisma } from "../../utils/prisma.js";
 import { workflowIntegrationService } from "../workflows/workflow-integration.service.js";
 import { workflowInstanceService } from "../workflows/workflow-instance.service.js";
+import { buildDeadlineExtensionOutcomeNotification } from "../workflows/workflow-notification.service.js";
 import {
   findActiveWorkflowTaskForEntity,
   findActiveWorkflowTasksForEntities,
@@ -1026,28 +1027,31 @@ export const extensionRequestsService = {
       });
     }
     if (!usedWorkflow && previous.requestedByUserId !== access.userId) {
-      const eventType = approved ? "EXTENSION_APPROVED" : "EXTENSION_REJECTED";
-      const message = `La solicitud de ampliación de plazo del plan de acción fue ${
-        approved ? "aprobada" : "rechazada"
-      }.`;
-      const title = `Ampliación de plazo ${approved ? "aprobada" : "rechazada"}`;
-      const targetUrl = extensionTargetUrl(previous);
+      const observation = previous.observation ?? previous.actionPlan?.observation;
+      const notification = buildDeadlineExtensionOutcomeNotification({
+        actionPlanTitle: previous.actionPlan?.title ?? null,
+        approved,
+        entityId: previous.id,
+        observationReference: observation
+          ? `${observation.auditReport.reportNumber} / OBS-${String(observation.observationNumber).padStart(3, "0")}`
+          : null,
+      });
       await Promise.all([
         notificationService.create({
           entityId: previous.id,
           entityType: "DEADLINE_EXTENSION_REQUEST",
-          eventType,
-          message,
-          title,
-          targetUrl,
-          type: approved ? "success" : "warning",
+          eventType: notification.eventType,
+          message: notification.message,
+          title: notification.title,
+          targetUrl: notification.targetUrl,
+          type: notification.type,
           userId: previous.requestedByUserId,
         }),
         notificationService.sendEmailNotification({
-          eventType,
-          message,
-          title,
-          targetUrl,
+          eventType: notification.eventType,
+          message: notification.message,
+          title: notification.title,
+          targetUrl: notification.targetUrl,
           userId: previous.requestedByUserId,
         }),
       ]);

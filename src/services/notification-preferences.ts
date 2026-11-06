@@ -225,8 +225,8 @@ export const NOTIFICATION_CATALOG = [
     description: "Aviso al auditor cuando se envía un avance para revisión.",
     eventType: "PROGRESS_PENDING_REVIEW",
     exampleMessage:
-      "Hay una evaluación de avance pendiente para un plan de acción.",
-    exampleTitle: "Avance pendiente de revisión",
+      "El plan de acción “Prueba 17” (AI-02-2027 / OBS-022) requiere su revisión y evaluación.",
+    exampleTitle: "Plan de acción pendiente de evaluación",
     key: "notification_enabled_progress_pending_review",
     name: "Avance pendiente de revisión",
   },
@@ -235,8 +235,9 @@ export const NOTIFICATION_CATALOG = [
     channels: "Solo NIBOL",
     description: "Aviso al autor cuando se aprueba su evaluación de avance.",
     eventType: "PROGRESS_APPROVED",
-    exampleMessage: "La evaluación de avance del plan de acción fue aprobada.",
-    exampleTitle: "Evaluación de avance revisada",
+    exampleMessage:
+      "Auditoría aprobó la evaluación de avance del plan de acción “Prueba 17” (AI-02-2027 / OBS-022).",
+    exampleTitle: "Evaluación de avance aprobada",
     key: "notification_enabled_progress_approved",
     name: "Avance aprobado",
   },
@@ -245,10 +246,34 @@ export const NOTIFICATION_CATALOG = [
     channels: "Solo NIBOL",
     description: "Aviso al autor cuando se devuelve su evaluación de avance.",
     eventType: "PROGRESS_RETURNED",
-    exampleMessage: "La evaluación de avance del plan de acción fue devuelta.",
-    exampleTitle: "Evaluación de avance revisada",
+    exampleMessage:
+      "Auditoría devolvió la evaluación de avance del plan de acción “Prueba 17” (AI-02-2027 / OBS-022). Revise los comentarios y vuelva a enviar las evidencias.",
+    exampleTitle: "Evaluación de avance devuelta",
     key: "notification_enabled_progress_returned",
     name: "Avance devuelto",
+  },
+  {
+    category: "Avances y evidencias",
+    channels: "Solo NIBOL",
+    description: "Aviso al ejecutor cuando se concluye un plan de acción.",
+    eventType: "ACTION_PLAN_COMPLETED",
+    exampleMessage:
+      "Se concluyó exitosamente el plan de acción “Prueba 17” de la observación “Control de inventario” (AI-02-2027 / OBS-022).",
+    exampleTitle: "Plan de acción concluido",
+    key: "notification_enabled_action_plan_completed",
+    name: "Plan de acción concluido",
+  },
+  {
+    category: "Observaciones",
+    channels: "Solo NIBOL",
+    description:
+      "Aviso cuando todos los planes de acción de una observación están concluidos.",
+    eventType: "OBSERVATION_CLOSED",
+    exampleMessage:
+      "Se concluyó exitosamente la observación “Control de inventario” (AI-02-2027 / OBS-022).",
+    exampleTitle: "Observación concluida",
+    key: "notification_enabled_observation_closed",
+    name: "Observación concluida",
   },
   {
     category: "Avances y evidencias",
@@ -290,8 +315,9 @@ export const NOTIFICATION_CATALOG = [
     description:
       "Aviso al solicitante cuando se aprueba su ampliación de plazo.",
     eventType: "EXTENSION_APPROVED",
-    exampleMessage: "La ampliación fue aprobada hasta el 30/11/2026.",
-    exampleTitle: "Solicitud de ampliación revisada",
+    exampleMessage:
+      "La solicitud de ampliación de plazo del plan de acción “Prueba 17” (AI-02-2027 / OBS-022) fue aprobada.",
+    exampleTitle: "Ampliación de plazo aprobada",
     key: "notification_enabled_extension_approved",
     name: "Ampliación aprobada",
   },
@@ -301,8 +327,9 @@ export const NOTIFICATION_CATALOG = [
     description:
       "Aviso al solicitante cuando se rechaza su ampliación de plazo.",
     eventType: "EXTENSION_REJECTED",
-    exampleMessage: "La solicitud de ampliación fue rechazada.",
-    exampleTitle: "Solicitud de ampliación revisada",
+    exampleMessage:
+      "La solicitud de ampliación de plazo del plan de acción “Prueba 17” (AI-02-2027 / OBS-022) fue rechazada.",
+    exampleTitle: "Ampliación de plazo rechazada",
     key: "notification_enabled_extension_rejected",
     name: "Ampliación rechazada",
   },

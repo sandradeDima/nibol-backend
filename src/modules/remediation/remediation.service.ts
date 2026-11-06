@@ -13,7 +13,9 @@ import {
   buildRemediationPlanScopeWhere,
   type AuthorizationSummary,
 } from "../../services/authorization-service.js";
+import { notificationService } from "../../services/notification-service.js";
 import { AppError } from "../../utils/app-error.js";
+import { buildObservationUrl } from "../../utils/observation-links.js";
 import { prisma } from "../../utils/prisma.js";
 import {
   lockObservationForActionPlanUpdate,
@@ -31,6 +33,10 @@ import {
   getOfficialActionPlanProgress,
   isApprovedDeadlineExtension,
 } from "../reports/reporting-definitions.js";
+import {
+  buildProgressNotification,
+  formatObservationReference,
+} from "../progress/progress-notification.js";
 import type {
   ActionPlanDetail,
   ActionPlanFilterOptions,
@@ -1122,6 +1128,8 @@ export const remediationService = {
         "No se puede concluir un plan con un avance pendiente de revisión.",
         409,
       );
+    let observationWasConcluded = false;
+    const wasAlreadyConcluded = previous.status === "CONCLUDED";
     await prisma.$transaction(async (tx) => {
       await lockObservationForActionPlanUpdate(tx, previous.observation.id);
       await tx.actionPlan.update({
@@ -1129,7 +1137,82 @@ export const remediationService = {
         where: { id },
       });
       await recalculateObservationFromActionPlans(tx, previous.observation.id);
+      if (!wasAlreadyConcluded) {
+        const plans = await tx.actionPlan.findMany({
+          select: { status: true },
+          where: { deletedAt: null, observationId: previous.observation.id },
+        });
+        observationWasConcluded =
+          plans.length > 0 && plans.every((plan) => plan.status === "CONCLUDED");
+      }
     });
+    if (!wasAlreadyConcluded) {
+      const details = {
+        actionPlanTitle: previous.description,
+        observationReference: formatObservationReference(
+          previous.observation.auditReport.reportNumber,
+          previous.observation.observationNumber,
+        ),
+        observationTitle: previous.observation.title,
+      };
+      const completed = buildProgressNotification("planCompleted", details);
+      await notificationService.create({
+        entityId: id,
+        entityType: "ACTION_PLAN",
+        eventType: completed.eventType,
+        message: completed.message,
+        targetUrl: buildObservationUrl(previous.observation.id, {
+          planId: id,
+          tab: "plans",
+        }),
+        title: completed.title,
+        type: completed.type,
+        userId: previous.responsibleUser.id,
+      });
+      if (observationWasConcluded) {
+        const plans = await prisma.actionPlan.findMany({
+          select: {
+            observationArea: {
+              select: {
+                areaResponsibleUserId: true,
+                processOwnerUserId: true,
+              },
+            },
+            responsibleUserId: true,
+          },
+          where: { deletedAt: null, observationId: previous.observation.id },
+        });
+        const recipientIds = Array.from(
+          new Set(
+            plans.flatMap((plan) => [
+              plan.responsibleUserId,
+              plan.observationArea.areaResponsibleUserId,
+              plan.observationArea.processOwnerUserId,
+            ]).filter((userId): userId is string => Boolean(userId)),
+          ),
+        );
+        const closed = buildProgressNotification(
+          "observationCompleted",
+          details,
+        );
+        await Promise.all(
+          recipientIds.map((userId) =>
+            notificationService.create({
+              entityId: previous.observation.id,
+              entityType: "OBSERVATION",
+              eventType: closed.eventType,
+              message: closed.message,
+              targetUrl: buildObservationUrl(previous.observation.id, {
+                tab: "summary",
+              }),
+              title: closed.title,
+              type: closed.type,
+              userId,
+            }),
+          ),
+        );
+      }
+    }
     return {
       current: format(await find(id, access)),
       previous: format(previous),

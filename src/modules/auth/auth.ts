@@ -81,7 +81,7 @@ const microsoftProvider =
 
 export const auth = betterAuth({
   basePath: "/api/auth",
-  baseURL: env.BETTER_AUTH_URL,
+  baseURL: env.BETTER_AUTH_URL.replace(/\/+$/, ""),
   database: prismaAdapter(prisma, {
     provider: "sqlserver",
     transaction: true,

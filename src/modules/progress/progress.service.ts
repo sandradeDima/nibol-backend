@@ -60,6 +60,10 @@ import {
   isOfficialProgressStatusTransitionAllowed,
   officialProgressByStatus,
 } from "./progress.constants.js";
+import {
+  buildProgressNotification,
+  formatObservationReference,
+} from "./progress-notification.js";
 
 type UploadFile = {
   buffer: Buffer;
@@ -1036,6 +1040,7 @@ export const progressService = {
         400,
       );
     const next = action === "approve" ? "APPROVED" : "RETURNED";
+    let observationWasConcluded = false;
     await prisma.$transaction(async (tx) => {
       const updated = await tx.progressEvaluation.updateMany({
         data: {
@@ -1068,12 +1073,34 @@ export const progressService = {
           previous.actionPlan.observation.id,
           input.officialStatus,
         );
+      if (
+        action === "approve" &&
+        input.officialStatus === "CONCLUDED" &&
+        previous.actionPlan.status !== "CONCLUDED"
+      ) {
+        const plans = await tx.actionPlan.findMany({
+          select: { status: true },
+          where: {
+            deletedAt: null,
+            observationId: previous.actionPlan.observation.id,
+          },
+        });
+        observationWasConcluded =
+          plans.length > 0 && plans.every((plan) => plan.status === "CONCLUDED");
+      }
     });
     if (previous.submittedByUser.id !== access.userId) {
-      const eventType =
-        next === "APPROVED" ? "PROGRESS_APPROVED" : "PROGRESS_RETURNED";
-      const message = `La evaluación de avance del plan de acción fue ${next === "APPROVED" ? "aprobada" : "devuelta"}.`;
-      const title = "Evaluación de avance revisada";
+      const content = buildProgressNotification(
+        next === "APPROVED" ? "approved" : "returned",
+        {
+          actionPlanTitle: previous.actionPlan.title,
+          observationReference: formatObservationReference(
+            previous.actionPlan.observation.auditReport.reportNumber,
+            previous.actionPlan.observation.observationNumber,
+          ),
+          observationTitle: previous.actionPlan.observation.title,
+        },
+      );
       const targetUrl = progressEvaluationTargetUrl(
         previous.actionPlan.observation.id,
         previous.actionPlan.id,
@@ -1083,21 +1110,103 @@ export const progressService = {
         notificationService.create({
           entityId: id,
           entityType: "PROGRESS_EVALUATION",
-          eventType,
-          message,
-          title,
+          eventType: content.eventType,
+          message: content.message,
+          title: content.title,
           targetUrl,
-          type: next === "APPROVED" ? "success" : "warning",
+          type: content.type,
           userId: previous.submittedByUser.id,
         }),
         notificationService.sendEmailNotification({
-          eventType,
-          message,
+          eventType: content.eventType,
+          message: content.message,
           targetUrl,
-          title,
+          title: content.title,
           userId: previous.submittedByUser.id,
         }),
       ]);
+    }
+    if (
+      action === "approve" &&
+      input.officialStatus === "CONCLUDED" &&
+      previous.actionPlan.status !== "CONCLUDED"
+    ) {
+      const content = buildProgressNotification("planCompleted", {
+        actionPlanTitle: previous.actionPlan.title,
+        observationReference: formatObservationReference(
+          previous.actionPlan.observation.auditReport.reportNumber,
+          previous.actionPlan.observation.observationNumber,
+        ),
+        observationTitle: previous.actionPlan.observation.title,
+      });
+      const targetUrl = buildObservationUrl(
+        previous.actionPlan.observation.id,
+        { planId: previous.actionPlan.id, tab: "plans" },
+      );
+      const executorId = previous.actionPlan.responsibleUser?.id;
+      if (executorId) {
+        await notificationService.create({
+          entityId: previous.actionPlan.id,
+          entityType: "ACTION_PLAN",
+          eventType: content.eventType,
+          message: content.message,
+          targetUrl,
+          title: content.title,
+          type: content.type,
+          userId: executorId,
+        });
+      }
+      if (observationWasConcluded) {
+        const plans = await prisma.actionPlan.findMany({
+          select: {
+            observationArea: {
+              select: {
+                areaResponsibleUserId: true,
+                processOwnerUserId: true,
+              },
+            },
+            responsibleUserId: true,
+          },
+          where: {
+            deletedAt: null,
+            observationId: previous.actionPlan.observation.id,
+          },
+        });
+        const recipientIds = Array.from(
+          new Set(
+            plans.flatMap((plan) => [
+              plan.responsibleUserId,
+              plan.observationArea.areaResponsibleUserId,
+              plan.observationArea.processOwnerUserId,
+            ]).filter((userId): userId is string => Boolean(userId)),
+          ),
+        );
+        const closed = buildProgressNotification("observationCompleted", {
+          actionPlanTitle: previous.actionPlan.title,
+          observationReference: formatObservationReference(
+            previous.actionPlan.observation.auditReport.reportNumber,
+            previous.actionPlan.observation.observationNumber,
+          ),
+          observationTitle: previous.actionPlan.observation.title,
+        });
+        await Promise.all(
+          recipientIds.map((userId) =>
+            notificationService.create({
+              entityId: previous.actionPlan.observation.id,
+              entityType: "OBSERVATION",
+              eventType: closed.eventType,
+              message: closed.message,
+              targetUrl: buildObservationUrl(
+                previous.actionPlan.observation.id,
+                { tab: "summary" },
+              ),
+              title: closed.title,
+              type: closed.type,
+              userId,
+            }),
+          ),
+        );
+      }
     }
     return {
       current: formatEvaluation(await findEvaluation(id, access), access),
@@ -1117,6 +1226,7 @@ export const progressService = {
         "No se pueden enviar avances de un plan concluido.",
         409,
       );
+    let workflowInstanceId: string | null = null;
     if (previous.type === "FINALIZATION") {
       let replaceInstanceId: string | undefined;
       if (previous.workflowInstanceId) {
@@ -1132,7 +1242,7 @@ export const progressService = {
         }
       }
 
-      await workflowIntegrationService.startForEntity({
+      const workflow = await workflowIntegrationService.startForEntity({
         access: { ...access, ipAddress: null },
         actorUserId: access.userId,
         entityId: id,
@@ -1140,6 +1250,7 @@ export const progressService = {
         processType: "OBSERVATION_CLOSURE",
         replaceInstanceId,
       });
+      workflowInstanceId = workflow.instanceId || null;
     }
     const updated = await prisma.$transaction(async (tx) => {
       const changed = await tx.progressEvaluation.updateMany({
@@ -1174,11 +1285,15 @@ export const progressService = {
       );
     }
     const auditorId = previous.actionPlan.observation.auditorUserId;
-    if (auditorId && auditorId !== access.userId) {
-      const eventType = "PROGRESS_PENDING_REVIEW";
-      const message =
-        "Hay una evaluación de avance pendiente para un plan de acción.";
-      const title = "Avance pendiente de revisión";
+    if (auditorId && auditorId !== access.userId && !workflowInstanceId) {
+      const content = buildProgressNotification("pending", {
+        actionPlanTitle: previous.actionPlan.title,
+        observationReference: formatObservationReference(
+          previous.actionPlan.observation.auditReport.reportNumber,
+          previous.actionPlan.observation.observationNumber,
+        ),
+        observationTitle: previous.actionPlan.observation.title,
+      });
       const targetUrl = progressEvaluationTargetUrl(
         previous.actionPlan.observation.id,
         previous.actionPlan.id,
@@ -1188,18 +1303,18 @@ export const progressService = {
         notificationService.create({
           entityId: id,
           entityType: "PROGRESS_EVALUATION",
-          eventType,
-          message,
-          title,
+          eventType: content.eventType,
+          message: content.message,
+          title: content.title,
           targetUrl,
-          type: "info",
+          type: content.type,
           userId: auditorId,
         }),
         notificationService.sendEmailNotification({
-          eventType,
-          message,
+          eventType: content.eventType,
+          message: content.message,
           targetUrl,
-          title,
+          title: content.title,
           userId: auditorId,
         }),
       ]);

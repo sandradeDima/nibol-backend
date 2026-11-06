@@ -89,7 +89,7 @@ const chartColor = (item: ReportChartItem): string => {
 };
 
 const panel = (title: string, content: string, description = ""): string =>
-  `<section class="panel"><h2>${escapeHtml(title)}</h2>${description ? `<p class="description">${escapeHtml(description)}</p>` : ""}${content}</section>`;
+  `<section class="panel">${title ? `<h2>${escapeHtml(title)}</h2>` : ""}${description ? `<p class="description">${escapeHtml(description)}</p>` : ""}${content}</section>`;
 
 const kpi = (label: string, value: unknown, tone = ""): string =>
   `<article class="kpi ${tone}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(formatCell(value))}</strong></article>`;
@@ -158,6 +158,7 @@ const table = (
     row,
     label,
   ) => escapeHtml(formatCell(row[label])),
+  repeatTitle = false,
 ): string => {
   if (!rows.length)
     return panel(
@@ -207,10 +208,14 @@ const table = (
         : "";
       for (let start = 0; start < rows.length; start += 20) {
         const end = Math.min(start + 20, rows.length);
+        const sectionTitle = `${title}${chunks.length > 1 ? ` · columnas ${index + 1}/${chunks.length}` : ""} · ${start + 1}-${end} de ${rows.length}`;
+        const repeatedTitle = repeatTitle
+          ? `<tr><th class="table-title" colspan="${chunk.length}">${escapeHtml(sectionTitle)}</th></tr>`
+          : "";
         sections.push(
           panel(
-            `${title}${chunks.length > 1 ? ` · columnas ${index + 1}/${chunks.length}` : ""} · ${start + 1}-${end} de ${rows.length}`,
-            `<table><thead>${groupHeader}<tr>${chunk.map(({ index, label }) => `<th${grouped ? ` class="group-header" style="background:${observationGroups.find((item) => index < item.end)!.color}"` : ""}>${escapeHtml(label)}</th>`).join("")}</tr></thead><tbody>${rows
+            repeatTitle ? "" : sectionTitle,
+            `<table><thead>${repeatedTitle}${groupHeader}<tr>${chunk.map(({ index, label }) => `<th${grouped ? ` class="group-header" style="background:${observationGroups.find((item) => index < item.end)!.color}"` : ""}>${escapeHtml(label)}</th>`).join("")}</tr></thead><tbody>${rows
               .slice(start, end)
               .map(
                 (row) =>
@@ -252,6 +257,7 @@ const actionPlanTable = (
       label === "Ver plan" && typeof row["Enlace al plan"] === "string"
         ? `<a href="${escapeHtml(row["Enlace al plan"])}" style="color:#2F5597;text-decoration:underline">Ver plan</a>`
         : escapeHtml(formatCell(row[label])),
+    true,
   );
 
 const observationDistribution = (
@@ -297,7 +303,7 @@ const reportContent = (input: PdfInput): string => {
     input.includeActionPlans === false
       ? ""
       : input.actionPlanRows === undefined
-        ? table(preview.columns, preview.rows, title)
+        ? table(preview.columns, preview.rows, title, false, undefined, true)
         : actionPlanTable(input.actionPlanRows, title);
   if (input.view === "GENERATOR") {
     const rows =
@@ -453,6 +459,7 @@ const styles = `
   tr { break-inside: avoid; }
   th { color: #6b7280; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; text-align: left; border-bottom: 2px solid #cbd5e1; }
   th.group-header { color: white; border: 1px solid #ffffff50; }
+  th.table-title { color: #07142d; font-family: Barlow, Manrope, sans-serif; font-size: 17px; letter-spacing: 0; border: 0; padding: 0 5px 11px; }
   th, td { padding: 6px 5px; vertical-align: top; overflow-wrap: anywhere; white-space: pre-wrap; }
   td { border-bottom: 1px solid #e5e7eb; }
 `;
