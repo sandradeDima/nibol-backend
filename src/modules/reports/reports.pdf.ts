@@ -88,8 +88,13 @@ const chartColor = (item: ReportChartItem): string => {
   return "#07142D";
 };
 
-const panel = (title: string, content: string, description = ""): string =>
-  `<section class="panel">${title ? `<h2>${escapeHtml(title)}</h2>` : ""}${description ? `<p class="description">${escapeHtml(description)}</p>` : ""}${content}</section>`;
+const panel = (
+  title: string,
+  content: string,
+  description = "",
+  className = "",
+): string =>
+  `<section class="panel${className ? ` ${className}` : ""}">${title ? `<h2>${escapeHtml(title)}</h2>` : ""}${description ? `<p class="description">${escapeHtml(description)}</p>` : ""}${content}</section>`;
 
 const kpi = (label: string, value: unknown, tone = ""): string =>
   `<article class="kpi ${tone}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(formatCell(value))}</strong></article>`;
@@ -222,6 +227,8 @@ const table = (
                   `<tr>${chunk.map(({ label }) => `<td>${renderCell(row, label)}</td>`).join("")}</tr>`,
               )
               .join("")}</tbody></table>`,
+            "",
+            repeatTitle && (index > 0 || start > 0) ? "new-page" : "",
           ),
         );
       }
@@ -416,6 +423,7 @@ const styles = `
   .grid { display: grid; gap: 14px; margin: 14px 0; align-items: start; }
   .grid.two { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .panel { min-width: 0; padding: 17px; border: 1px solid #e5e7eb; margin-bottom: 14px; break-inside: avoid; }
+  .panel.new-page { break-before: page; }
   .panel:has(table) { break-inside: auto; }
   .panel h2 { margin: 0 0 11px; font-family: Barlow, Manrope, sans-serif; font-size: 17px; text-transform: uppercase; break-after: avoid; }
   .panel .description { color: #334155; }

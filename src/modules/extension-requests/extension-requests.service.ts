@@ -834,10 +834,7 @@ export const extensionRequestsService = {
         },
         where: { id },
       });
-      if (input.evidenceFileIds) {
-        await tx.deadlineExtensionAttachment.deleteMany({
-          where: { extensionRequestId: id },
-        });
+      if (input.evidenceFileIds?.length) {
         const observationId = previous.observation?.id;
         const actionPlanObservationId = previous.actionPlanId
           ? (
@@ -850,11 +847,23 @@ export const extensionRequestsService = {
         const targetObservationId = observationId ?? actionPlanObservationId;
         if (!targetObservationId)
           throw new AppError("El destino de la ampliación no es válido.", 409);
+        // Keep prior files attached when a requester adds correction evidence.
+        const evidenceIds = [...new Set(input.evidenceFileIds)];
+        const attached = await tx.deadlineExtensionAttachment.findMany({
+          select: { evidenceFileId: true },
+          where: {
+            evidenceFileId: { in: evidenceIds },
+            extensionRequestId: id,
+          },
+        });
+        const alreadyAttached = new Set(
+          attached.map((attachment) => attachment.evidenceFileId),
+        );
         await attachEvidence(
           tx,
           id,
           targetObservationId,
-          input.evidenceFileIds,
+          evidenceIds.filter((evidenceId) => !alreadyAttached.has(evidenceId)),
           access,
         );
       }
