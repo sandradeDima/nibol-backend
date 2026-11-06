@@ -1,10 +1,10 @@
 import { authorizationService, buildActionPlanScopeWhere, buildEvidenceScopeWhere, buildExtensionRequestScopeWhere, } from "../../services/authorization-service.js";
 import { notificationService } from "../../services/notification-service.js";
 import { AppError } from "../../utils/app-error.js";
-import { resolveNotificationTarget } from "../../utils/notification-links.js";
 import { prisma } from "../../utils/prisma.js";
 import { workflowIntegrationService } from "../workflows/workflow-integration.service.js";
 import { workflowInstanceService } from "../workflows/workflow-instance.service.js";
+import { buildDeadlineExtensionOutcomeNotification } from "../workflows/workflow-notification.service.js";
 import { findActiveWorkflowTaskForEntity, findActiveWorkflowTasksForEntities, workflowTaskService, } from "../workflows/workflow-task.service.js";
 import { EDITABLE_EXTENSION_REQUEST_STATUSES } from "./extension-requests.constants.js";
 const addDays = (date, days) => {
@@ -27,6 +27,7 @@ const include = {
             description: true,
             observation: {
                 select: {
+                    areaAssignments: { select: { areaResponsibleUserId: true } },
                     auditReport: { select: { reportNumber: true } },
                     id: true,
                     observationNumber: true,
@@ -39,6 +40,8 @@ const include = {
             observationArea: {
                 select: {
                     area: { select: { id: true, name: true } },
+                    areaResponsibleUserId: true,
+                    processOwnerUserId: true,
                     areaResponsible: { select: userSelect },
                     processOwner: { select: userSelect },
                 },
@@ -72,6 +75,7 @@ const include = {
     managerReviewer: { select: userSelect },
     observation: {
         select: {
+            areaAssignments: { select: { areaResponsibleUserId: true } },
             auditReport: { select: { reportNumber: true } },
             auditorUserId: true,
             id: true,
@@ -84,17 +88,29 @@ const include = {
     observationArea: {
         select: {
             area: { select: { id: true, managerUserId: true, name: true } },
+            areaResponsibleUserId: true,
+            processOwnerUserId: true,
             areaResponsible: { select: userSelect },
             processOwner: { select: userSelect },
         },
     },
     requestedByUser: { select: userSelect },
 };
-const extensionTargetUrl = (record) => resolveNotificationTarget({
-    entityId: record.id,
-    entityType: "DEADLINE_EXTENSION_REQUEST",
-}) ?? `/ampliaciones-plazo/${record.id}`;
-const format = (record, reviewTask = null) => ({
+const assignmentContext = (record) => ({
+    areaResponsibleUserId: record.actionPlan?.observationArea.areaResponsibleUserId ??
+        record.observationArea?.areaResponsibleUserId ??
+        null,
+    executorUserId: record.actionPlan?.responsibleUser.id ?? null,
+    processOwnerUserId: record.actionPlan?.observationArea.processOwnerUserId ??
+        record.observationArea?.processOwnerUserId ??
+        null,
+});
+const canManageRequest = async (access, record) => record.actionPlan
+    ? authorizationService.canForAssignments(access, "deadline_extensions.request", assignmentContext(record))
+    : authorizationService.can(access, "deadline_extensions.request");
+export const getEffectiveExtensionDueDate = (input) => input.actionPlanDueDate ?? input.observationDueDate ?? input.previousDueDate;
+const extensionTargetUrl = (record) => `/ampliaciones-plazo?extensionId=${encodeURIComponent(record.id)}`;
+const format = (record, access, reviewTask = null) => ({
     actionPlan: record.actionPlan
         ? {
             id: record.actionPlan.id,
@@ -106,12 +122,14 @@ const format = (record, reviewTask = null) => ({
             observationArea: record.actionPlan.observationArea,
         }
         : null,
-    attachments: record.attachments.map(({ evidenceFile }) => ({
-        ...evidenceFile,
-        createdAt: evidenceFile.createdAt.toISOString(),
-        downloadPath: `/evidences/${evidenceFile.id}/download`,
-        sizeBytes: Number(evidenceFile.sizeBytes),
-    })),
+    attachments: authorizationService.can(access, "evidence.view")
+        ? record.attachments.map(({ evidenceFile }) => ({
+            ...evidenceFile,
+            createdAt: evidenceFile.createdAt.toISOString(),
+            downloadPath: `/evidences/${evidenceFile.id}/download`,
+            sizeBytes: Number(evidenceFile.sizeBytes),
+        }))
+        : [],
     createdAt: record.createdAt.toISOString(),
     classification: record.classification,
     finalApprovedAt: record.finalApprovedAt?.toISOString() ?? null,
@@ -121,11 +139,11 @@ const format = (record, reviewTask = null) => ({
     managerComment: record.managerComment,
     managerReviewedAt: record.managerReviewedAt?.toISOString() ?? null,
     managerReviewer: record.managerReviewer,
-    effectiveDueDate: (record.status === "MANAGER_APPROVED"
-        ? record.proposedDueDate
-        : (record.actionPlan?.currentDueDate ??
-            record.observation?.currentDueDate ??
-            record.previousDueDate)).toISOString(),
+    effectiveDueDate: getEffectiveExtensionDueDate({
+        actionPlanDueDate: record.actionPlan?.currentDueDate ?? null,
+        observationDueDate: record.observation?.currentDueDate ?? null,
+        previousDueDate: record.previousDueDate,
+    }).toISOString(),
     observation: (record.observation ?? record.actionPlan?.observation)
         ? {
             displayCode: `${(record.observation ?? record.actionPlan.observation).auditReport.reportNumber} / OBS-${String((record.observation ?? record.actionPlan.observation).observationNumber).padStart(3, "0")}`,
@@ -148,7 +166,11 @@ const legacyReviewTask = (record, access) => {
     if (record.status !== "SENT_TO_MANAGER" || record.workflowInstanceId)
         return null;
     const isAreaResponsible = record.observationArea?.areaResponsible.id === access.userId ||
-        record.actionPlan?.observationArea?.areaResponsible.id === access.userId;
+        record.actionPlan?.observationArea?.areaResponsible.id === access.userId ||
+        (record.observation?.areaAssignments.some((assignment) => assignment.areaResponsibleUserId === access.userId) ??
+            false) ||
+        (record.actionPlan?.observation.areaAssignments.some((assignment) => assignment.areaResponsibleUserId === access.userId) ??
+            false);
     const canAct = access.isAdmin || isAreaResponsible;
     const allowedActions = [
         ...(canAct &&
@@ -166,25 +188,126 @@ const legacyReviewTask = (record, access) => {
         status: record.status,
     };
 };
+const restrictReviewTaskToAssignedRole = (record, access, reviewTask) => {
+    if (!reviewTask ||
+        reviewTask.id ||
+        !["AREA_RESPONSIBLE", "PROCESS_OWNER", "EXECUTOR"].includes(access.roleCode ?? ""))
+        return reviewTask;
+    const isAssignedAsAreaResponsible = Boolean(record.actionPlan?.observationArea.areaResponsibleUserId ===
+        access.userId ||
+        record.observationArea?.areaResponsibleUserId === access.userId ||
+        record.observation?.areaAssignments.some((assignment) => assignment.areaResponsibleUserId === access.userId) ||
+        record.actionPlan?.observation.areaAssignments.some((assignment) => assignment.areaResponsibleUserId === access.userId));
+    const canAct = access.roleCode === "AREA_RESPONSIBLE" &&
+        isAssignedAsAreaResponsible &&
+        reviewTask.canAct;
+    return {
+        ...reviewTask,
+        allowedActions: canAct ? reviewTask.allowedActions : [],
+        canAct,
+    };
+};
 const formatWithReviewTask = async (record, access) => {
     const workflowTask = record.workflowInstanceId
         ? await findActiveWorkflowTaskForEntity({
             entityId: record.id,
             entityType: "deadline_extension_request",
+            permissions: extensionWorkflowPermissions(access),
             processType: "DEADLINE_EXTENSION",
             userId: access.userId,
         })
         : null;
-    return format(record, workflowTask ?? legacyReviewTask(record, access));
+    return format(record, access, restrictReviewTaskToAssignedRole(record, access, workflowTask ?? legacyReviewTask(record, access)));
 };
-const accessWhere = (access) => buildExtensionRequestScopeWhere(access);
+const accessWhere = (access) => authorizationService.can(access, "deadline_extensions.view") ||
+    !authorizationService.can(access, "deadline_extensions.request")
+    ? buildExtensionRequestScopeWhere(access)
+    : {
+        AND: [
+            buildExtensionRequestScopeWhere(access),
+            { requestedByUserId: access.userId },
+        ],
+    };
+const extensionWorkflowPermissions = (access) => [
+    ...access.permissions,
+    ...(authorizationService.can(access, "deadline_extensions.approve")
+        ? ["workflow_tasks.approve"]
+        : []),
+    ...(authorizationService.can(access, "deadline_extensions.reject")
+        ? ["workflow_tasks.reject"]
+        : []),
+];
+const legacyReviewableWhere = (access) => access.isAdmin
+    ? { workflowInstanceId: null }
+    : {
+        OR: [
+            { observationArea: { areaResponsibleUserId: access.userId } },
+            {
+                actionPlan: {
+                    observationArea: { areaResponsibleUserId: access.userId },
+                },
+            },
+            {
+                observation: {
+                    areaAssignments: {
+                        some: { areaResponsibleUserId: access.userId },
+                    },
+                },
+            },
+        ],
+        workflowInstanceId: null,
+    };
+export const buildExtensionReviewQueueScopeWhere = (access, assignedRequestIds) => ({
+    OR: [
+        accessWhere(access),
+        legacyReviewableWhere(access),
+        ...(assignedRequestIds.length
+            ? [{ id: { in: [...assignedRequestIds] } }]
+            : []),
+    ],
+});
 const find = async (id, access) => {
     const record = await prisma.deadlineExtensionRequest.findFirst({
         include,
         where: { deletedAt: null, id, ...accessWhere(access) },
     });
     if (!record)
-        throw new AppError("Deadline extension request not found.", 404);
+        throw new AppError("No se encontró la solicitud de ampliación de plazo.", 404);
+    return record;
+};
+const findReviewable = async (id, access) => {
+    const task = await findActiveWorkflowTaskForEntity({
+        entityId: id,
+        entityType: "deadline_extension_request",
+        permissions: extensionWorkflowPermissions(access),
+        processType: "DEADLINE_EXTENSION",
+        userId: access.userId,
+    });
+    const record = task
+        ? await prisma.deadlineExtensionRequest.findFirst({
+            include,
+            where: { deletedAt: null, id },
+        })
+        : await prisma.deadlineExtensionRequest.findFirst({
+            include,
+            where: {
+                AND: [
+                    { deletedAt: null, id },
+                    { OR: [accessWhere(access), legacyReviewableWhere(access)] },
+                ],
+            },
+        });
+    if (!record)
+        throw new AppError("No se encontró la solicitud de ampliación de plazo.", 404);
+    return record;
+};
+const findById = async (id) => {
+    const record = await prisma.deadlineExtensionRequest.findFirst({
+        include,
+        where: { deletedAt: null, id },
+    });
+    if (!record)
+        throw new AppError("No se encontró la solicitud de ampliación de plazo.", 404);
     return record;
 };
 const attachEvidence = async (tx, requestId, observationId, evidenceIds, access) => {
@@ -198,7 +321,7 @@ const attachEvidence = async (tx, requestId, observationId, evidenceIds, access)
         },
     });
     if (count !== new Set(evidenceIds).size)
-        throw new AppError("One or more evidence files are invalid.", 400);
+        throw new AppError("Uno o más archivos de evidencia no son válidos.", 400);
     await tx.deadlineExtensionAttachment.createMany({
         data: Array.from(new Set(evidenceIds)).map((evidenceFileId) => ({
             evidenceFileId,
@@ -208,8 +331,27 @@ const attachEvidence = async (tx, requestId, observationId, evidenceIds, access)
 };
 export const extensionRequestsService = {
     async listClassifications(access) {
-        if (!authorizationService.can(access, "deadline_extensions.request"))
-            throw new AppError("No tiene permiso para solicitar ampliaciones.", 403);
+        if (!access.isAdmin) {
+            const assignedActionPlan = await prisma.actionPlan.findFirst({
+                select: {
+                    observationArea: {
+                        select: { areaResponsibleUserId: true, processOwnerUserId: true },
+                    },
+                    responsibleUserId: true,
+                },
+                where: {
+                    ...buildActionPlanScopeWhere(access),
+                    responsibleUserId: access.userId,
+                },
+            });
+            if (!assignedActionPlan ||
+                !(await authorizationService.canForAssignments(access, "deadline_extensions.request", {
+                    areaResponsibleUserId: assignedActionPlan.observationArea.areaResponsibleUserId,
+                    executorUserId: assignedActionPlan.responsibleUserId,
+                    processOwnerUserId: assignedActionPlan.observationArea.processOwnerUserId,
+                })))
+                throw new AppError("No tiene permiso para solicitar ampliaciones.", 403);
+        }
         return prisma.deadlineExtensionClassification.findMany({
             orderBy: { name: "asc" },
             select: {
@@ -228,6 +370,9 @@ export const extensionRequestsService = {
                 id: true,
                 observationAreaId: true,
                 observationId: true,
+                observationArea: {
+                    select: { areaResponsibleUserId: true, processOwnerUserId: true },
+                },
                 responsibleUserId: true,
             },
             where: {
@@ -235,12 +380,14 @@ export const extensionRequestsService = {
                 id: actionPlanId,
             },
         });
-        if (!authorizationService.can(access, "deadline_extensions.request"))
-            throw new AppError("No tiene permiso para solicitar ampliaciones.", 403);
         if (!actionPlan)
-            throw new AppError("Action plan not found.", 404);
-        if (!access.isAdmin && actionPlan.responsibleUserId !== access.userId)
-            throw new AppError("Solo el ejecutor asignado puede solicitar la ampliación.", 403);
+            throw new AppError("No se encontró el plan de acción.", 404);
+        if (!(await authorizationService.canForAssignments(access, "deadline_extensions.request", {
+            areaResponsibleUserId: actionPlan.observationArea.areaResponsibleUserId,
+            executorUserId: actionPlan.responsibleUserId,
+            processOwnerUserId: actionPlan.observationArea.processOwnerUserId,
+        })))
+            throw new AppError("Solo puede solicitar ampliaciones de sus planes asignados.", 403);
         const classification = await prisma.deadlineExtensionClassification.findFirst({
             select: { id: true, maxAdditionalDays: true },
             where: { active: true, code: input.classificationCode },
@@ -249,7 +396,7 @@ export const extensionRequestsService = {
             throw new AppError("La clasificación de ampliación no está configurada.", 400);
         const maxAllowedDate = addDays(actionPlan.currentDueDate, classification.maxAdditionalDays);
         if (input.proposedDueDate <= actionPlan.currentDueDate)
-            throw new AppError("The proposed date must be after the current due date.", 400);
+            throw new AppError("La fecha propuesta debe ser posterior a la fecha de compromiso vigente.", 400);
         if (input.proposedDueDate > maxAllowedDate)
             throw new AppError("La nueva fecha supera el máximo permitido para la clasificación seleccionada.", 400);
         const existing = await prisma.deadlineExtensionRequest.findFirst({
@@ -277,66 +424,57 @@ export const extensionRequestsService = {
             await attachEvidence(tx, request.id, actionPlan.observationId, input.evidenceFileIds, access);
             return request;
         });
-        return format(await find(created.id, access));
+        return format(await find(created.id, access), access);
     },
     async getById(id, access) {
-        return formatWithReviewTask(await find(id, access), access);
+        return formatWithReviewTask(await findReviewable(id, access), access);
     },
     async list(query, access) {
+        if (!authorizationService.can(access, "deadline_extensions.view") &&
+            !authorizationService.can(access, "deadline_extensions.request") &&
+            !authorizationService.can(access, "deadline_extensions.approve") &&
+            !authorizationService.can(access, "deadline_extensions.reject") &&
+            !query.reviewQueue)
+            throw new AppError("Solo puede consultar la bandeja de ampliaciones pendientes.", 403);
         const reviewTasks = query.reviewQueue
             ? await findActiveWorkflowTasksForEntities({
                 entityType: "deadline_extension_request",
+                permissions: extensionWorkflowPermissions(access),
                 processType: "DEADLINE_EXTENSION",
                 userId: access.userId,
             })
             : new Map();
-        const legacyReviewable = access.isAdmin
-            ? { workflowInstanceId: null }
-            : {
-                OR: [
-                    {
-                        observationArea: {
-                            areaResponsibleUserId: access.userId,
-                        },
-                    },
-                    {
-                        actionPlan: {
-                            observationArea: {
-                                areaResponsibleUserId: access.userId,
-                            },
-                        },
-                    },
-                    {
-                        observation: {
-                            areaAssignments: {
-                                some: { areaResponsibleUserId: access.userId },
-                            },
-                        },
-                    },
-                ],
-                workflowInstanceId: null,
-            };
         const filters = [
             { deletedAt: null },
-            accessWhere(access),
+            query.reviewQueue
+                ? buildExtensionReviewQueueScopeWhere(access, [...reviewTasks.keys()])
+                : accessWhere(access),
             ...(query.actionPlanId ? [{ actionPlanId: query.actionPlanId }] : []),
-            ...(query.areaId
+            ...(query.areaId?.length
                 ? [
                     {
                         OR: [
-                            { observationArea: { areaId: query.areaId } },
-                            { actionPlan: { observationArea: { areaId: query.areaId } } },
-                            {
-                                observation: {
-                                    areaAssignments: { some: { areaId: query.areaId } },
-                                },
-                            },
+                            ...query.areaId.map((areaId) => ({
+                                observationArea: { areaId },
+                            })),
+                            ...query.areaId.map((areaId) => ({
+                                actionPlan: { observationArea: { areaId } },
+                            })),
+                            ...query.areaId.map((areaId) => ({
+                                observation: { areaAssignments: { some: { areaId } } },
+                            })),
                         ],
                     },
                 ]
                 : []),
-            ...(query.executorUserId
-                ? [{ actionPlan: { responsibleUserId: query.executorUserId } }]
+            ...(query.executorUserId?.length
+                ? [
+                    {
+                        actionPlan: {
+                            responsibleUserId: { in: query.executorUserId },
+                        },
+                    },
+                ]
                 : []),
             ...(query.observationId
                 ? [
@@ -351,34 +489,32 @@ export const extensionRequestsService = {
             ...(query.requestedByUserId
                 ? [{ requestedByUserId: query.requestedByUserId }]
                 : []),
-            ...(query.responsibleUserId
+            ...(query.responsibleUserId?.length
                 ? [
                     {
                         OR: [
-                            {
-                                observationArea: {
-                                    areaResponsibleUserId: query.responsibleUserId,
-                                },
-                            },
-                            {
+                            ...query.responsibleUserId.map((responsibleUserId) => ({
+                                observationArea: { areaResponsibleUserId: responsibleUserId },
+                            })),
+                            ...query.responsibleUserId.map((responsibleUserId) => ({
                                 actionPlan: {
                                     observationArea: {
-                                        areaResponsibleUserId: query.responsibleUserId,
+                                        areaResponsibleUserId: responsibleUserId,
                                     },
                                 },
-                            },
-                            {
+                            })),
+                            ...query.responsibleUserId.map((responsibleUserId) => ({
                                 observation: {
                                     areaAssignments: {
-                                        some: { areaResponsibleUserId: query.responsibleUserId },
+                                        some: { areaResponsibleUserId: responsibleUserId },
                                     },
                                 },
-                            },
+                            })),
                         ],
                     },
                 ]
                 : []),
-            ...(query.status ? [{ status: query.status }] : []),
+            ...(query.status?.length ? [{ status: { in: query.status } }] : []),
             ...(query.targetType ? [{ targetType: query.targetType }] : []),
             ...(query.search
                 ? [
@@ -399,13 +535,12 @@ export const extensionRequestsService = {
                         ? [{ id: { in: [...reviewTasks.keys()] } }]
                         : []),
                     {
-                        ...legacyReviewable,
+                        ...legacyReviewableWhere(access),
                         status: "SENT_TO_MANAGER",
                     },
                 ],
             });
-            if (!query.status)
-                filters.push({ status: "SENT_TO_MANAGER" });
+            filters.push({ status: "SENT_TO_MANAGER" });
         }
         const where = {
             AND: filters,
@@ -421,8 +556,8 @@ export const extensionRequestsService = {
             prisma.deadlineExtensionRequest.count({ where }),
         ]);
         return {
-            data: records.map((record) => format(record, query.reviewQueue
-                ? (reviewTasks.get(record.id) ?? legacyReviewTask(record, access))
+            data: records.map((record) => format(record, access, query.reviewQueue
+                ? restrictReviewTaskToAssignedRole(record, access, reviewTasks.get(record.id) ?? legacyReviewTask(record, access))
                 : null)),
             pagination: {
                 page: query.page,
@@ -433,13 +568,17 @@ export const extensionRequestsService = {
         };
     },
     async update(id, input, access) {
-        if (!authorizationService.can(access, "deadline_extensions.request"))
-            throw new AppError("No tiene permiso para gestionar ampliaciones.", 403);
         const previous = await find(id, access);
+        if (!(await canManageRequest(access, previous)))
+            throw new AppError("No tiene permiso para gestionar ampliaciones.", 403);
+        if (!access.isAdmin &&
+            previous.actionPlan &&
+            previous.actionPlan.responsibleUser.id !== access.userId)
+            throw new AppError("Solo puede solicitar ampliaciones de sus planes asignados.", 403);
         if (!EDITABLE_EXTENSION_REQUEST_STATUSES.has(previous.status))
-            throw new AppError("This request is not editable.", 409);
+            throw new AppError("Esta solicitud ya no se puede editar.", 409);
         if (!access.isAdmin && previous.requestedByUserId !== access.userId)
-            throw new AppError("You cannot edit this request.", 403);
+            throw new AppError("No tiene permiso para editar esta solicitud.", 403);
         const classification = input.classificationCode
             ? await prisma.deadlineExtensionClassification.findFirst({
                 select: { id: true, maxAdditionalDays: true },
@@ -472,10 +611,7 @@ export const extensionRequestsService = {
                 },
                 where: { id },
             });
-            if (input.evidenceFileIds) {
-                await tx.deadlineExtensionAttachment.deleteMany({
-                    where: { extensionRequestId: id },
-                });
+            if (input.evidenceFileIds?.length) {
                 const observationId = previous.observation?.id;
                 const actionPlanObservationId = previous.actionPlanId
                     ? (await tx.actionPlan.findUnique({
@@ -485,39 +621,47 @@ export const extensionRequestsService = {
                     : null;
                 const targetObservationId = observationId ?? actionPlanObservationId;
                 if (!targetObservationId)
-                    throw new AppError("Extension target is invalid.", 409);
-                await attachEvidence(tx, id, targetObservationId, input.evidenceFileIds, access);
+                    throw new AppError("El destino de la ampliación no es válido.", 409);
+                // Keep prior files attached when a requester adds correction evidence.
+                const evidenceIds = [...new Set(input.evidenceFileIds)];
+                const attached = await tx.deadlineExtensionAttachment.findMany({
+                    select: { evidenceFileId: true },
+                    where: {
+                        evidenceFileId: { in: evidenceIds },
+                        extensionRequestId: id,
+                    },
+                });
+                const alreadyAttached = new Set(attached.map((attachment) => attachment.evidenceFileId));
+                await attachEvidence(tx, id, targetObservationId, evidenceIds.filter((evidenceId) => !alreadyAttached.has(evidenceId)), access);
             }
         });
         return {
-            current: format(await find(id, access)),
-            previous: format(previous),
+            current: format(await find(id, access), access),
+            previous: format(previous, access),
         };
     },
     async submit(id, access) {
-        if (!authorizationService.can(access, "deadline_extensions.request"))
-            throw new AppError("No tiene permiso para enviar ampliaciones.", 403);
         const previous = await find(id, access);
-        if (previous.status === "SENT_TO_MANAGER" && previous.workflowInstanceId)
-            return {
-                current: format(previous),
-                previous: format(previous),
-            };
-        if (!EDITABLE_EXTENSION_REQUEST_STATUSES.has(previous.status))
-            throw new AppError("This request cannot be submitted.", 409);
+        if (!(await canManageRequest(access, previous)))
+            throw new AppError("No tiene permiso para enviar ampliaciones.", 403);
+        if (!access.isAdmin &&
+            previous.actionPlan &&
+            previous.actionPlan.responsibleUser.id !== access.userId)
+            throw new AppError("Solo puede solicitar ampliaciones de sus planes asignados.", 403);
+        if (!EDITABLE_EXTENSION_REQUEST_STATUSES.has(previous.status) &&
+            !(previous.status === "SENT_TO_MANAGER" && previous.workflowInstanceId))
+            throw new AppError("Esta solicitud no se puede enviar.", 409);
         if (!access.isAdmin && previous.requestedByUserId !== access.userId)
             throw new AppError("Solo el solicitante puede enviar la ampliación.", 403);
-        if (previous.status === "MANAGER_REJECTED" && previous.workflowInstanceId) {
+        let replaceInstanceId;
+        if (previous.workflowInstanceId) {
             const priorInstance = await prisma.workflowInstance.findUnique({
                 select: { status: true },
                 where: { id: previous.workflowInstanceId },
             });
             if (priorInstance &&
                 ["CANCELLED", "COMPLETED", "REJECTED"].includes(priorInstance.status)) {
-                await prisma.deadlineExtensionRequest.updateMany({
-                    data: { workflowInstanceId: null },
-                    where: { id, workflowInstanceId: previous.workflowInstanceId },
-                });
+                replaceInstanceId = previous.workflowInstanceId;
             }
         }
         const workflow = await workflowIntegrationService.startForEntity({
@@ -526,6 +670,7 @@ export const extensionRequestsService = {
             entityId: id,
             entityType: "deadline_extension_request",
             processType: "DEADLINE_EXTENSION",
+            replaceInstanceId,
         });
         const updated = await prisma.deadlineExtensionRequest.updateMany({
             data: { status: "SENT_TO_MANAGER" },
@@ -538,43 +683,56 @@ export const extensionRequestsService = {
             throw new AppError("La solicitud ya fue enviada a revisión.", 409);
         }
         return {
-            current: format(await find(id, access)),
-            previous: format(previous),
+            current: format(await find(id, access), access),
+            previous: format(previous, access),
         };
     },
     async managerReview(id, approved, input, access) {
-        if (!authorizationService.can(access, approved ? "deadline_extensions.approve" : "deadline_extensions.reject"))
+        const previous = await findReviewable(id, access);
+        const workflowInstanceId = previous.workflowInstanceId;
+        const usedWorkflow = Boolean(workflowInstanceId);
+        if (!usedWorkflow &&
+            !(await authorizationService.canForAssignments(access, approved ? "deadline_extensions.approve" : "deadline_extensions.reject", assignmentContext(previous))))
             throw new AppError("No tiene permiso para revisar esta ampliación.", 403);
-        const previous = await find(id, access);
         const alreadyReviewedStatus = approved
             ? "MANAGER_APPROVED"
             : "MANAGER_REJECTED";
         if (previous.status === alreadyReviewedStatus)
             return {
-                current: format(previous),
-                previous: format(previous),
+                current: format(previous, access),
+                previous: format(previous, access),
             };
         if (previous.status !== "SENT_TO_MANAGER")
-            throw new AppError("This request is not pending management review.", 409);
+            throw new AppError("Esta solicitud no está pendiente de revisión por Gerencia.", 409);
         if (!approved && !input.comment)
             throw new AppError("Debe ingresar un comentario para rechazar la ampliación.", 400);
-        const workflowInstanceId = previous.workflowInstanceId;
-        const usedWorkflow = Boolean(workflowInstanceId);
         if (!workflowInstanceId &&
             !access.isAdmin &&
-            previous.observationArea?.areaResponsible.id !== access.userId &&
-            previous.actionPlan?.observationArea?.areaResponsible.id !== access.userId)
+            !(await prisma.deadlineExtensionRequest.findFirst({
+                select: { id: true },
+                where: {
+                    AND: [{ deletedAt: null, id }, legacyReviewableWhere(access)],
+                },
+            })))
             throw new AppError("Solo el responsable del área puede decidir esta ampliación.", 403);
         if (workflowInstanceId) {
             const task = await findActiveWorkflowTaskForEntity({
                 entityId: id,
                 entityType: "deadline_extension_request",
+                permissions: extensionWorkflowPermissions(access),
                 processType: "DEADLINE_EXTENSION",
                 userId: access.userId,
             });
             if (!task)
                 throw new AppError("No está autorizado para decidir la tarea pendiente de esta ampliación.", 403);
-            await workflowTaskService.actOnTask(task.id, approved ? "APPROVE" : "REJECT", { comment: input.comment ?? undefined }, { ...access, ipAddress: null });
+            await workflowTaskService.actOnTask(task.id, approved ? "APPROVE" : "REJECT", { comment: input.comment ?? undefined }, {
+                ...access,
+                ipAddress: null,
+                permissions: [
+                    ...access.permissions,
+                    approved ? "workflow_tasks.approve" : "workflow_tasks.reject",
+                ],
+            });
         }
         else {
             await prisma.$transaction(async (tx) => {
@@ -602,22 +760,39 @@ export const extensionRequestsService = {
                     });
             });
         }
-        if (!usedWorkflow && previous.requestedByUserId !== access.userId)
-            await notificationService.create({
+        if (!usedWorkflow && previous.requestedByUserId !== access.userId) {
+            const observation = previous.observation ?? previous.actionPlan?.observation;
+            const notification = buildDeadlineExtensionOutcomeNotification({
+                actionPlanTitle: previous.actionPlan?.title ?? null,
+                approved,
                 entityId: previous.id,
-                entityType: "DEADLINE_EXTENSION_REQUEST",
-                eventType: approved ? "EXTENSION_APPROVED" : "EXTENSION_REJECTED",
-                message: approved
-                    ? `La ampliación fue aprobada hasta el ${previous.proposedDueDate.toISOString().slice(0, 10)}.`
-                    : "La solicitud de ampliación fue rechazada.",
-                title: "Solicitud de ampliación revisada",
-                targetUrl: extensionTargetUrl(previous),
-                type: approved ? "success" : "warning",
-                userId: previous.requestedByUserId,
+                observationReference: observation
+                    ? `${observation.auditReport.reportNumber} / OBS-${String(observation.observationNumber).padStart(3, "0")}`
+                    : null,
             });
+            await Promise.all([
+                notificationService.create({
+                    entityId: previous.id,
+                    entityType: "DEADLINE_EXTENSION_REQUEST",
+                    eventType: notification.eventType,
+                    message: notification.message,
+                    title: notification.title,
+                    targetUrl: notification.targetUrl,
+                    type: notification.type,
+                    userId: previous.requestedByUserId,
+                }),
+                notificationService.sendEmailNotification({
+                    eventType: notification.eventType,
+                    message: notification.message,
+                    title: notification.title,
+                    targetUrl: notification.targetUrl,
+                    userId: previous.requestedByUserId,
+                }),
+            ]);
+        }
         return {
-            current: format(await find(id, access)),
-            previous: format(previous),
+            current: format(await findById(id), access),
+            previous: format(previous, access),
         };
     },
     async cancel(id, access) {
@@ -625,7 +800,7 @@ export const extensionRequestsService = {
             throw new AppError("No tiene permiso para cancelar ampliaciones.", 403);
         const previous = await find(id, access);
         if (!access.isAdmin && previous.requestedByUserId !== access.userId)
-            throw new AppError("You cannot cancel this request.", 403);
+            throw new AppError("No tiene permiso para cancelar esta solicitud.", 403);
         if (previous.workflowInstanceId) {
             const workflowInstance = await prisma.workflowInstance.findUnique({
                 select: { status: true },
@@ -641,8 +816,8 @@ export const extensionRequestsService = {
             where: { id },
         });
         return {
-            current: format(await find(id, access)),
-            previous: format(previous),
+            current: format(await find(id, access), access),
+            previous: format(previous, access),
         };
     },
 };

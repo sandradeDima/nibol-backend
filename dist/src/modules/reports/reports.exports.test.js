@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildExcelWorkbook, buildReportPdf } from "./reports.exports.js";
+import { inflateRawSync } from "node:zlib";
+import { buildExcelWorkbook, buildObservationDetailWorkbook, observationDetailHeaders, } from "./reports.exports.js";
 const charts = {
     areaDistribution: [{ key: "area-1", label: "Finanzas", value: 2 }],
     areaPerformance: [
@@ -70,15 +71,124 @@ const input = {
     ],
     summary,
 };
-test("genera un XLSX real y un PDF legible con el resumen del corte", () => {
+test("genera un XLSX real con el resumen del corte", () => {
     const workbook = buildExcelWorkbook(input);
     assert.equal(workbook.subarray(0, 2).toString("ascii"), "PK");
     assert.ok(workbook.length > 1_000);
-    const pdf = buildReportPdf(input);
-    assert.match(pdf.toString("latin1"), /^%PDF-1\.4/);
-    assert.match(pdf.toString("latin1"), /Reporte NIBOL/);
-    assert.match(pdf.toString("latin1"), /Fecha de corte/);
-    assert.match(pdf.toString("latin1"), /17\/09\/2026/);
-    assert.match(pdf.toString("latin1"), /Riesgo/);
+    const readEntry = (name) => {
+        let offset = 0;
+        while (workbook.readUInt32LE(offset) === 0x04034b50) {
+            const size = workbook.readUInt32LE(offset + 18);
+            const start = offset + 30 + workbook.readUInt16LE(offset + 26);
+            if (workbook.toString("utf8", offset + 30, start) === name)
+                return inflateRawSync(workbook.subarray(start, start + size)).toString();
+            offset = start + size;
+        }
+        throw new Error(`Missing ${name}`);
+    };
+    const dataSheet = readEntry("xl/worksheets/sheet1.xml");
+    const summarySheet = readEntry("xl/worksheets/sheet2.xml");
+    assert.match(readEntry("xl/workbook.xml"), /name="DATA"/);
+    assert.match(dataSheet, /showGridLines="0"/);
+    assert.match(dataSheet, /autoFilter ref="A2:C3"/);
+    assert.match(dataSheet, /ySplit="2"/);
+    assert.match(dataSheet, /Observación/);
+    assert.match(dataSheet, /Estado y evaluación/);
+    assert.match(summarySheet, /Estado del plan de acción/);
+    assert.match(summarySheet, /No iniciado/);
+    assert.match(summarySheet, /Finanzas/);
+    assert.doesNotMatch(summarySheet, /<drawing/);
+    assert.equal(workbook.includes(Buffer.from("xl/drawings/")), false);
+    const styles = readEntry("xl/styles.xml");
+    for (const color of ["FF2F5597", "FFC00000", "FF7030A0", "FF44546A"])
+        assert.ok(styles.includes(color), color);
+});
+test("el Excel de auditoría conserva sus columnas y solo muestra métricas propias", () => {
+    const workbook = buildExcelWorkbook({
+        columns: [
+            "Fecha",
+            "Observación",
+            "Área",
+            "Responsable",
+            "Acción",
+            "Resultado",
+        ],
+        filters: { Área: "Importaciones" },
+        generatedAt: "2026-10-12T12:00:00.000Z",
+        reportName: "Historial de observación",
+        rows: [
+            {
+                Fecha: "2026-10-12T00:00:00.000Z",
+                Observación: "OBS-001",
+                Área: "Importaciones",
+                Responsable: "Auditoría",
+                Acción: "Aprobación",
+                Resultado: "Aprobado",
+            },
+        ],
+    });
+    const read = (name) => {
+        let offset = 0;
+        while (workbook.readUInt32LE(offset) === 0x04034b50) {
+            const size = workbook.readUInt32LE(offset + 18);
+            const start = offset + 30 + workbook.readUInt16LE(offset + 26);
+            if (workbook.toString("utf8", offset + 30, start) === name)
+                return inflateRawSync(workbook.subarray(start, start + size)).toString();
+            offset = start + size;
+        }
+        throw new Error(`Missing ${name}`);
+    };
+    const data = read("xl/worksheets/sheet1.xml");
+    assert.match(data, /Fechas y plazos/);
+    assert.match(data, /Responsables y área/);
+    assert.match(data, /mergeCell ref="C1:D1"/);
+    assert.match(data, /Aprobación/);
+    assert.match(data, /autoFilter ref="A2:F3"/);
+    const summary = read("xl/worksheets/sheet2.xml");
+    assert.match(summary, /Registros del reporte/);
+    assert.doesNotMatch(summary, /Total observaciones/);
+});
+test("el detalle conserva los 24 encabezados agrupados y registra los filtros", () => {
+    const values = Array(24).fill("");
+    values[0] = "AI-01-2022";
+    values[2] = "2026-10-12T00:00:00.000Z";
+    values[14] = "Acción filtrada";
+    const workbook = buildObservationDetailWorkbook({
+        filters: { Área: "Importaciones" },
+        generatedAt: "2026-10-12T12:00:00.000Z",
+        reportName: "Observaciones",
+        rows: [values],
+    });
+    const read = (name) => {
+        let offset = 0;
+        while (workbook.readUInt32LE(offset) === 0x04034b50) {
+            const size = workbook.readUInt32LE(offset + 18);
+            const start = offset + 30 + workbook.readUInt16LE(offset + 26);
+            if (workbook.toString("utf8", offset + 30, start) === name)
+                return inflateRawSync(workbook.subarray(start, start + size)).toString();
+            offset = start + size;
+        }
+        throw new Error(`Missing ${name}`);
+    };
+    const data = read("xl/worksheets/sheet1.xml");
+    assert.match(read("xl/workbook.xml"), /name="DATA"/);
+    assert.match(data, /mergeCell ref="D1:N1"/);
+    assert.match(data, /autoFilter ref="A2:X3"/);
+    assert.match(data, /ySplit="2"/);
+    assert.match(data, /zoomScale="70"/);
+    assert.match(data, /<col min="6" max="6" width="63\.6640625"/);
+    assert.match(data, /<c r="A1" s="1"/);
+    assert.match(data, /<c r="D1" s="2"/);
+    assert.match(data, /<c r="O1" s="3"/);
+    assert.match(data, /<c r="V1" s="5"/);
+    assert.match(data, /<c r="C3" s="4"><v>/);
+    assert.match(data, /<c r="O3" s="6"/);
+    const styles = read("xl/styles.xml");
+    for (const color of ["FF2F5597", "FFC00000", "FF7030A0", "FF44546A"])
+        assert.ok(styles.includes(color), color);
+    for (const header of observationDetailHeaders)
+        assert.ok(data.includes(header.replaceAll("&", "&amp;")), header);
+    assert.match(data, /Acción filtrada/);
+    assert.match(read("xl/worksheets/sheet2.xml"), /Importaciones/);
 });
 //# sourceMappingURL=reports.exports.test.js.map

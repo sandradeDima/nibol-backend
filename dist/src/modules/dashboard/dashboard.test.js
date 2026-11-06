@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildRoleDashboardHierarchy, getRoleDashboardStatus, } from "./dashboard.service.js";
+import { buildRoleDashboardQuickActions, buildRoleDashboardHierarchy, getRoleDashboardStatus, } from "./dashboard.service.js";
 import { buildObservationUrl } from "../../utils/observation-links.js";
 test("dashboard deep links preserve the observation context", () => {
     assert.equal(buildObservationUrl("observation-1", {
@@ -23,6 +23,14 @@ test("role dashboard status reflects mixed observation states", () => {
         name: "Mixto",
     });
 });
+test("executor quick actions stay focused on plan deadlines", () => {
+    const actions = buildRoleDashboardQuickActions({ roleCode: "EXECUTOR", userId: "executor-1" }, { search: "" }, 7);
+    assert.deepEqual(actions.map((action) => action.label), [
+        "Planes de acción vencidos",
+        "Planes próximos a vencer",
+        "Solicitar ampliación",
+    ]);
+});
 test("role dashboard keeps responsible and executor hierarchy role-specific", () => {
     const record = {
         areaAssignments: [
@@ -40,8 +48,35 @@ test("role dashboard keeps responsible and executor hierarchy role-specific", ()
     const processOwnerArea = buildRoleDashboardHierarchy([record], "PROCESS_OWNER")[0];
     assert.equal(processOwnerArea.responsibles?.[0]?.id, "responsible-1");
     assert.equal(processOwnerArea.responsibles?.[0]?.executors[0]?.id, "executor-1");
+    for (const role of ["AUDITOR", "AUDIT_CHIEF"]) {
+        const auditArea = buildRoleDashboardHierarchy([record], role)[0];
+        assert.equal(auditArea.responsibles?.[0]?.id, "responsible-1");
+        assert.equal(auditArea.responsibles?.[0]?.executors[0]?.id, "executor-1");
+    }
     const areaResponsibleArea = buildRoleDashboardHierarchy([record], "AREA_RESPONSIBLE")[0];
     assert.equal(areaResponsibleArea.responsibles, undefined);
     assert.equal(areaResponsibleArea.executors?.[0]?.id, "executor-1");
+});
+test("pending hierarchy excludes concluded observations at every level", () => {
+    const records = Array.from({ length: 72 }, (_, index) => ({
+        areaAssignments: [
+            {
+                actionPlans: [
+                    { responsibleUser: { id: "executor-1", name: "Ejecutor 1" } },
+                ],
+                area: { id: "area-1", name: "Área 1" },
+                areaResponsible: { id: "responsible-1", name: "Responsable 1" },
+            },
+        ],
+        id: `observation-${index}`,
+        status: { isFinal: index >= 52 },
+    }));
+    const [area] = buildRoleDashboardHierarchy(records.slice(0, 52), "PROCESS_OWNER");
+    assert.equal(area?.total, 52);
+    assert.equal(area?.status.key, "PENDING");
+    assert.equal(area?.responsibles?.[0]?.total, 52);
+    assert.equal(area?.responsibles?.[0]?.status.key, "PENDING");
+    assert.equal(area?.responsibles?.[0]?.executors[0]?.total, 52);
+    assert.equal(area?.responsibles?.[0]?.executors[0]?.status.key, "PENDING");
 });
 //# sourceMappingURL=dashboard.test.js.map

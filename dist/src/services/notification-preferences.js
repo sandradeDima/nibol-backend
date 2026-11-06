@@ -1,0 +1,398 @@
+import { prisma } from "../utils/prisma.js";
+export const NOTIFICATION_CATALOG = [
+    {
+        category: "Vencimientos",
+        channels: "NIBOL y correo, según los canales activos",
+        description: "Resumen programado de planes de acción vencidos o próximos a vencer.",
+        eventType: "DEADLINE_REMINDER_DIGEST",
+        exampleMessage: "Tienes 2 planes vencidos, 1 vence hoy y 3 próximos a vencer.",
+        exampleTitle: "Recordatorio de plazos",
+        key: "notification_enabled_deadline_reminder_digest",
+        name: "Resumen de plazos",
+    },
+    {
+        category: "Flujos de aprobación",
+        channels: "NIBOL y correo",
+        description: "Se crea cuando una tarea de workflow queda asignada a un usuario, rol o responsable de área.",
+        eventType: "workflow.task.assigned",
+        exampleMessage: "Tiene una tarea pendiente: Revisar solicitud.",
+        exampleTitle: "Nueva tarea de aprobación",
+        key: "notification_enabled_workflow_task_assigned",
+        name: "Tarea asignada",
+    },
+    {
+        category: "Flujos de aprobación",
+        channels: "NIBOL y correo",
+        description: "Aviso a los participantes cuando una tarea se aprueba.",
+        eventType: "workflow.task.approve",
+        exampleMessage: "La tarea “Revisión legal” fue aprobada para la solicitud “Ampliación de plazo”.",
+        exampleTitle: "Actualización de aprobación: Ampliación de plazo",
+        key: "notification_enabled_workflow_task_approve",
+        name: "Tarea aprobada",
+    },
+    {
+        category: "Flujos de aprobación",
+        channels: "NIBOL y correo",
+        description: "Aviso a los participantes cuando una tarea se completa.",
+        eventType: "workflow.task.complete",
+        exampleMessage: "La tarea “Validar evidencia” fue completada para la observación OBS-014.",
+        exampleTitle: "Actualización de aprobación: OBS-014",
+        key: "notification_enabled_workflow_task_complete",
+        name: "Tarea completada",
+    },
+    {
+        category: "Flujos de aprobación",
+        channels: "NIBOL y correo",
+        description: "Aviso a los participantes cuando una tarea se observa.",
+        eventType: "workflow.task.observe",
+        exampleMessage: "La tarea “Revisar avance” fue observada para el plan de acción.",
+        exampleTitle: "Actualización de aprobación: Plan de acción",
+        key: "notification_enabled_workflow_task_observe",
+        name: "Tarea observada",
+    },
+    {
+        category: "Flujos de aprobación",
+        channels: "NIBOL y correo",
+        description: "Aviso a los participantes cuando una tarea se rechaza.",
+        eventType: "workflow.task.reject",
+        exampleMessage: "La tarea “Aprobar solicitud” fue rechazada para la ampliación de plazo.",
+        exampleTitle: "Actualización de aprobación: Ampliación de plazo",
+        key: "notification_enabled_workflow_task_reject",
+        name: "Tarea rechazada",
+    },
+    {
+        category: "Flujos de aprobación",
+        channels: "NIBOL y correo",
+        description: "Aviso a los participantes cuando una tarea se devuelve para corrección.",
+        eventType: "workflow.task.request_correction",
+        exampleMessage: "La tarea “Revisar avance” fue devuelta para corrección para el plan de acción.",
+        exampleTitle: "Actualización de aprobación: Plan de acción",
+        key: "notification_enabled_workflow_task_request_correction",
+        name: "Tarea devuelta para corrección",
+    },
+    {
+        category: "Flujos de aprobación",
+        channels: "NIBOL y correo",
+        description: "Recordatorio cuando una tarea de workflow está próxima a vencer.",
+        eventType: "workflow.timer.reminder_processed",
+        exampleMessage: "La tarea “Revisar solicitud” está próxima a vencer y requiere atención.",
+        exampleTitle: "Recordatorio de tarea",
+        key: "notification_enabled_workflow_timer_reminder",
+        name: "Recordatorio de tarea próxima a vencer",
+    },
+    {
+        category: "Flujos de aprobación",
+        channels: "NIBOL y correo",
+        description: "Aviso cuando una tarea de workflow vence y continúa pendiente.",
+        eventType: "workflow.timer.due_processed",
+        exampleMessage: "La tarea “Revisar solicitud” venció y continúa pendiente.",
+        exampleTitle: "Tarea vencida",
+        key: "notification_enabled_workflow_timer_due",
+        name: "Tarea vencida",
+    },
+    {
+        category: "Flujos de aprobación",
+        channels: "NIBOL y correo",
+        description: "Aviso cuando una tarea se escala o reasigna por vencimiento de SLA.",
+        eventType: "workflow.timer.escalation_processed",
+        exampleMessage: "La tarea “Revisar solicitud” fue escalada y requiere atención.",
+        exampleTitle: "Escalamiento de tarea",
+        key: "notification_enabled_workflow_escalation",
+        name: "Tarea escalada",
+    },
+    {
+        category: "Flujos de aprobación",
+        channels: "Solo NIBOL",
+        description: "Aviso administrativo cuando no se pudo resolver el destinatario del escalamiento.",
+        eventType: "workflow.timer.escalation_failed",
+        exampleMessage: "No se pudo resolver el destinatario de escalamiento para la tarea Revisar solicitud.",
+        exampleTitle: "Escalamiento requiere configuración",
+        key: "notification_enabled_workflow_escalation_failed",
+        name: "Escalamiento sin destinatario",
+    },
+    {
+        category: "Flujos de aprobación",
+        channels: "NIBOL y correo",
+        description: "Aviso cuando una tarea se reasigna por vencimiento del SLA.",
+        eventType: "workflow.task.reassigned",
+        exampleMessage: "La tarea “Revisar solicitud” fue reasignada por vencimiento del SLA.",
+        exampleTitle: "Tarea reasignada",
+        key: "notification_enabled_workflow_task_reassigned",
+        name: "Tarea reasignada",
+    },
+    {
+        category: "Flujos de aprobación",
+        channels: "NIBOL y correo",
+        description: "Aviso de resultado final cuando el nodo de fin tiene activado “Notificar a participantes”; esta preferencia global permite pausarlo.",
+        eventType: "workflow.instance.completed",
+        exampleMessage: "El flujo de aprobación fue completado correctamente para la solicitud “Ampliación de plazo”.",
+        exampleTitle: "Aprobación completada: Ampliación de plazo",
+        key: "notification_enabled_workflow_instance_completed",
+        name: "Workflow finalizado",
+    },
+    {
+        category: "Flujos de aprobación",
+        channels: "Canal configurado en el nodo",
+        description: "Aviso definido por un nodo de notificación dentro del workflow.",
+        eventType: "workflow.node.notification",
+        exampleMessage: "Tiene una notificación de workflow: CONFIRMACION_APROBACION. Proceso: DEADLINE_EXTENSION.",
+        exampleTitle: "Confirmación de aprobación",
+        key: "notification_enabled_workflow_node_notification",
+        name: "Notificación de nodo de workflow",
+    },
+    {
+        category: "Planes de acción",
+        channels: "Solo NIBOL",
+        description: "Aviso al ejecutor cuando se crea un plan de acción junto con una observación nueva.",
+        eventType: "ACTION_PLAN_CREATED_WITH_OBSERVATION",
+        exampleMessage: "Se te asignó el plan de acción “Actualizar el procedimiento” de la observación “Control de inventario” (INF-2026 / OBS-014).",
+        exampleTitle: "Nuevo plan de acción asignado",
+        key: "notification_enabled_action_plan_created_with_observation",
+        name: "Plan creado con una observación nueva",
+    },
+    {
+        category: "Planes de acción",
+        channels: "Solo NIBOL",
+        description: "Aviso al ejecutor cuando se agrega un plan a una observación que ya existía.",
+        eventType: "ACTION_PLAN_CREATED_AFTER_OBSERVATION",
+        exampleMessage: "Se te asignó el plan de acción “Actualizar el procedimiento” de la observación “Control de inventario” (INF-2026 / OBS-014).",
+        exampleTitle: "Nuevo plan de acción asignado",
+        key: "notification_enabled_action_plan_created_after_observation",
+        name: "Plan agregado a una observación existente",
+    },
+    {
+        category: "Planes de acción",
+        channels: "Solo NIBOL",
+        description: "Aviso al ejecutor anterior y al nuevo cuando cambia el responsable del plan.",
+        eventType: "ACTION_PLAN_EXECUTOR_CHANGED",
+        exampleMessage: "El ejecutor del plan “Actualizar el procedimiento” cambió de Ana Pérez a Luis Rojas (INF-2026 / OBS-014).",
+        exampleTitle: "Ejecutor del plan actualizado",
+        key: "notification_enabled_action_plan_executor_changed",
+        name: "Ejecutor de plan de acción actualizado",
+    },
+    {
+        category: "Observaciones",
+        channels: "NIBOL y correo",
+        description: "Aviso cuando se asignan observaciones para gestión.",
+        eventType: "OBSERVATION_ASSIGNMENT",
+        exampleMessage: "Tiene 2 observaciones nuevas asignadas para gestión.",
+        exampleTitle: "Nuevas observaciones asignadas",
+        key: "notification_enabled_observation_assignment",
+        name: "Observaciones asignadas",
+    },
+    {
+        category: "Avances y evidencias",
+        channels: "Solo NIBOL",
+        description: "Aviso al auditor cuando se envía un avance para revisión.",
+        eventType: "PROGRESS_PENDING_REVIEW",
+        exampleMessage: "El plan de acción “Prueba 17” (AI-02-2027 / OBS-022) requiere su revisión y evaluación.",
+        exampleTitle: "Plan de acción pendiente de evaluación",
+        key: "notification_enabled_progress_pending_review",
+        name: "Avance pendiente de revisión",
+    },
+    {
+        category: "Avances y evidencias",
+        channels: "Solo NIBOL",
+        description: "Aviso al autor cuando se aprueba su evaluación de avance.",
+        eventType: "PROGRESS_APPROVED",
+        exampleMessage: "Auditoría aprobó la evaluación de avance del plan de acción “Prueba 17” (AI-02-2027 / OBS-022).",
+        exampleTitle: "Evaluación de avance aprobada",
+        key: "notification_enabled_progress_approved",
+        name: "Avance aprobado",
+    },
+    {
+        category: "Avances y evidencias",
+        channels: "Solo NIBOL",
+        description: "Aviso al autor cuando se devuelve su evaluación de avance.",
+        eventType: "PROGRESS_RETURNED",
+        exampleMessage: "Auditoría devolvió la evaluación de avance del plan de acción “Prueba 17” (AI-02-2027 / OBS-022). Revise los comentarios y vuelva a enviar las evidencias.",
+        exampleTitle: "Evaluación de avance devuelta",
+        key: "notification_enabled_progress_returned",
+        name: "Avance devuelto",
+    },
+    {
+        category: "Avances y evidencias",
+        channels: "Solo NIBOL",
+        description: "Aviso al ejecutor cuando se concluye un plan de acción.",
+        eventType: "ACTION_PLAN_COMPLETED",
+        exampleMessage: "Se concluyó exitosamente el plan de acción “Prueba 17” de la observación “Control de inventario” (AI-02-2027 / OBS-022).",
+        exampleTitle: "Plan de acción concluido",
+        key: "notification_enabled_action_plan_completed",
+        name: "Plan de acción concluido",
+    },
+    {
+        category: "Observaciones",
+        channels: "Solo NIBOL",
+        description: "Aviso cuando todos los planes de acción de una observación están concluidos.",
+        eventType: "OBSERVATION_CLOSED",
+        exampleMessage: "Se concluyó exitosamente la observación “Control de inventario” (AI-02-2027 / OBS-022).",
+        exampleTitle: "Observación concluida",
+        key: "notification_enabled_observation_closed",
+        name: "Observación concluida",
+    },
+    {
+        category: "Avances y evidencias",
+        channels: "NIBOL y correo",
+        description: "Aviso a los revisores cuando se envía una evidencia a revisión.",
+        eventType: "EVIDENCE_REVIEW_SUBMITTED",
+        exampleMessage: "Se ha registrado nueva evidencia para revisión correspondiente a Informe 2026 / OBS-014.\nTítulo: Seguimiento de recomendaciones\nÁreas involucradas: Finanzas, Operaciones\nEnviado por: María Pérez\nFecha de carga: 21 oct 2026, 10:30",
+        exampleTitle: "Evidencia pendiente de revisión",
+        key: "notification_enabled_evidence_review_submitted",
+        name: "Evidencia enviada a revisión",
+    },
+    {
+        category: "Avances y evidencias",
+        channels: "NIBOL y correo",
+        description: "Aviso al autor cuando se aprueba una evidencia.",
+        eventType: "EVIDENCE_APPROVED",
+        exampleMessage: "La evidencia “Informe de respaldo.pdf” fue aprobada por Auditoría.",
+        exampleTitle: "Evidencia aprobada",
+        key: "notification_enabled_evidence_approved",
+        name: "Evidencia aprobada",
+    },
+    {
+        category: "Avances y evidencias",
+        channels: "NIBOL y correo",
+        description: "Aviso al autor cuando se devuelve una evidencia.",
+        eventType: "EVIDENCE_RETURNED",
+        exampleMessage: "La evidencia “Informe de respaldo.pdf” fue devuelta por Auditoría: falta adjuntar el respaldo.",
+        exampleTitle: "Evidencia devuelta por Auditoría",
+        key: "notification_enabled_evidence_returned",
+        name: "Evidencia devuelta",
+    },
+    {
+        category: "Ampliaciones de plazo",
+        channels: "Solo NIBOL",
+        description: "Aviso al solicitante cuando se aprueba su ampliación de plazo.",
+        eventType: "EXTENSION_APPROVED",
+        exampleMessage: "La solicitud de ampliación de plazo del plan de acción “Prueba 17” (AI-02-2027 / OBS-022) fue aprobada.",
+        exampleTitle: "Ampliación de plazo aprobada",
+        key: "notification_enabled_extension_approved",
+        name: "Ampliación aprobada",
+    },
+    {
+        category: "Ampliaciones de plazo",
+        channels: "Solo NIBOL",
+        description: "Aviso al solicitante cuando se rechaza su ampliación de plazo.",
+        eventType: "EXTENSION_REJECTED",
+        exampleMessage: "La solicitud de ampliación de plazo del plan de acción “Prueba 17” (AI-02-2027 / OBS-022) fue rechazada.",
+        exampleTitle: "Ampliación de plazo rechazada",
+        key: "notification_enabled_extension_rejected",
+        name: "Ampliación rechazada",
+    },
+    {
+        category: "Cuenta y administración",
+        channels: "Solo NIBOL",
+        description: "Aviso al creador cuando se acepta una invitación.",
+        eventType: "INVITATION_ACCEPTED",
+        exampleMessage: "analista@nibol.bo aceptó una invitación para el rol Auditor.",
+        exampleTitle: "Invitación aceptada",
+        key: "notification_enabled_invitation_accepted",
+        name: "Invitación aceptada",
+    },
+    {
+        category: "Cuenta y administración",
+        channels: "Solo NIBOL",
+        description: "Aviso al usuario cuando cambian sus roles de acceso.",
+        eventType: "USER_ROLES_UPDATED",
+        exampleMessage: "Sus roles de acceso cambiaron de Ejecutor a Auditor.",
+        exampleTitle: "Roles actualizados",
+        key: "notification_enabled_user_roles_updated",
+        name: "Roles de acceso actualizados",
+    },
+    {
+        category: "Mensajes manuales",
+        channels: "Solo NIBOL",
+        description: "Mensajes enviados desde el centro de notificaciones o por integración sin un tipo de evento específico.",
+        eventType: null,
+        exampleMessage: "La reunión de seguimiento fue reprogramada para el jueves a las 10:00.",
+        exampleTitle: "Actualización de seguimiento",
+        key: "notification_enabled_manual",
+        name: "Notificaciones manuales o generales",
+    },
+    {
+        category: "Otros eventos",
+        channels: "Según el emisor",
+        description: "Eventos personalizados no incluidos en las categorías anteriores.",
+        eventType: "*",
+        exampleMessage: "Se registró una actualización relacionada con su solicitud.",
+        exampleTitle: "Actualización del sistema",
+        key: "notification_enabled_other_events",
+        name: "Otros eventos personalizados",
+    },
+];
+export const getNotificationChannelPreferenceKeys = (key) => {
+    const suffix = key.replace("notification_enabled_", "");
+    return {
+        email: `notification_channel_email_${suffix}`,
+        internal: `notification_channel_internal_${suffix}`,
+    };
+};
+export const NOTIFICATION_PREFERENCE_DEFAULTS = Object.fromEntries(NOTIFICATION_CATALOG.flatMap((item) => {
+    const channelKeys = getNotificationChannelPreferenceKeys(item.key);
+    return [
+        [item.key, true],
+        [
+            channelKeys.email,
+            item.channels.includes("correo") ||
+                item.channels.includes("Canal configurado"),
+        ],
+        [channelKeys.internal, true],
+    ];
+}));
+const getCatalogEntry = (eventType) => NOTIFICATION_CATALOG.find((item) => item.eventType === eventType) ??
+    NOTIFICATION_CATALOG.find((item) => item.eventType === (eventType ? "*" : null));
+export const isNotificationChannelEnabled = async (eventType, channel, db = prisma.systemParameter) => {
+    const item = getCatalogEntry(eventType);
+    const channelKey = getNotificationChannelPreferenceKeys(item.key)[channel];
+    const settings = await db.findMany({
+        select: { key: true, value: true },
+        where: {
+            active: true,
+            deletedAt: null,
+            key: { in: [channelKey, item.key] },
+        },
+    });
+    const values = new Map(settings.map(({ key, value }) => [key, value]));
+    const channelValue = values.get(channelKey);
+    if (channelValue !== undefined)
+        return channelValue.trim().toLowerCase() === "true";
+    if (values.get(item.key)?.trim().toLowerCase() === "false")
+        return false;
+    return (channel === "internal" ||
+        item.channels.includes("correo") ||
+        item.channels.includes("Canal configurado"));
+};
+export const getNotificationCatalog = async (db = prisma.systemParameter) => {
+    const channelKeys = NOTIFICATION_CATALOG.flatMap((item) => {
+        const keys = getNotificationChannelPreferenceKeys(item.key);
+        return [item.key, keys.internal, keys.email];
+    });
+    const settings = await db.findMany({
+        select: { key: true, value: true },
+        where: {
+            active: true,
+            deletedAt: null,
+            key: { in: channelKeys },
+        },
+    });
+    const byKey = new Map(settings.map(({ key, value }) => [key, value]));
+    return NOTIFICATION_CATALOG.map((entry) => {
+        const keys = getNotificationChannelPreferenceKeys(entry.key);
+        const legacyEnabled = byKey.get(entry.key)?.trim().toLowerCase() !== "false";
+        return {
+            ...entry,
+            channelKeys: keys,
+            channels: {
+                email: byKey.get(keys.email)?.trim().toLowerCase() === "true" ||
+                    (byKey.get(keys.email) === undefined &&
+                        legacyEnabled &&
+                        (entry.channels.includes("correo") ||
+                            entry.channels.includes("Canal configurado"))),
+                internal: byKey.get(keys.internal)?.trim().toLowerCase() === "true" ||
+                    (byKey.get(keys.internal) === undefined && legacyEnabled),
+            },
+        };
+    });
+};
+//# sourceMappingURL=notification-preferences.js.map

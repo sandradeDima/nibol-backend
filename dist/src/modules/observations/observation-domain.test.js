@@ -18,9 +18,12 @@ test("observation aggregation averages independent action plans", () => {
     assert.equal(observationAggregationService.calculateProgress(plans), 44);
     assert.equal(observationAggregationService.calculateStatus(plans), "CON_AVANCE");
 });
-test("all concluded plans require closure approval before global conclusion", () => {
+test("only all concluded plans produce global conclusion", () => {
     const plans = [{ progressPercent: 100, status: "CONCLUDED" }];
-    assert.equal(observationAggregationService.calculateStatus(plans), "CON_AVANCE");
-    assert.equal(observationAggregationService.calculateStatus(plans, true), "CONCLUIDO");
+    assert.equal(observationAggregationService.calculateStatus(plans), "CONCLUIDO");
+    assert.equal(observationAggregationService.calculateStatus([
+        ...plans,
+        { progressPercent: 0, status: "NOT_STARTED" },
+    ]), "INICIADO");
 });
 //# sourceMappingURL=observation-domain.test.js.map

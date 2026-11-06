@@ -1,11 +1,12 @@
 import { AppError } from "../../utils/app-error.js";
 import { buildObservationUrl } from "../../utils/observation-links.js";
+import { lockObservationForActionPlanUpdate, recalculateObservationFromActionPlans, } from "../observations/observation-aggregation.service.js";
 import { FILE_LEVEL_EVIDENCE_REVIEW_CONTEXTS } from "../progress/progress.constants.js";
 const database = (db) => {
     // Adapters are called from runtime transactions. The fallback is injected by
     // the registry only for validation/context reads in standalone callers.
     if (!db)
-        throw new AppError("La operación de workflow requiere una transacción.", 500);
+        throw new AppError("La operación del flujo de trabajo requiere una transacción.", 500);
     return db;
 };
 const asRuntimeDate = (date) => date.toISOString();
@@ -28,10 +29,37 @@ const createContext = (input) => ({
     riskLevel: input.riskLevel,
     custom: input.custom ?? {},
 });
-const getObservationStatusId = async (db, key) => (await db.observationStatus.findFirst({
-    select: { id: true },
-    where: { active: true, deletedAt: null, key },
-}))?.id ?? null;
+export const buildDeadlineExtensionWorkflowDecisionData = (input) => {
+    const correction = ["REQUEST_CORRECTION", "OBSERVE"].includes(input.action);
+    const approved = ["APPROVE", "COMPLETE"].includes(input.action);
+    // Correction routes can create another review task on the same instance.
+    return {
+        managerComment: input.comment?.trim() || null,
+        managerReviewedAt: input.now ?? new Date(),
+        managerReviewerId: input.actorUserId,
+        finalApprovedAt: null,
+        ...(correction
+            ? { status: "DRAFT" }
+            : {
+                status: approved
+                    ? "SENT_TO_MANAGER"
+                    : "MANAGER_REJECTED",
+            }),
+    };
+};
+export const buildObservationClosureWorkflowDecisionData = (input) => {
+    const correction = ["REQUEST_CORRECTION", "OBSERVE", "REJECT"].includes(input.action);
+    // Correction routes can create another review task on the same instance.
+    return {
+        reviewComment: input.comment?.trim() || null,
+        reviewedAt: input.now ?? new Date(),
+        reviewedByUserId: input.actorUserId,
+        ...(correction
+            ? { reviewStatus: "RETURNED" }
+            : { evaluatedStatus: "CONCLUDED" }),
+    };
+};
+export const isFinalizationProgressComplete = (reportedProgressPercent) => reportedProgressPercent === 100;
 const deadlineExtensionAdapter = {
     processType: "DEADLINE_EXTENSION",
     async getEntity(entityId, db) {
@@ -81,7 +109,7 @@ const deadlineExtensionAdapter = {
         const observation = request.observation ?? request.actionPlan?.observation;
         if (!observation)
             throw new AppError("La solicitud no tiene una observación asociada.", 409);
-        if (observation.status.key === "CONCLUIDO") {
+        if (observation.status.isFinal) {
             throw new AppError("No se puede iniciar un flujo para una observación terminal.", 409);
         }
         if (request.proposedDueDate.getTime() <= Date.now()) {
@@ -133,27 +161,12 @@ const deadlineExtensionAdapter = {
         });
         if (!request || request.status !== "SENT_TO_MANAGER")
             return;
-        if (action === "REQUEST_CORRECTION" || action === "OBSERVE") {
-            await db.deadlineExtensionRequest.update({
-                data: {
-                    managerComment: comment?.trim() || null,
-                    managerReviewedAt: new Date(),
-                    managerReviewerId: actorUserId,
-                    status: "DRAFT",
-                },
-                where: { id: entityId },
-            });
-            return;
-        }
-        const approved = action === "APPROVE" || action === "COMPLETE";
         await db.deadlineExtensionRequest.update({
-            data: {
-                managerComment: comment?.trim() || null,
-                managerReviewedAt: new Date(),
-                managerReviewerId: actorUserId,
-                finalApprovedAt: null,
-                status: approved ? "MANAGER_APPROVED" : "MANAGER_REJECTED",
-            },
+            data: buildDeadlineExtensionWorkflowDecisionData({
+                action,
+                actorUserId,
+                comment,
+            }),
             where: { id: entityId },
         });
     },
@@ -263,7 +276,7 @@ const observationClosureAdapter = {
         const update = (await this.getEntity(entityId, db));
         if (update.actionPlan.observation.status.isFinal)
             throw new AppError("La observación ya está cerrada.", 409);
-        if (update.reportedProgressPercent !== 100)
+        if (!isFinalizationProgressComplete(update.reportedProgressPercent))
             throw new AppError("El cierre requiere 100% de avance.", 400);
         if (!["DRAFT", "RETURNED"].includes(update.reviewStatus))
             throw new AppError("El cierre no está disponible para envío.", 409);
@@ -300,12 +313,11 @@ const observationClosureAdapter = {
             throw new AppError("No se encontró la solicitud de cierre.", 404);
         if (action === "REQUEST_CORRECTION" || action === "OBSERVE") {
             await db.progressEvaluation.update({
-                data: {
-                    reviewComment: comment?.trim() || null,
-                    reviewedAt: new Date(),
-                    reviewedByUserId: actorUserId,
-                    reviewStatus: "RETURNED",
-                },
+                data: buildObservationClosureWorkflowDecisionData({
+                    action,
+                    actorUserId,
+                    comment,
+                }),
                 where: { id: entityId },
             });
             await db.progressReviewHistory.create({
@@ -321,12 +333,11 @@ const observationClosureAdapter = {
         }
         else if (action === "REJECT") {
             await db.progressEvaluation.update({
-                data: {
-                    reviewComment: comment?.trim() || null,
-                    reviewedAt: new Date(),
-                    reviewedByUserId: actorUserId,
-                    reviewStatus: "RETURNED",
-                },
+                data: buildObservationClosureWorkflowDecisionData({
+                    action,
+                    actorUserId,
+                    comment,
+                }),
                 where: { id: entityId },
             });
             await db.progressReviewHistory.create({
@@ -343,12 +354,11 @@ const observationClosureAdapter = {
         else if (["APPROVE", "COMPLETE"].includes(action) &&
             update.reviewStatus !== "APPROVED") {
             await db.progressEvaluation.update({
-                data: {
-                    evaluatedStatus: "CONCLUDED",
-                    reviewedAt: new Date(),
-                    reviewedByUserId: actorUserId,
-                    reviewStatus: "APPROVED",
-                },
+                data: buildObservationClosureWorkflowDecisionData({
+                    action,
+                    actorUserId,
+                    comment,
+                }),
                 where: { id: entityId },
             });
             await db.progressReviewHistory.create({
@@ -356,7 +366,7 @@ const observationClosureAdapter = {
                     action: "APPROVED",
                     fromStatus: update.reviewStatus,
                     progressEvaluationId: entityId,
-                    toStatus: "APPROVED",
+                    toStatus: "SENT_TO_AUDIT",
                     userId: actorUserId,
                 },
             });
@@ -375,6 +385,7 @@ const observationClosureAdapter = {
         if (!update)
             throw new AppError("No se encontró la solicitud de cierre.", 404);
         if (["APPROVED", "CLOSED"].includes(finalResult)) {
+            await lockObservationForActionPlanUpdate(db, update.actionPlan.observationId);
             await db.actionPlan.update({
                 data: {
                     completedAt: new Date(),
@@ -389,27 +400,23 @@ const observationClosureAdapter = {
                 },
                 where: { id: update.actionPlan.id },
             });
-            const openPlans = await db.actionPlan.count({
-                where: {
-                    deletedAt: null,
-                    observationId: update.actionPlan.observationId,
-                    status: { not: "CONCLUDED" },
-                },
-            });
-            if (openPlans > 0)
-                return;
-            const closedStatusId = await getObservationStatusId(db, "CONCLUIDO");
-            if (!closedStatusId)
-                throw new AppError("El catálogo no contiene el estado CONCLUIDO.", 500);
-            await db.observation.update({
-                data: { statusId: closedStatusId, progressPercent: 100 },
-                where: { id: update.actionPlan.observationId },
-            });
-            if (update.reviewStatus !== "APPROVED")
+            await recalculateObservationFromActionPlans(db, update.actionPlan.observationId);
+            if (update.reviewStatus !== "APPROVED") {
                 await db.progressEvaluation.update({
                     data: { reviewStatus: "APPROVED" },
                     where: { id: entityId },
                 });
+                const lastReview = await db.progressReviewHistory.findFirst({
+                    orderBy: { createdAt: "desc" },
+                    select: { id: true },
+                    where: { progressEvaluationId: entityId },
+                });
+                if (lastReview)
+                    await db.progressReviewHistory.update({
+                        data: { toStatus: "APPROVED" },
+                        where: { id: lastReview.id },
+                    });
+            }
         }
         else if (["REJECTED", "EXPIRED"].includes(finalResult) &&
             update.reviewStatus !== "RETURNED") {

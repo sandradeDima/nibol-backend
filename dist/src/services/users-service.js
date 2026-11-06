@@ -131,7 +131,7 @@ const assertUserCanLoseActiveAccess = async (userId) => {
         },
     });
     if (remainingAdminCount === 0) {
-        throw new AppError("The last admin user cannot be deactivated.", 400);
+        throw new AppError("No se puede desactivar al último usuario administrador.", 400);
     }
 };
 const assertEmailAvailable = async (email, excludedUserId) => {
@@ -152,7 +152,7 @@ const assertEmailAvailable = async (email, excludedUserId) => {
         },
     });
     if (existingUser) {
-        throw new AppError("A user with this email already exists.", 400);
+        throw new AppError("Ya existe un usuario con ese correo electrónico.", 400);
     }
 };
 const assertRolesExist = async (roleIds) => {
@@ -165,7 +165,7 @@ const assertRolesExist = async (roleIds) => {
         },
     });
     if (matchingRoles !== roleIds.length) {
-        throw new AppError("One or more selected roles are invalid.", 400);
+        throw new AppError("Uno o más roles seleccionados no son válidos.", 400);
     }
 };
 const getDeletedUserByEmail = async (email) => {
@@ -366,7 +366,7 @@ export const usersService = {
                     entityType: "user",
                     metadata: {
                         email: snapshot.email,
-                        summary: `${snapshot.name} was deleted.`,
+                        summary: `Se eliminó el usuario ${snapshot.name}.`,
                     },
                 }, {
                     db: transaction,
@@ -389,11 +389,11 @@ export const usersService = {
             },
         });
         if (!user?.password) {
-            throw new AppError("Password credentials are not available for this account.", 400);
+            throw new AppError("Esta cuenta no tiene credenciales de contraseña disponibles.", 400);
         }
         const passwordMatches = await bcrypt.compare(input.currentPassword, user.password);
         if (!passwordMatches) {
-            throw new AppError("The current password is incorrect.", 400);
+            throw new AppError("La contraseña actual es incorrecta.", 400);
         }
         const nextPasswordHash = await bcrypt.hash(input.newPassword, 12);
         await prisma.$transaction(async (transaction) => {
@@ -421,7 +421,7 @@ export const usersService = {
                 entityType: "user",
                 metadata: {
                     email: user.email,
-                    summary: `${user.name} changed their password.`,
+                    summary: `El usuario ${user.name} cambió su contraseña.`,
                     updatedFields: ["password"],
                 },
             }, {
@@ -518,7 +518,7 @@ export const usersService = {
                             metadata: {
                                 email: nextSnapshot.email,
                                 roles: nextSnapshot.roleNames,
-                                summary: `${nextSnapshot.name} was restored.`,
+                                summary: `Se restauró el usuario ${nextSnapshot.name}.`,
                             },
                         }, {
                             db: transaction,
@@ -531,7 +531,7 @@ export const usersService = {
                                 entityType: "user",
                                 metadata: {
                                     roles: nextSnapshot.roleNames,
-                                    summary: `Assigned ${nextSnapshot.roleNames.join(", ")} to ${nextSnapshot.name}.`,
+                                    summary: `Se asignó el rol ${nextSnapshot.roleNames.join(", ")} a ${nextSnapshot.name}.`,
                                 },
                             }, {
                                 db: transaction,
@@ -542,7 +542,7 @@ export const usersService = {
             }
             catch (error) {
                 if (isUniqueConstraintError(error)) {
-                    throw new AppError("A user with this email already exists.", 400, {
+                    throw new AppError("Ya existe un usuario con ese correo electrónico.", 400, {
                         email: input.email,
                         fields: error.meta?.target,
                     });
@@ -600,7 +600,7 @@ export const usersService = {
                         metadata: {
                             email: createdSnapshot.email,
                             roles: createdSnapshot.roleNames,
-                            summary: `${createdSnapshot.name} was created.`,
+                            summary: `Se creó el usuario ${createdSnapshot.name}.`,
                         },
                     }, {
                         db: transaction,
@@ -613,7 +613,7 @@ export const usersService = {
                             entityType: "user",
                             metadata: {
                                 roles: createdSnapshot.roleNames,
-                                summary: `Assigned ${createdSnapshot.roleNames.join(", ")} to ${createdSnapshot.name}.`,
+                                summary: `Se asignó el rol ${createdSnapshot.roleNames.join(", ")} a ${createdSnapshot.name}.`,
                             },
                         }, {
                             db: transaction,
@@ -625,7 +625,7 @@ export const usersService = {
         }
         catch (error) {
             if (isUniqueConstraintError(error)) {
-                throw new AppError("A user with this email already exists.", 400, {
+                throw new AppError("Ya existe un usuario con ese correo electrónico.", 400, {
                     email: input.email,
                     fields: error.meta?.target,
                 });
@@ -646,7 +646,7 @@ export const usersService = {
             },
         });
         if (!user) {
-            throw new AppError("User not found.", 404);
+            throw new AppError("No se encontró el usuario.", 404);
         }
         await assertUserCanLoseActiveAccess(userId);
         await prisma.$transaction(async (transaction) => {
@@ -682,7 +682,7 @@ export const usersService = {
                     entityType: "user",
                     metadata: {
                         email: previousSnapshot.email,
-                        summary: `${previousSnapshot.name} was deleted.`,
+                        summary: `Se eliminó el usuario ${previousSnapshot.name}.`,
                     },
                 }, {
                     db: transaction,
@@ -698,6 +698,7 @@ export const usersService = {
                 createdAt: true,
                 email: true,
                 id: true,
+                jobTitle: true,
                 lastLoginAt: true,
                 name: true,
                 userRoles: {
@@ -726,13 +727,14 @@ export const usersService = {
             },
         });
         if (!user) {
-            throw new AppError("User not found.", 404);
+            throw new AppError("No se encontró el usuario.", 404);
         }
         return {
             avatar: user.avatar,
             createdAt: user.createdAt.toISOString(),
             email: user.email,
             id: user.id,
+            jobTitle: user.jobTitle,
             lastLoginAt: user.lastLoginAt?.toISOString() ?? null,
             name: user.name,
             roles: user.userRoles.map(({ role }) => role.name),
@@ -741,7 +743,7 @@ export const usersService = {
     async getUserById(userId) {
         const user = await getUserDetailsRecord(userId);
         if (!user) {
-            throw new AppError("User not found.", 404);
+            throw new AppError("No se encontró el usuario.", 404);
         }
         return mapUserDetails(user);
     },
@@ -843,7 +845,7 @@ export const usersService = {
             },
         });
         if (!user) {
-            throw new AppError("User not found.", 404);
+            throw new AppError("No se encontró el usuario.", 404);
         }
         if (user.emailVerified) {
             throw new AppError("Este usuario ya verifico su correo.", 400);
@@ -875,7 +877,7 @@ export const usersService = {
             },
         });
         if (!user) {
-            throw new AppError("User not found.", 404);
+            throw new AppError("No se encontró el usuario.", 404);
         }
         if (user.isActive === isActive) {
             return this.getUserById(userId);
@@ -910,7 +912,7 @@ export const usersService = {
                     entityId: userId,
                     entityType: "user",
                     metadata: {
-                        summary: `${nextSnapshot.name} was ${isActive ? "enabled" : "disabled"}.`,
+                        summary: `Se ${isActive ? "habilitó" : "deshabilitó"} al usuario ${nextSnapshot.name}.`,
                     },
                 }, {
                     db: transaction,
@@ -930,7 +932,7 @@ export const usersService = {
             },
         });
         if (!user) {
-            throw new AppError("User not found.", 404);
+            throw new AppError("No se encontró el usuario.", 404);
         }
         await prisma.$transaction(async (transaction) => {
             const previousSnapshot = await getUserAuditSnapshot(transaction, userId);
@@ -959,7 +961,7 @@ export const usersService = {
                     entityId: userId,
                     entityType: "user",
                     metadata: {
-                        summary: `${nextSnapshot.name} updated their profile.`,
+                        summary: `El usuario ${nextSnapshot.name} actualizó su perfil.`,
                         updatedFields: ["name"],
                     },
                 }, {
@@ -982,7 +984,7 @@ export const usersService = {
             },
         });
         if (!existingUser) {
-            throw new AppError("User not found.", 404);
+            throw new AppError("No se encontró el usuario.", 404);
         }
         await assertEmailAvailable(input.email, userId);
         await assertRolesExist(input.roleIds);
@@ -990,6 +992,7 @@ export const usersService = {
         if (!input.isActive && existingUser.isActive) {
             await assertUserCanLoseActiveAccess(userId);
         }
+        let roleUpdateMessage = null;
         await prisma.$transaction(async (transaction) => {
             const previousSnapshot = await getUserAuditSnapshot(transaction, userId);
             await transaction.user.update({
@@ -1042,7 +1045,7 @@ export const usersService = {
                     entityId: userId,
                     entityType: "user",
                     metadata: {
-                        summary: `${nextSnapshot.name} was updated.`,
+                        summary: `Se actualizó el usuario ${nextSnapshot.name}.`,
                         updatedFields: ["email", "isActive", "name", "roles"],
                     },
                 }, {
@@ -1057,14 +1060,16 @@ export const usersService = {
                         metadata: {
                             afterRoles: nextSnapshot.roleNames,
                             beforeRoles: previousSnapshot.roleNames,
-                            summary: `${nextSnapshot.name}'s roles changed from ${previousSnapshot.roleNames.join(", ") || "none"} to ${nextSnapshot.roleNames.join(", ") || "none"}.`,
+                            summary: `Los roles de ${nextSnapshot.name} cambiaron de ${previousSnapshot.roleNames.join(", ") || "ninguno"} a ${nextSnapshot.roleNames.join(", ") || "ninguno"}.`,
                         },
                     }, {
                         db: transaction,
                     });
+                    roleUpdateMessage = `Sus roles de acceso cambiaron de ${previousSnapshot.roleNames.join(", ") || "ninguno"} a ${nextSnapshot.roleNames.join(", ") || "ninguno"}.`;
                     await notificationService.create({
-                        message: `Your access roles changed from ${previousSnapshot.roleNames.join(", ") || "none"} to ${nextSnapshot.roleNames.join(", ") || "none"}.`,
-                        title: "Role changed",
+                        eventType: "USER_ROLES_UPDATED",
+                        message: roleUpdateMessage,
+                        title: "Roles actualizados",
                         type: "warning",
                         userId,
                     }, {
@@ -1073,6 +1078,13 @@ export const usersService = {
                 }
             }
         });
+        if (roleUpdateMessage)
+            await notificationService.sendEmailNotification({
+                eventType: "USER_ROLES_UPDATED",
+                message: roleUpdateMessage,
+                title: "Roles actualizados",
+                userId,
+            });
         return this.getUserById(userId);
     },
     async uploadAvatar(userId, file) {
@@ -1087,7 +1099,7 @@ export const usersService = {
             },
         });
         if (!user) {
-            throw new AppError("User not found.", 404);
+            throw new AppError("No se encontró el usuario.", 404);
         }
         const fileName = buildAvatarFileName(userId, file.originalName);
         const destination = path.join(avatarUploadsDir, fileName);

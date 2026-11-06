@@ -37,7 +37,7 @@ emailPreviewRouter.get("/:templateName", asyncHandler(async (request, response) 
         ? request.params.templateName[0]
         : request.params.templateName;
     if (!templateName || !isEmailTemplateName(templateName)) {
-        throw new AppError("Email template not found.", 404);
+        throw new AppError("No se encontró la plantilla de correo.", 404);
     }
     const format = previewFormatSchema.parse(request.query.format);
     const sampleVariables = emailTemplateDefinitions[templateName].sampleVariables;

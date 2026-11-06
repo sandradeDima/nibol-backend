@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { nextAvailableObservationNumber } from "./observations.service.js";
+import { buildObservationDeadlineWhere, buildObservationProgressWhere, getObservationDeadlineStatus, nextAvailableObservationNumber, } from "./observations.service.js";
 import { countWorkflowTasksForObservation } from "./observation-aggregation.service.js";
 import { observationDeadlineService } from "./observation-deadline.service.js";
 import { EDITABLE_PROGRESS_STATUSES, FILE_LEVEL_EVIDENCE_REVIEW_CONTEXTS, isOfficialProgressStatusTransitionAllowed, officialProgressByStatus, } from "../progress/progress.constants.js";
@@ -9,6 +9,64 @@ test("reutiliza el menor número libre dentro de un informe", () => {
     assert.equal(nextAvailableObservationNumber([1, 2, 4, 5]), 3);
     assert.equal(nextAvailableObservationNumber([1, 2, 3]), 4);
     assert.equal(nextAvailableObservationNumber([]), 1);
+});
+const allScope = {
+    dataScope: "ALL",
+    isAdmin: true,
+    permissions: [],
+    roleCode: "SYSTEM_ADMIN",
+    roleName: "Administrador del sistema",
+    roles: ["Admin"],
+    userId: "user-1",
+};
+test("el filtro de avance consulta el estado exacto de los planes de acción", () => {
+    assert.deepEqual(buildObservationProgressWhere(["CON_AVANCE"], allScope), {
+        actionPlans: {
+            some: {
+                AND: [
+                    {
+                        OR: [
+                            { remediationPlanId: null },
+                            { remediationPlan: { deletedAt: null } },
+                        ],
+                    },
+                ],
+                deletedAt: null,
+                observation: { deletedAt: null },
+                status: { in: ["WITH_PROGRESS"] },
+            },
+        },
+    });
+    assert.equal(buildObservationProgressWhere([], allScope), null);
+});
+test("los filtros de plazo coinciden con el estado visible", () => {
+    const now = new Date("2026-10-14T00:00:00.000Z");
+    assert.deepEqual(buildObservationDeadlineWhere("VIGENTE", now), {
+        OR: [
+            {
+                currentDueDate: { gte: now },
+                deadlineExtensionRequests: {
+                    none: { deletedAt: null, status: "MANAGER_APPROVED" },
+                },
+            },
+            { status: { isFinal: true } },
+        ],
+    });
+    assert.deepEqual(buildObservationDeadlineWhere("REPROGRAMADO", now), {
+        currentDueDate: { gte: now },
+        deadlineExtensionRequests: {
+            some: { deletedAt: null, status: "MANAGER_APPROVED" },
+        },
+        status: { isFinal: false },
+    });
+    assert.deepEqual(buildObservationDeadlineWhere("VENCIDO", now), {
+        currentDueDate: { lt: now },
+        status: { isFinal: false },
+    });
+    assert.equal(getObservationDeadlineStatus(true, false, false), "VIGENTE");
+    assert.equal(getObservationDeadlineStatus(false, true, true), "VENCIDO");
+    assert.equal(getObservationDeadlineStatus(false, false, true), "REPROGRAMADO");
+    assert.equal(getObservationDeadlineStatus(false, false, false), "VIGENTE");
 });
 test("el correlativo se calcula por conjunto de números del informe", () => {
     assert.equal(nextAvailableObservationNumber([1, 2]), 3);
@@ -93,6 +151,62 @@ test("el cierre no exige documento pero conserva el avance obligatorio", async (
         db: db,
         entityId: "evaluation-1",
     }), /100%/);
+});
+test("el cierre por workflow concluye la observación al terminar todos sus planes", async () => {
+    const adapter = getWorkflowEntityAdapter("OBSERVATION_CLOSURE");
+    assert.ok(adapter?.applyCompletion);
+    const plans = [
+        { id: "plan-1", progressPercent: 60, status: "WITH_PROGRESS" },
+        { id: "plan-2", progressPercent: 60, status: "WITH_PROGRESS" },
+    ];
+    const observationUpdates = [];
+    let observationLocked = false;
+    const db = {
+        $queryRaw: async (query) => {
+            assert.match(query.join("?"), /WITH \(UPDLOCK, HOLDLOCK, ROWLOCK\)/);
+            if (query[0]?.includes("FROM observations")) {
+                observationLocked = true;
+                return [{ id: "observation-1" }];
+            }
+            assert.ok(observationLocked);
+            return plans;
+        },
+        progressEvaluation: {
+            findUnique: async ({ where }) => ({
+                actionPlan: { id: where.id, observationId: "observation-1" },
+                evaluatedStatus: "CONCLUDED",
+                reviewStatus: "APPROVED",
+            }),
+        },
+        actionPlan: {
+            update: async ({ where, data, }) => {
+                assert.ok(observationLocked);
+                Object.assign(plans.find((plan) => plan.id === where.id), data);
+            },
+        },
+        observation: {
+            findUnique: async () => ({ id: "observation-1" }),
+            update: async ({ data, }) => {
+                observationUpdates.push(data);
+            },
+        },
+        observationStatus: {
+            findFirst: async ({ where }) => ({
+                id: where.key,
+            }),
+        },
+    };
+    for (const entityId of ["plan-1", "plan-2"])
+        await adapter.applyCompletion({
+            db: db,
+            entityId,
+            finalResult: "APPROVED",
+            instanceId: "workflow-1",
+        });
+    assert.deepEqual(observationUpdates, [
+        { progressPercent: 80, statusId: "CON_AVANCE" },
+        { progressPercent: 100, statusId: "CONCLUIDO" },
+    ]);
 });
 test("el límite de plazo se calcula desde la fecha del informe", () => {
     assert.equal(observationDeadlineService

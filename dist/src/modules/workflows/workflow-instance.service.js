@@ -5,15 +5,12 @@ import { writeRuntimeAuditEvent, writeRuntimeTransitionLog, } from "./workflow-r
 import { loadPinnedWorkflowGraph } from "./workflow-runtime-graph.js";
 import { WORKFLOW_RUNTIME_ERROR_CODES, WorkflowRuntimeError, } from "./workflow-runtime-errors.js";
 import { prisma } from "../../utils/prisma.js";
+import { parseDatabaseJson, parseDatabaseJsonArray, toDatabaseJson, } from "../../services/logging-utils.js";
 import { cancelWorkflowInstanceTimers } from "./workflow-timer.service.js";
-import { deliverWorkflowNotificationsForInstance } from "./workflow-notification.service.js";
+import { deliverWorkflowNotificationsInBackground } from "./workflow-notification.service.js";
 import { getWorkflowEntityAdapter } from "./workflow-entity-adapters.js";
 import { WORKFLOW_INSTANCE_PERMISSIONS } from "./workflows.permissions.js";
-const asJson = (value) => {
-    if (value === null || value === undefined)
-        return {};
-    return value;
-};
+const asJson = (value) => toDatabaseJson(value ?? {});
 const runtimeActor = (access) => ({
     ipAddress: access.ipAddress ?? null,
     userId: access.userId,
@@ -97,7 +94,6 @@ const getInstanceForDetail = async (db, instanceId) => db.workflowInstance.findU
     },
     where: { id: instanceId },
 });
-const parseArrayJson = (value) => Array.isArray(value) ? value : [];
 const buildTimeline = (record) => {
     if (!record)
         return [];
@@ -114,7 +110,7 @@ const buildTimeline = (record) => {
             actor: transition.performedBy,
             date: transition.createdAt.toISOString(),
             decision: transition.decision,
-            details: transition.detailsJson,
+            details: parseDatabaseJson(transition.detailsJson, "workflow_transition_logs.details_json"),
             eventType: transition.eventType ?? transition.triggerType,
             fromNode: transition.sourceNode,
             node: transition.targetNode,
@@ -133,7 +129,7 @@ const buildTimeline = (record) => {
                 taskId: task.id,
             });
         }
-        for (const assignment of parseArrayJson(task.assignmentHistoryJson)) {
+        for (const assignment of parseDatabaseJsonArray(task.assignmentHistoryJson, "workflow_tasks.assignment_history_json")) {
             if (typeof assignment !== "object" || assignment === null)
                 continue;
             const entry = assignment;
@@ -204,7 +200,7 @@ const mapInstance = (record) => {
             assignedArea: task.assignedArea,
             assignedRole: task.assignedRole,
             assignedUser: task.assignedUser,
-            assignmentSnapshot: task.assignmentSnapshotJson,
+            assignmentSnapshot: parseDatabaseJson(task.assignmentSnapshotJson, "workflow_tasks.assignment_snapshot_json"),
             comments: task.comments,
             completedAt: task.completedAt?.toISOString() ?? null,
             createdAt: task.createdAt.toISOString(),
@@ -294,24 +290,24 @@ export const workflowInstanceService = {
                     },
                 });
             if (definitions.length === 0) {
-                throw new WorkflowRuntimeError(WORKFLOW_RUNTIME_ERROR_CODES.NO_ACTIVE_VERSION, "No existe un workflow publicado y activo para este tipo de proceso.");
+                throw new WorkflowRuntimeError(WORKFLOW_RUNTIME_ERROR_CODES.NO_ACTIVE_VERSION, "No existe un flujo de trabajo publicado y activo para este tipo de proceso.");
             }
             if (definitions.length > 1) {
-                throw new WorkflowRuntimeError(WORKFLOW_RUNTIME_ERROR_CODES.RUNTIME_CONFIGURATION, "Hay varios workflows activos para este tipo de proceso; seleccione un workflow explícitamente.");
+                throw new WorkflowRuntimeError(WORKFLOW_RUNTIME_ERROR_CODES.RUNTIME_CONFIGURATION, "Hay varios flujos de trabajo activos para este tipo de proceso; seleccione uno explícitamente.");
             }
             const selected = definitions[0];
             if (!selected || selected.status !== "PUBLISHED" || selected.archivedAt) {
-                throw new WorkflowRuntimeError(WORKFLOW_RUNTIME_ERROR_CODES.RUNTIME_CONFIGURATION, "El workflow seleccionado está archivado o no está publicado.");
+                throw new WorkflowRuntimeError(WORKFLOW_RUNTIME_ERROR_CODES.RUNTIME_CONFIGURATION, "El flujo de trabajo seleccionado está archivado o no está publicado.");
             }
             if (selected.processType !== input.processType) {
-                throw new WorkflowRuntimeError(WORKFLOW_RUNTIME_ERROR_CODES.RUNTIME_CONFIGURATION, "El workflow seleccionado no corresponde al tipo de proceso solicitado.");
+                throw new WorkflowRuntimeError(WORKFLOW_RUNTIME_ERROR_CODES.RUNTIME_CONFIGURATION, "El flujo de trabajo seleccionado no corresponde al tipo de proceso solicitado.");
             }
             const version = selected.activeVersion;
             if (!version || selected.activeVersionId !== version.id) {
-                throw new WorkflowRuntimeError(WORKFLOW_RUNTIME_ERROR_CODES.NO_ACTIVE_VERSION, "El workflow no tiene una versión activa.");
+                throw new WorkflowRuntimeError(WORKFLOW_RUNTIME_ERROR_CODES.NO_ACTIVE_VERSION, "El flujo de trabajo no tiene una versión activa.");
             }
             if (version.status !== "PUBLISHED") {
-                throw new WorkflowRuntimeError(WORKFLOW_RUNTIME_ERROR_CODES.VERSION_NOT_PUBLISHED, "La versión activa del workflow no está publicada.");
+                throw new WorkflowRuntimeError(WORKFLOW_RUNTIME_ERROR_CODES.VERSION_NOT_PUBLISHED, "La versión activa del flujo de trabajo no está publicada.");
             }
             const context = buildWorkflowRuntimeContext({
                 actorUserId: access.userId,
@@ -372,7 +368,7 @@ export const workflowInstanceService = {
             where: { id: createdId },
         });
         if (!options?.deferNotifications) {
-            await deliverWorkflowNotificationsForInstance(created.id);
+            deliverWorkflowNotificationsInBackground(created.id);
         }
         if (options?.internal)
             return created;
@@ -520,7 +516,7 @@ export const workflowInstanceService = {
             });
             await executeAutomaticNodes({ actor, db, instanceId, now });
         });
-        await deliverWorkflowNotificationsForInstance(instanceId);
+        deliverWorkflowNotificationsInBackground(instanceId);
         return this.getInstance(instanceId, access);
     },
     async getInstanceWithinTransaction(db, instanceId) {

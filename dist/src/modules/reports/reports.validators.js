@@ -39,6 +39,7 @@ export const reportProgressStatusSchema = z.enum([
 export const reportFiltersSchema = z.object({
     activeOnly: booleanFilter,
     areaId: z.uuid().optional(),
+    areaIds: csvArray(z.uuid()),
     areaResponsibleId: csvArray(z.uuid()),
     auditReportId: csvArray(z.uuid()),
     dateFrom: dateFilter,
@@ -49,6 +50,7 @@ export const reportFiltersSchema = z.object({
     dueSoon: booleanFilter,
     dueSoonDays: z.coerce.number().int().min(1).max(90).default(7),
     executorId: csvArray(z.uuid()),
+    globalStatus: z.enum(["PENDING", "CLOSED"]).optional(),
     hasEvidence: booleanFilter,
     hasExtension: booleanFilter,
     hasPlan: booleanFilter,
@@ -57,10 +59,12 @@ export const reportFiltersSchema = z.object({
     progressMax: z.coerce.number().int().min(0).max(100).optional(),
     progressMin: z.coerce.number().int().min(0).max(100).optional(),
     progressStatus: reportProgressStatusSchema.optional(),
+    progressStatuses: csvArray(reportProgressStatusSchema),
     processOwnerId: csvArray(z.uuid()),
     reprogrammed: booleanFilter,
     responsibleUserId: z.uuid().optional(),
     riskLevelId: z.uuid().optional(),
+    riskLevelIds: csvArray(z.uuid()),
     search: z.string().trim().max(191).default(""),
     observationStatusIds: csvArray(z.uuid()),
     statusId: z.uuid().optional(),
@@ -101,6 +105,10 @@ export const auditReportQuerySchema = z.object({
     userId: z.uuid().optional(),
 });
 export const reportExportQuerySchema = reportPreviewQuerySchema.extend({
+    includeActionPlans: booleanFilter.default(true),
+    pdfView: z
+        .enum(["REPORTS", "DASHBOARD", "GENERATOR", "ATTENTION"])
+        .default("GENERATOR"),
     perPage: z.coerce.number().int().min(1).max(5000).default(5000),
 });
 export const auditReportExportQuerySchema = auditReportQuerySchema.extend({

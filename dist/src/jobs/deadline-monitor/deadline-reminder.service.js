@@ -1,14 +1,17 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { randomUUID } from "node:crypto";
-import { NotificationDeliveryChannel, NotificationDeliveryStatus, NotificationPriority, NotificationType, ScheduledJobExecutionStatus, } from "../../../generated/prisma/client.js";
+import {} from "../../../generated/prisma/client.js";
+import { parseDatabaseJson, toDatabaseJson, } from "../../services/logging-utils.js";
+import { NotificationDeliveryChannel, NotificationDeliveryStatus, NotificationPriority, NotificationType, ScheduledJobExecutionStatus, parseDatabaseEnum, } from "../../types/database-enums.js";
 import { emailService } from "../../emails/EmailService.js";
 import { getBusinessDateKey, getEffectiveActionPlanDueDate, getOfficialActionPlanProgress, getActionPlanDeadlineStatus, getDateOnlyKey, } from "../../modules/reports/reporting-definitions.js";
 import { buildActionPlanScopeWhere, } from "../../services/authorization-service.js";
 import { notificationService } from "../../services/notification-service.js";
+import { isNotificationChannelEnabled } from "../../services/notification-preferences.js";
 import { prisma } from "../../utils/prisma.js";
 import { buildFrontendUrl, buildPendingWorkUrl, } from "../../utils/notification-links.js";
 import { logger } from "../../utils/logger.js";
-import { DEADLINE_REMINDER_EVENT_TYPE, DEADLINE_REMINDER_JOB_NAME, DEADLINE_REMINDER_LOCK_NAME, DEADLINE_REMINDER_PARAMETER_DEFAULTS, DEADLINE_REMINDER_POLICY_DEFAULTS, DEADLINE_REMINDER_ROLE_LABELS, DEADLINE_REMINDER_ROLES, getDeadlineReminderParameterKey, } from "./deadline-reminder.constants.js";
+import { DEADLINE_REMINDER_ALERT_DEFAULTS, DEADLINE_REMINDER_EVENT_TYPE, DEADLINE_REMINDER_JOB_NAME, DEADLINE_REMINDER_LOCK_NAME, DEADLINE_REMINDER_PARAMETER_DEFAULTS, DEADLINE_REMINDER_POLICY_DEFAULTS, DEADLINE_REMINDER_ROLE_LABELS, DEADLINE_REMINDER_ROLES, getDeadlineReminderParameterKey, } from "./deadline-reminder.constants.js";
 import { addDaysToDateKey, getCadenceLabel, getReminderBucket, getScheduleGroupKey, getScheduledReminderPeriods, getNextScheduledReminderPeriod, } from "./deadline-reminder.policy.js";
 const SCHEDULED_RUN = "SCHEDULED";
 const MANUAL_RUN = "MANUAL";
@@ -91,7 +94,6 @@ const monthLabel = (dateKey) => new Intl.DateTimeFormat("es-BO", {
     year: "numeric",
 }).format(dateAtNoonUtc(dateKey));
 const errorMessage = (error) => (error instanceof Error ? error.message : "Error desconocido").slice(0, 500);
-const toJson = (value) => value;
 const buildAccess = (userId, role) => ({
     dataScope: role === "EXECUTOR" ? "ASSIGNED" : "AREA",
     isAdmin: false,
@@ -135,19 +137,32 @@ const readPolicies = async () => {
         };
     });
 };
-const readChannels = async () => {
-    const records = await prisma.systemParameter.findMany({
-        select: { key: true, value: true },
-        where: {
-            active: true,
-            deletedAt: null,
-            key: { in: ["notify_by_email", "notify_in_app"] },
-        },
-    });
+const readAlertSettings = async () => {
+    const [records, internalEnabled, emailEnabled] = await Promise.all([
+        prisma.systemParameter.findMany({
+            select: { key: true, value: true },
+            where: {
+                active: true,
+                deletedAt: null,
+                key: {
+                    in: [
+                        "notify_by_email",
+                        "notify_in_app",
+                        ...Object.keys(DEADLINE_REMINDER_ALERT_DEFAULTS),
+                    ],
+                },
+            },
+        }),
+        isNotificationChannelEnabled(DEADLINE_REMINDER_EVENT_TYPE, "internal"),
+        isNotificationChannelEnabled(DEADLINE_REMINDER_EVENT_TYPE, "email"),
+    ]);
     const values = new Map(records.map((record) => [record.key, record.value]));
     return {
-        notifyByEmail: parseBoolean(values.get("notify_by_email"), true),
-        notifyInApp: parseBoolean(values.get("notify_in_app"), true),
+        includeOverdue: parseBoolean(values.get("include_reminder_overdue"), DEADLINE_REMINDER_ALERT_DEFAULTS.include_reminder_overdue),
+        includeDueToday: parseBoolean(values.get("include_reminder_due_today"), DEADLINE_REMINDER_ALERT_DEFAULTS.include_reminder_due_today),
+        includeUpcoming: parseBoolean(values.get("include_reminder_upcoming"), DEADLINE_REMINDER_ALERT_DEFAULTS.include_reminder_upcoming),
+        notifyByEmail: parseBoolean(values.get("notify_by_email"), true) && emailEnabled,
+        notifyInApp: parseBoolean(values.get("notify_in_app"), true) && internalEnabled,
     };
 };
 const readBusinessTimeZone = async () => {
@@ -197,7 +212,12 @@ const findActionPlans = async (policy, cutoffDateKey, recipientUserId) => {
         where,
     });
 };
-const toDigestPlan = (plan, cutoffDateKey, policy, showExecutor) => {
+const isReminderBucketEnabled = (bucket, settings) => bucket === "OVERDUE"
+    ? settings.includeOverdue
+    : bucket === "DUE_TODAY"
+        ? settings.includeDueToday
+        : settings.includeUpcoming;
+const toDigestPlan = (plan, cutoffDateKey, policy, showExecutor, alertSettings) => {
     const effectiveDueDate = getEffectiveActionPlanDueDate(plan);
     const effectiveDueDateKey = getDateOnlyKey(effectiveDueDate);
     const bucket = getReminderBucket({
@@ -205,7 +225,7 @@ const toDigestPlan = (plan, cutoffDateKey, policy, showExecutor) => {
         effectiveDueDateKey,
         upcomingWindowDays: policy.upcomingWindowDays,
     });
-    if (!bucket)
+    if (!bucket || !isReminderBucketEnabled(bucket, alertSettings))
         return null;
     const officialProgress = getOfficialActionPlanProgress(plan.status);
     const observationCode = `${plan.observation.auditReport.reportNumber} / OBS-${String(plan.observation.observationNumber).padStart(3, "0")}`;
@@ -266,7 +286,7 @@ const buildDigests = async (input) => {
         for (const recipient of recipients) {
             const plans = await findActionPlans(policy, input.cutoffDateKey, recipient.id);
             for (const plan of plans) {
-                const digestPlan = toDigestPlan(plan, input.cutoffDateKey, policy, showExecutor);
+                const digestPlan = toDigestPlan(plan, input.cutoffDateKey, policy, showExecutor, input.alertSettings);
                 if (!digestPlan)
                     continue;
                 const key = recipient.email.trim().toLowerCase() || recipient.id;
@@ -376,7 +396,7 @@ const notificationMessage = (digest) => {
     ].filter(Boolean);
     return `Tienes ${parts.join(", ")}.`;
 };
-const deliverReminderEmailDelivery = async (deliveryId) => {
+const deliverReminderEmailDelivery = async (deliveryId, alertSettings) => {
     const delivery = await prisma.notificationDelivery.findUnique({
         select: {
             payloadJson: true,
@@ -385,11 +405,15 @@ const deliverReminderEmailDelivery = async (deliveryId) => {
         },
         where: { id: deliveryId },
     });
-    if (!delivery || delivery.status === NotificationDeliveryStatus.SENT) {
+    if (!delivery) {
         return {
             attempted: false,
-            status: delivery?.status ?? NotificationDeliveryStatus.SKIPPED,
+            status: NotificationDeliveryStatus.SKIPPED,
         };
+    }
+    const deliveryStatus = parseDatabaseEnum(NotificationDeliveryStatus, delivery.status, "notification_deliveries.status");
+    if (deliveryStatus === NotificationDeliveryStatus.SENT) {
+        return { attempted: false, status: deliveryStatus };
     }
     if (!delivery.payloadJson || !delivery.recipientEmail) {
         await prisma.notificationDelivery.update({
@@ -401,27 +425,60 @@ const deliverReminderEmailDelivery = async (deliveryId) => {
         });
         return { attempted: false, status: NotificationDeliveryStatus.SKIPPED };
     }
-    if (!(await notificationService.claimEmailDelivery(deliveryId))) {
+    const payload = parseDatabaseJson(delivery.payloadJson, "notification_deliveries.payload_json", (value) => {
+        if (typeof value !== "object" ||
+            value === null ||
+            !Array.isArray(value.plans) ||
+            typeof value.platformLink !== "string") {
+            throw new Error("La carga útil del recordatorio tiene un formato no válido.");
+        }
+        return value;
+    });
+    if (!payload) {
+        throw new Error("No se encontró la carga útil del recordatorio.");
+    }
+    const plans = payload.plans.filter((plan) => isReminderBucketEnabled(plan.bucket, alertSettings));
+    if (plans.length === 0) {
+        await prisma.notificationDelivery.update({
+            data: {
+                errorMessage: "Omitida por la configuración actual de alertas.",
+                status: NotificationDeliveryStatus.SKIPPED,
+            },
+            where: { id: deliveryId },
+        });
+        return { attempted: false, status: NotificationDeliveryStatus.SKIPPED };
+    }
+    if (!(await notificationService.claimEmailDelivery(deliveryId, DEADLINE_REMINDER_EVENT_TYPE))) {
         const current = await prisma.notificationDelivery.findUnique({
             select: { status: true },
             where: { id: deliveryId },
         });
         return {
             attempted: false,
-            status: current?.status ?? NotificationDeliveryStatus.SKIPPED,
+            status: current
+                ? parseDatabaseEnum(NotificationDeliveryStatus, current.status, "notification_deliveries.status")
+                : NotificationDeliveryStatus.SKIPPED,
         };
     }
-    const payload = delivery.payloadJson;
+    const filteredPayload = {
+        ...payload,
+        dueToday: plans.filter((plan) => plan.bucket === "DUE_TODAY").length,
+        overdue: plans.filter((plan) => plan.bucket === "OVERDUE").length,
+        plans,
+        reprogrammed: plans.filter((plan) => plan.reprogrammed).length,
+        subject: `NIBOL · ${plans.length} pendientes requieren atención`,
+        upcoming: plans.filter((plan) => plan.bucket === "UPCOMING").length,
+    };
     try {
         const result = await emailService.sendTemplate({
             template: "deadlineReminder",
             to: delivery.recipientEmail,
             variables: {
-                ...payload,
+                ...filteredPayload,
                 appName: "NIBOL Bolivia",
                 userName: payload.recipientName,
                 platformLink: buildFrontendUrl(payload.platformLink),
-                plans: payload.plans.map((plan) => ({
+                plans: plans.map((plan) => ({
                     area: plan.area,
                     bucket: plan.bucket,
                     deadlineStatus: plan.deadlineStatus === "VENCIDO" ? "Vencido" : "Vigente",
@@ -429,6 +486,7 @@ const deliverReminderEmailDelivery = async (deliveryId) => {
                     effectiveDueDate: plan.effectiveDueDate,
                     ...(plan.executor ? { executor: plan.executor } : {}),
                     observation: plan.observation,
+                    observationId: plan.observationId,
                     officialProgress: plan.officialProgress,
                     officialProgressPercent: plan.officialProgressPercent,
                     plan: plan.plan,
@@ -461,7 +519,7 @@ const deliverReminderEmailDelivery = async (deliveryId) => {
         };
     }
 };
-const deliverPendingReminderEmails = async () => {
+const deliverPendingReminderEmails = async (alertSettings) => {
     const deliveries = await prisma.notificationDelivery.findMany({
         orderBy: [{ lastAttemptAt: "asc" }, { createdAt: "asc" }],
         select: { id: true },
@@ -485,7 +543,7 @@ const deliverPendingReminderEmails = async () => {
     });
     const outcomes = [];
     for (const delivery of deliveries) {
-        outcomes.push(await deliverReminderEmailDelivery(delivery.id));
+        outcomes.push(await deliverReminderEmailDelivery(delivery.id, alertSettings));
     }
     return outcomes;
 };
@@ -614,7 +672,7 @@ const notifyDigest = async (input) => {
             channel: NotificationDeliveryChannel.IN_APP,
             dedupeKey: inAppKey,
             notificationId: notificationResult.notification.id,
-            payloadJson: toJson(payload),
+            payloadJson: payload,
             recipientEmail: input.digest.recipient.email,
             recipientUserId: input.digest.recipient.id,
             status: NotificationDeliveryStatus.SENT,
@@ -625,11 +683,11 @@ const notifyDigest = async (input) => {
         const emailDelivery = await notificationService.createDelivery({
             channel: NotificationDeliveryChannel.EMAIL,
             dedupeKey: `${baseKey}:EMAIL`,
-            payloadJson: toJson(payload),
+            payloadJson: payload,
             recipientEmail: input.digest.recipient.email,
             recipientUserId: input.digest.recipient.id,
         });
-        const result = await deliverReminderEmailDelivery(emailDelivery.id);
+        const result = await deliverReminderEmailDelivery(emailDelivery.id, input.channels);
         if (result.status === NotificationDeliveryStatus.SENT && result.attempted)
             input.summary.emailsSent += 1;
         if (result.status === NotificationDeliveryStatus.FAILED) {
@@ -668,6 +726,7 @@ const executePeriod = async (input) => {
     }
     try {
         const digests = await buildDigests({
+            alertSettings: input.channels,
             cutoffDateKey: input.cutoffDateKey,
             policies: input.policies,
         });
@@ -702,7 +761,7 @@ const executePeriod = async (input) => {
         summary.finishedAt = new Date().toISOString();
         await prisma.scheduledJobExecution.update({
             data: {
-                detailsJson: toJson({
+                detailsJson: toDatabaseJson({
                     cadenceKey: input.cadenceKey,
                     cutoffDate: input.cutoffDateKey,
                     failures: summary.failures.slice(0, 100),
@@ -735,7 +794,7 @@ const executePeriod = async (input) => {
         summary.finishedAt = new Date().toISOString();
         await prisma.scheduledJobExecution.update({
             data: {
-                detailsJson: toJson({ failures: summary.failures }),
+                detailsJson: toDatabaseJson({ failures: summary.failures }),
                 errorMessage: errorMessage(error),
                 failuresCount: summary.failuresCount,
                 finishedAt: new Date(),
@@ -836,6 +895,7 @@ export const deadlineReminderService = {
                 lastExecution: lastExecution
                     ? {
                         ...lastExecution,
+                        detailsJson: parseDatabaseJson(lastExecution.detailsJson, "scheduled_job_executions.details_json"),
                         finishedAt: lastExecution.finishedAt?.toISOString() ?? null,
                     }
                     : null,
@@ -851,13 +911,15 @@ export const deadlineReminderService = {
         };
     },
     async preview(input) {
-        const [policies, timeZone] = await Promise.all([
+        const [policies, channels, timeZone] = await Promise.all([
             readPolicies(),
+            readAlertSettings(),
             readBusinessTimeZone(),
         ]);
         const policy = policies.find((item) => item.role === input.role);
         const cutoffDateKey = input.cutoffDateKey ?? getBusinessDateKey(input.now, timeZone);
         const digests = await buildDigests({
+            alertSettings: channels,
             cutoffDateKey,
             policies: [policy],
         });
@@ -871,6 +933,11 @@ export const deadlineReminderService = {
             return result;
         }, { dueToday: 0, overdue: 0, plans: 0, reprogrammed: 0, upcoming: 0 });
         return {
+            channels: {
+                enabled: channels.notifyByEmail || channels.notifyInApp,
+                notifyByEmail: channels.notifyByEmail,
+                notifyInApp: channels.notifyInApp,
+            },
             cutoffDate: cutoffDateKey,
             policy,
             recipients: digests,
@@ -907,10 +974,12 @@ export const deadlineReminderService = {
         try {
             const [policies, channels, timeZone] = await Promise.all([
                 readPolicies(),
-                readChannels(),
+                readAlertSettings(),
                 readBusinessTimeZone(),
             ]);
-            const retryResults = await deliverPendingReminderEmails();
+            const retryResults = channels.notifyByEmail
+                ? await deliverPendingReminderEmails(channels)
+                : [];
             baseSummary.emailsSent += retryResults.filter((result) => result.status === NotificationDeliveryStatus.SENT && result.attempted).length;
             baseSummary.failures.push(...retryResults
                 .filter((result) => result.status === NotificationDeliveryStatus.FAILED)
@@ -1010,7 +1079,7 @@ export const deadlineReminderService = {
             });
             baseSummary.status = "FAILED";
             baseSummary.finishedAt = new Date().toISOString();
-            logger.error("Deadline reminder scheduler failed.", {
+            logger.error("Falló la programación de recordatorios de plazos.", {
                 message: errorMessage(error),
             });
             return baseSummary;

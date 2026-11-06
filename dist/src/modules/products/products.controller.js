@@ -22,7 +22,7 @@ const getQueryValue = (value) => {
 const getRequiredProductId = (value) => {
     const productId = Array.isArray(value) ? value[0] : value;
     if (!productId) {
-        throw new AppError("Product id is required.", 400);
+        throw new AppError("Se requiere el identificador del producto.", 400);
     }
     return productIdParamSchema.parse({
         id: productId,

@@ -16,14 +16,14 @@ const envSchema = z.object({
     BETTER_AUTH_SECRET: z.string().min(32).default(DEVELOPMENT_AUTH_SECRET),
     BETTER_AUTH_URL: z.string().url().default("http://localhost:4000"),
     CRON_SECRET: z.string().min(32).optional(),
-    DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
-    DEADLINE_REMINDER_INTERVAL_MS: z.coerce
-        .number()
-        .int()
-        .min(60_000)
-        .default(86_400_000),
+    DATABASE_URL: z
+        .string()
+        .startsWith("sqlserver://", "DATABASE_URL debe usar sqlserver://"),
     FRONTEND_URL: z.string().url().default("http://localhost:3000"),
     LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
+    MICROSOFT_CLIENT_ID: z.string().min(1).optional(),
+    MICROSOFT_CLIENT_SECRET: z.string().min(1).optional(),
+    MICROSOFT_TENANT_ID: z.string().min(1).default("common"),
     NODE_ENV: z
         .enum(["development", "test", "production"])
         .default("development"),
@@ -50,27 +50,55 @@ const envSchema = z.object({
 });
 const parsedEnv = envSchema
     .superRefine((value, context) => {
+    const encrypt = /(?:^|;)encrypt=(true|false)(?:;|$)/i
+        .exec(value.DATABASE_URL)?.[1]
+        ?.toLowerCase();
+    const trustServerCertificate = /(?:^|;)trustServerCertificate=(true|false)(?:;|$)/i
+        .exec(value.DATABASE_URL)?.[1]
+        ?.toLowerCase();
+    if (value.NODE_ENV === "production" && encrypt !== "true") {
+        context.addIssue({
+            code: "custom",
+            message: "DATABASE_URL debe establecer encrypt=true explícitamente en producción.",
+            path: ["DATABASE_URL"],
+        });
+    }
+    if (value.NODE_ENV === "production" && trustServerCertificate === "true") {
+        context.addIssue({
+            code: "custom",
+            message: "DATABASE_URL no debe establecer trustServerCertificate=true en producción.",
+            path: ["DATABASE_URL"],
+        });
+    }
+    if (Boolean(value.MICROSOFT_CLIENT_ID) !==
+        Boolean(value.MICROSOFT_CLIENT_SECRET)) {
+        context.addIssue({
+            code: "custom",
+            message: "MICROSOFT_CLIENT_ID y MICROSOFT_CLIENT_SECRET deben configurarse juntos.",
+            path: ["MICROSOFT_CLIENT_ID"],
+        });
+    }
     if (value.NODE_ENV !== "production")
         return;
     if (!process.env.BETTER_AUTH_SECRET ||
         value.BETTER_AUTH_SECRET === DEVELOPMENT_AUTH_SECRET) {
         context.addIssue({
             code: "custom",
-            message: "BETTER_AUTH_SECRET must be explicitly configured in production.",
+            message: "BETTER_AUTH_SECRET debe configurarse explícitamente en producción.",
             path: ["BETTER_AUTH_SECRET"],
         });
     }
     if (!process.env.BETTER_AUTH_URL) {
         context.addIssue({
             code: "custom",
-            message: "BETTER_AUTH_URL must be explicitly configured in production.",
+            message: "BETTER_AUTH_URL debe configurarse explícitamente en producción.",
             path: ["BETTER_AUTH_URL"],
         });
     }
     if (!process.env.FRONTEND_URL) {
         context.addIssue({
             code: "custom",
-            message: "FRONTEND_URL must be explicitly configured in production.",
+            message: "FRONTEND_URL debe configurarse explícitamente en producción.",
             path: ["FRONTEND_URL"],
         });
     }
@@ -80,7 +108,7 @@ if (!parsedEnv.success) {
     const issues = parsedEnv.error.issues
         .map(({ path, message }) => `${path.join(".") || "env"}: ${message}`)
         .join("\n");
-    throw new Error(`Invalid environment configuration.\n${issues}`);
+    throw new Error(`La configuración del entorno no es válida.\n${issues}`);
 }
 export const env = parsedEnv.data;
 //# sourceMappingURL=env.js.map

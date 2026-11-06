@@ -54,8 +54,11 @@ test("rechaza filtros jerárquicos manipulados fuera del alcance", () => {
     assert.doesNotThrow(() => assertReportFilterAccess({
         executorId: ["00000000-0000-0000-0000-000000000001"],
     }, access("PROCESS_OWNER", "AREA")));
+    const processOwner = access("PROCESS_OWNER", "AREA");
+    assert.doesNotThrow(() => assertReportFilterAccess({ processOwnerId: [processOwner.userId] }, processOwner));
     assert.throws(() => assertReportFilterAccess({
         processOwnerId: ["00000000-0000-0000-0000-000000000001"],
-    }, access("PROCESS_OWNER", "AREA")), /filtros no está disponible/);
+    }, processOwner), /filtros no está disponible/);
+    assert.throws(() => assertReportFilterAccess({ processOwnerId: [processOwner.userId, "other-user"] }, processOwner), /filtros no está disponible/);
 });
 //# sourceMappingURL=reports.authorization.test.js.map

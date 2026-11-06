@@ -1,4 +1,5 @@
 import { AppError } from "../../utils/app-error.js";
+import { parseDatabaseJson, parseDatabaseJsonArray, toDatabaseJson, } from "../../services/logging-utils.js";
 import { prisma } from "../../utils/prisma.js";
 import { getEvidenceReviewRuntimeSummary, getSpecialRequestRuntimeSummary, restoreWorkflowRuntimeContext, } from "./workflow-runtime-context.js";
 import { writeRuntimeAuditEvent, writeRuntimeTransitionLog, } from "./workflow-runtime-events.js";
@@ -6,17 +7,26 @@ import { loadPinnedWorkflowGraph } from "./workflow-runtime-graph.js";
 import { WORKFLOW_RUNTIME_ERROR_CODES, WorkflowRuntimeError, } from "./workflow-runtime-errors.js";
 import { executeAutomaticNodes, } from "./workflow-runtime.service.js";
 import { getWorkflowEntityAdapter } from "./workflow-entity-adapters.js";
-import { createWorkflowDecisionNotification, deliverWorkflowNotificationsForInstance, } from "./workflow-notification.service.js";
+import { createWorkflowDecisionNotification, deliverWorkflowNotificationsInBackground, } from "./workflow-notification.service.js";
 import { cancelWorkflowTaskTimers } from "./workflow-timer.service.js";
 import { WORKFLOW_DEFAULT_DUE_SOON_HOURS } from "./workflows.constants.js";
 import { getWorkflowSlaState } from "./workflow-sla.js";
 import { selectRuntimeTransition } from "./workflow-transition-resolver.js";
 import { workflowTaskActionPermissions, } from "./workflow-runtime.validators.js";
 import { workflowNodeConfigurationSchema } from "./workflows.validators.js";
-const asJson = (value) => value ?? {};
+const asJson = (value) => toDatabaseJson(value ?? {});
 const assertPermission = (access, permission) => {
     if (!access.permissions.includes(permission)) {
         throw new AppError(`Falta el permiso requerido: ${permission}.`, 403);
+    }
+};
+const assertTaskReadPermission = (access) => {
+    if (![
+        "workflow_tasks.view",
+        ...Object.values(workflowTaskActionPermissions),
+        "workflow_tasks.reassign",
+    ].some((permission) => access.permissions.includes(permission))) {
+        throw new AppError("Falta un permiso para consultar tareas del flujo de trabajo.", 403);
     }
 };
 export const taskIsActionable = (status) => status === "PENDING" || status === "IN_PROGRESS";
@@ -68,6 +78,9 @@ const getTaskRecord = async (db, taskId) => db.workflowTask.findUnique({
     where: { id: taskId },
 });
 const getNodeConfiguration = (configurationJson) => {
+    if (typeof configurationJson === "string") {
+        configurationJson = parseDatabaseJson(configurationJson, "workflow_nodes.configuration_json");
+    }
     const parsed = workflowNodeConfigurationSchema.safeParse(configurationJson);
     if (!parsed.success) {
         throw new WorkflowRuntimeError(WORKFLOW_RUNTIME_ERROR_CODES.RUNTIME_CONFIGURATION, "La configuración publicada de la tarea no es válida.");
@@ -91,9 +104,17 @@ const actionStatus = {
     REJECT: "REJECTED",
     REQUEST_CORRECTION: "CORRECTION_REQUESTED",
 };
-const getAllowedActions = (configuration) => configuration.nodeType === "STAGE" || configuration.nodeType === "APPROVAL"
-    ? configuration.allowedActions
-    : [];
+const getAllowedActions = (configuration, permissions) => {
+    const actions = configuration.nodeType === "STAGE" || configuration.nodeType === "APPROVAL"
+        ? configuration.allowedActions
+        : [];
+    return permissions
+        ? actions.filter((action) => {
+            const permission = workflowTaskActionPermissions[action];
+            return permission ? permissions.includes(permission) : false;
+        })
+        : actions;
+};
 const activeTaskWhere = (input) => ({
     AND: [
         taskAuthorizationWhere(input.userId),
@@ -126,7 +147,7 @@ export const findActiveWorkflowTasksForEntities = async (input) => {
         if (result.has(task.instance.entityId))
             continue;
         result.set(task.instance.entityId, {
-            allowedActions: getAllowedActions(getNodeConfiguration(task.node.configurationJson)),
+            allowedActions: getAllowedActions(getNodeConfiguration(task.node.configurationJson), input.permissions),
             canAct: true,
             id: task.id,
             status: task.status,
@@ -166,14 +187,14 @@ const mapTask = (task, access, canAct) => {
     if (!task)
         return null;
     const configuration = getNodeConfiguration(task.node.configurationJson);
-    const allowedActions = getAllowedActions(configuration);
+    const allowedActions = getAllowedActions(configuration, access.permissions);
     const context = restoreWorkflowRuntimeContext(task.instance.processType, task.instance.contextJson);
     const relatedRecordUrl = getWorkflowEntityAdapter(task.instance.processType)?.getEntityLink?.(task.instance.entityId, context);
     return {
         assignedArea: task.assignedArea,
         assignedRole: task.assignedRole,
         assignedUser: task.assignedUser,
-        assignmentSnapshot: task.assignmentSnapshotJson,
+        assignmentSnapshot: parseDatabaseJson(task.assignmentSnapshotJson, "workflow_tasks.assignment_snapshot_json"),
         canAct,
         comments: task.comments,
         completedAt: task.completedAt?.toISOString() ?? null,
@@ -182,7 +203,7 @@ const mapTask = (task, access, canAct) => {
         dueAt: task.dueAt?.toISOString() ?? null,
         dueState: getTaskDueState(task.dueAt, task.timers),
         entrySequence: task.entrySequence,
-        evidenceReferences: task.evidenceReferencesJson,
+        evidenceReferences: parseDatabaseJson(task.evidenceReferencesJson, "workflow_tasks.evidence_references_json"),
         id: task.id,
         instance: {
             entityId: task.instance.entityId,
@@ -331,7 +352,7 @@ const sortOrder = (query) => {
 };
 export const workflowTaskService = {
     async listMyPending(query, access) {
-        assertPermission(access, "workflow_tasks.view");
+        assertTaskReadPermission(access);
         const where = buildTaskWhere(access.userId, query);
         const [total, tasks] = await prisma.$transaction([
             prisma.workflowTask.count({ where }),
@@ -366,7 +387,7 @@ export const workflowTaskService = {
             data: tasks.map((task) => {
                 const configuration = getNodeConfiguration(task.node.configurationJson);
                 const context = restoreWorkflowRuntimeContext(task.instance.processType, task.instance.contextJson);
-                const assignment = task.assignmentSnapshotJson;
+                const assignment = parseDatabaseJson(task.assignmentSnapshotJson, "workflow_tasks.assignment_snapshot_json");
                 const assignmentRecord = assignment &&
                     typeof assignment === "object" &&
                     !Array.isArray(assignment)
@@ -404,17 +425,14 @@ export const workflowTaskService = {
                     },
                     priority: null,
                     status: task.status,
-                    allowedActions: configuration.nodeType === "STAGE" ||
-                        configuration.nodeType === "APPROVAL"
-                        ? configuration.allowedActions
-                        : [],
+                    allowedActions: getAllowedActions(configuration, access.permissions),
                 };
             }),
             pagination: { page: query.page, perPage: query.perPage, total },
         };
     },
     async getTask(taskId, access) {
-        assertPermission(access, "workflow_tasks.view");
+        assertTaskReadPermission(access);
         const task = await getTaskRecord(prisma, taskId);
         if (!task)
             throw new AppError("No se encontró la tarea solicitada.", 404);
@@ -614,7 +632,7 @@ export const workflowTaskService = {
                 task: mapTask(refreshed, access, false),
             };
         });
-        await deliverWorkflowNotificationsForInstance(result.instanceId);
+        deliverWorkflowNotificationsInBackground(result.instanceId);
         return result.task;
     },
     async reassignTask(taskId, input, access) {
@@ -662,9 +680,7 @@ export const workflowTaskService = {
                 assignedUserId: task.assignedUserId,
             };
             const history = [
-                ...(Array.isArray(task.assignmentHistoryJson)
-                    ? task.assignmentHistoryJson
-                    : []),
+                ...parseDatabaseJsonArray(task.assignmentHistoryJson, "workflow_tasks.assignment_history_json"),
                 {
                     actorUserId: access.userId,
                     comment: input.comment?.trim() || null,

@@ -1,8 +1,8 @@
-import { Prisma } from "../../../generated/prisma/client.js";
 import { emailTemplateNames } from "../../emails/templates/index.js";
 import { activityLogService } from "../../services/activity-log-service.js";
 import { auditLogService } from "../../services/audit-log-service.js";
-import { toLogJsonValue } from "../../services/logging-utils.js";
+import { parseDatabaseJson, toDatabaseJson, } from "../../services/logging-utils.js";
+import { WorkflowAssignmentStrategy, WorkflowConditionLogicOperator, WorkflowConditionOperator, WorkflowNodeType, parseDatabaseEnum, } from "../../types/database-enums.js";
 import { AppError } from "../../utils/app-error.js";
 import { prisma } from "../../utils/prisma.js";
 import { WORKFLOW_ASSIGNMENT_STRATEGY_VALUES, WORKFLOW_ACTIVITY_ACTIONS, WORKFLOW_CONDITION_FIELD_VALUES, WORKFLOW_CONDITION_OPERATOR_VALUES, WORKFLOW_DEFINITION_ENTITY_TYPE, WORKFLOW_PROCESS_TYPE_CATALOG, WORKFLOW_TRANSITION_TYPE_VALUES, WORKFLOW_VERSION_ENTITY_TYPE, } from "./workflows.constants.js";
@@ -217,6 +217,24 @@ const workflowVersionDetailSelect = {
 const mapWorkflowVersionDetail = (version) => ({
     ...version,
     counts: version._count,
+    nodes: version.nodes.map((node) => ({
+        ...node,
+        configurationJson: workflowNodeConfigurationSchema.parse(parseDatabaseJson(node.configurationJson, "workflow_nodes.configuration_json")),
+    })),
+    transitions: version.transitions.map((transition) => ({
+        ...transition,
+        conditionGroup: transition.conditionGroup
+            ? {
+                ...transition.conditionGroup,
+                logicOperator: parseDatabaseEnum(WorkflowConditionLogicOperator, transition.conditionGroup.logicOperator, "workflow_condition_groups.logic_operator"),
+                conditions: transition.conditionGroup.conditions.map((condition) => ({
+                    ...condition,
+                    operator: parseDatabaseEnum(WorkflowConditionOperator, condition.operator, "workflow_condition_rules.operator"),
+                    valueJson: parseDatabaseJson(condition.valueJson, "workflow_condition_rules.value_json"),
+                })),
+            }
+            : null,
+    })),
 });
 const workflowCloneSelect = {
     conditionGroups: {
@@ -256,13 +274,7 @@ const normalizeOptionalText = (value) => {
     const trimmed = value.trim();
     return trimmed.length > 0 ? trimmed : null;
 };
-const toInputJsonValue = (value) => {
-    const serialized = toLogJsonValue(value);
-    if (serialized === null) {
-        return {};
-    }
-    return serialized;
-};
+const toInputJsonValue = (value) => toDatabaseJson(value);
 const assertPermission = (access, permission) => {
     if (!access.permissions.includes(permission)) {
         throw new AppError(`Falta el permiso requerido: ${permission}.`, 403);
@@ -280,7 +292,7 @@ export const assertDraftWorkflowVersion = (status) => {
 };
 export const assertWorkflowCanStartInstance = (status) => {
     if (status !== "PUBLISHED") {
-        throw new AppError("Solo se pueden iniciar instancias con workflows publicados.", 409);
+        throw new AppError("Solo se pueden iniciar instancias con flujos de trabajo publicados.", 409);
     }
 };
 export const assertCanPublishWorkflowVersion = (access) => {
@@ -357,7 +369,7 @@ export const validateDesignerGraph = (input, processType) => {
             node.configurationJson.processType !== processType) {
             addDesignerIssue(result, {
                 code: "START_PROCESS_MISMATCH",
-                message: "El proceso del nodo Inicio debe coincidir con el workflow.",
+                message: "El proceso del nodo Inicio debe coincidir con el flujo de trabajo.",
                 nodeKey: node.nodeKey,
                 severity: "error",
             });
@@ -482,7 +494,7 @@ const getWorkflowDefinition = async (db, workflowId) => {
         },
     });
     if (!definition) {
-        throw new AppError("El workflow solicitado no existe.", 404);
+        throw new AppError("El flujo de trabajo solicitado no existe.", 404);
     }
     return mapWorkflowDefinition(definition);
 };
@@ -512,7 +524,7 @@ const getWorkflowVersionForClone = async (db, workflowId, sourceVersionId) => {
                 where: baseWhere,
             })));
     if (!version) {
-        throw new AppError("La versión origen no existe dentro del workflow.", 404);
+        throw new AppError("La versión de origen no existe dentro del flujo de trabajo.", 404);
     }
     return version;
 };
@@ -562,7 +574,7 @@ const cloneVersionContents = async (db, source, workflowVersionId) => {
     for (const sourceNode of source.nodes) {
         const node = await db.workflowNode.create({
             data: {
-                configurationJson: toInputJsonValue(sourceNode.configurationJson),
+                configurationJson: toInputJsonValue(parseDatabaseJson(sourceNode.configurationJson, "workflow_nodes.configuration_json")),
                 description: sourceNode.description,
                 name: sourceNode.name,
                 nodeKey: sourceNode.nodeKey,
@@ -594,10 +606,10 @@ const cloneVersionContents = async (db, source, workflowVersionId) => {
                         sequence: condition.sequence,
                         ...(condition.valueJson === null
                             ? {
-                                valueJson: Prisma.JsonNull,
+                                valueJson: toDatabaseJson(null),
                             }
                             : {
-                                valueJson: toInputJsonValue(condition.valueJson),
+                                valueJson: toInputJsonValue(parseDatabaseJson(condition.valueJson, "workflow_condition_rules.value_json")),
                             }),
                     })),
                 },
@@ -737,14 +749,15 @@ const NO_VALUE_CONDITION_OPERATORS = new Set([
 const mapPersistedDesignerInput = (version) => {
     const nodes = [];
     for (const node of version.nodes) {
-        const parsedConfiguration = workflowNodeConfigurationSchema.safeParse(node.configurationJson);
+        const parsedConfiguration = workflowNodeConfigurationSchema.safeParse(parseDatabaseJson(node.configurationJson, "workflow_nodes.configuration_json"));
         if (!parsedConfiguration.success) {
             throw new AppError(`La configuración del nodo ${node.nodeKey} no es válida.`, 409);
         }
         nodes.push({
-            assignmentStrategy: node.assignmentStrategy === "MANAGEMENT"
+            assignmentStrategy: node.assignmentStrategy === null ||
+                node.assignmentStrategy === "MANAGEMENT"
                 ? null
-                : node.assignmentStrategy,
+                : parseDatabaseEnum(WorkflowAssignmentStrategy, node.assignmentStrategy, "workflow_nodes.assignment_strategy"),
             configurationJson: parsedConfiguration.data,
             description: node.description,
             id: node.id,
@@ -752,7 +765,7 @@ const mapPersistedDesignerInput = (version) => {
             nodeKey: node.nodeKey,
             positionX: node.positionX,
             positionY: node.positionY,
-            type: node.type,
+            type: parseDatabaseEnum(WorkflowNodeType, node.type, "workflow_nodes.type"),
         });
     }
     const outgoingTransitionCount = new Map();
@@ -785,14 +798,14 @@ const mapPersistedDesignerInput = (version) => {
                             description: condition.description,
                             field: canonicalizeWorkflowConditionField(condition.field) ??
                                 condition.field,
-                            operator: condition.operator,
+                            operator: parseDatabaseEnum(WorkflowConditionOperator, condition.operator, "workflow_condition_rules.operator"),
                             resultLabel: null,
                             sequence: condition.sequence,
-                            value: condition.valueJson,
+                            value: parseDatabaseJson(condition.valueJson, "workflow_condition_rules.value_json"),
                         })),
                         description: transition.conditionGroup.description,
                         id: transition.conditionGroup.id,
-                        logicOperator: transition.conditionGroup.logicOperator,
+                        logicOperator: parseDatabaseEnum(WorkflowConditionLogicOperator, transition.conditionGroup.logicOperator, "workflow_condition_groups.logic_operator"),
                     },
                 conditionGroupId: transition.conditionGroupId,
                 id: transition.id,
@@ -812,7 +825,7 @@ const mapPersistedDesignerInput = (version) => {
 };
 const buildDesignerResult = (version, access) => {
     if (version.definition.status === "ARCHIVED") {
-        throw new AppError("No se puede abrir el diseñador de un workflow archivado.", 409);
+        throw new AppError("No se puede abrir el diseñador de un flujo de trabajo archivado.", 409);
     }
     const canEdit = version.status === "DRAFT" &&
         access.permissions.includes(WORKFLOW_PERMISSIONS.edit);
@@ -846,7 +859,7 @@ const getDesignerVersion = async (db, versionId) => {
         },
     });
     if (!version) {
-        throw new AppError("La versión de workflow solicitada no existe.", 404);
+        throw new AppError("La versión del flujo de trabajo solicitada no existe.", 404);
     }
     return version;
 };
@@ -922,7 +935,7 @@ const copyConditionGroupData = (conditionGroup) => ({
             operator: condition.operator,
             sequence: condition.sequence ?? index,
             valueJson: condition.value === undefined || condition.value === null
-                ? Prisma.JsonNull
+                ? toDatabaseJson(null)
                 : toInputJsonValue(condition.value),
         })),
     },
@@ -943,11 +956,11 @@ const getConditionGroupForTransition = (transition, sourceNode, outgoingTransiti
                 operator: condition.operator,
                 resultLabel: null,
                 sequence: condition.sequence,
-                value: condition.valueJson,
+                value: parseDatabaseJson(condition.valueJson, "workflow_condition_rules.value_json"),
             })),
             description: existingGroup.description,
             id: existingGroup.id,
-            logicOperator: existingGroup.logicOperator,
+            logicOperator: parseDatabaseEnum(WorkflowConditionLogicOperator, existingGroup.logicOperator, "workflow_condition_groups.logic_operator"),
         };
     }
     if (sourceNode.configurationJson.nodeType === "CONDITION" &&
@@ -1088,6 +1101,14 @@ const persistDesignerGraph = async (db, version, input) => {
         .map((node) => node.id)
         .filter((nodeId) => !persistedNodeIds.has(nodeId));
     if (removedNodeIds.length > 0) {
+        await db.workflowTransitionLog.updateMany({
+            where: { sourceNodeId: { in: removedNodeIds } },
+            data: { sourceNodeId: null },
+        });
+        await db.workflowTransitionLog.updateMany({
+            where: { targetNodeId: { in: removedNodeIds } },
+            data: { targetNodeId: null },
+        });
         await db.workflowNode.deleteMany({
             where: {
                 id: {
@@ -1402,7 +1423,7 @@ export const workflowService = {
         return prisma.$transaction(async (db) => {
             const previous = await getWorkflowDefinition(db, workflowId);
             if (previous.status === "ARCHIVED") {
-                throw new AppError("Un workflow archivado no se puede modificar.", 409);
+                throw new AppError("Un flujo de trabajo archivado no se puede modificar.", 409);
             }
             if (input.processType !== undefined &&
                 input.processType !== previous.processType) {
@@ -1413,7 +1434,7 @@ export const workflowService = {
                     },
                 });
                 if (previous._count.instances > 0 || publishedVersionCount > 0) {
-                    throw new AppError("No se puede cambiar el proceso de un workflow publicado o con instancias.", 409);
+                    throw new AppError("No se puede cambiar el proceso de un flujo de trabajo publicado o con instancias.", 409);
                 }
             }
             const current = await db.workflowDefinition.update({
@@ -1531,7 +1552,7 @@ export const workflowService = {
         return prisma.$transaction(async (db) => {
             const definition = await getWorkflowDefinition(db, workflowId);
             if (definition.status === "ARCHIVED") {
-                throw new AppError("No se pueden crear versiones en un workflow archivado.", 409);
+                throw new AppError("No se pueden crear versiones de un flujo de trabajo archivado.", 409);
             }
             const source = await getWorkflowVersionForClone(db, workflowId, input.sourceVersionId);
             const versionNumber = await getNextVersionNumber(db, workflowId);
@@ -1545,17 +1566,18 @@ export const workflowService = {
             if (!result) {
                 throw new AppError("No se pudo cargar la versión recién creada.", 500);
             }
+            const mappedVersion = mapWorkflowVersionDetail(result);
             await writeWorkflowAudit({
                 access,
                 action: WORKFLOW_ACTIVITY_ACTIONS.createVersion,
                 db,
                 entityId: result.id,
                 entityType: WORKFLOW_VERSION_ENTITY_TYPE,
-                newValues: result,
+                newValues: mappedVersion,
                 oldValues: null,
                 summary: `Se creó la versión ${result.versionNumber} del workflow.`,
             });
-            return mapWorkflowVersionDetail(result);
+            return mappedVersion;
         });
     },
     async listWorkflowVersions(workflowId, query, access) {
@@ -1596,7 +1618,7 @@ export const workflowService = {
             },
         });
         if (!version) {
-            throw new AppError("La versión de workflow solicitada no existe.", 404);
+            throw new AppError("La versión del flujo de trabajo solicitada no existe.", 404);
         }
         return mapWorkflowVersionDetail(version);
     },
@@ -1615,7 +1637,7 @@ export const workflowService = {
         return prisma.$transaction(async (db) => {
             const version = await getDesignerVersion(db, versionId);
             if (version.definition.status === "ARCHIVED") {
-                throw new AppError("No se puede guardar el diseñador de un workflow archivado.", 409);
+                throw new AppError("No se puede guardar el diseñador de un flujo de trabajo archivado.", 409);
             }
             assertDraftWorkflowVersion(version.status);
             assertPersistableDesignerGraph(parsedInput, version.definition.processType);
@@ -1648,7 +1670,7 @@ export const workflowService = {
         return prisma.$transaction(async (db) => {
             const version = await getDesignerVersion(db, versionId);
             if (version.definition.status === "ARCHIVED") {
-                throw new AppError("No se puede validar el diseñador de un workflow archivado.", 409);
+                throw new AppError("No se puede validar el diseñador de un flujo de trabajo archivado.", 409);
             }
             assertDraftWorkflowVersion(version.status);
             let validation;
@@ -1765,7 +1787,7 @@ export const workflowService = {
         return prisma.$transaction(async (db) => {
             const version = await getDesignerVersion(db, versionId);
             if (version.definition.status === "ARCHIVED") {
-                throw new AppError("No se puede publicar un workflow archivado.", 409);
+                throw new AppError("No se puede publicar un flujo de trabajo archivado.", 409);
             }
             assertDraftWorkflowVersion(version.status);
             const graph = mapPersistedDesignerInput(version);

@@ -11,7 +11,7 @@ const id = (request) => auditReportIdParamSchema.parse({ id: value(request.param
 const classId = (request) => auditReportClassIdParamSchema.parse({ id: value(request.params.id) }).id;
 const userId = (request) => {
     if (!request.authorizationSummary)
-        throw new AppError("Authorization required.", 401);
+        throw new AppError("Se requiere autorización.", 401);
     return request.authorizationSummary.userId;
 };
 export const auditReportsController = {

@@ -9,7 +9,7 @@ export const errorMiddleware = (error, _request, response, _next) => {
         return;
     }
     if (error instanceof ZodError) {
-        logger.warn("Request validation failed.", {
+        logger.warn("Falló la validación de la solicitud.", {
             issues: error.flatten().fieldErrors,
         });
         const translateIssue = (issue) => {
@@ -56,8 +56,8 @@ export const errorMiddleware = (error, _request, response, _next) => {
         sendError(response, message, 400);
         return;
     }
-    logger.error("Unhandled application error.", {
-        message: error instanceof Error ? error.message : "Unknown error",
+    logger.error("Error de aplicación no controlado.", {
+        message: error instanceof Error ? error.message : "Error desconocido",
     });
     sendError(response, "Ocurrió un error interno al procesar la solicitud. Intente nuevamente y, si continúa, contacte al administrador.", 500);
 };

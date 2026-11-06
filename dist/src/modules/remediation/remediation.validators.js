@@ -21,7 +21,7 @@ export const updateRemediationPlanSchema = z
     .omit({ areaId: true })
     .partial()
     .refine((value) => Object.keys(value).length > 0, {
-    message: "At least one field is required.",
+    message: "Debe modificar al menos un campo.",
 });
 const fields = {
     description: z.string().trim().min(1).max(10_000),
@@ -35,7 +35,7 @@ export const updateActionPlanSchema = z
     .object(fields)
     .partial()
     .refine((value) => Object.keys(value).length > 0, {
-    message: "At least one field is required.",
+    message: "Debe modificar al menos un campo.",
 });
 export const actionPlanOptionsQuerySchema = z.object({
     areaId: csvArray(z.uuid()),

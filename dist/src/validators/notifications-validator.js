@@ -35,4 +35,7 @@ export const createNotificationSchema = z.object({
     dedupeKey: z.string().trim().max(255).nullable().optional(),
     userId: z.uuid(),
 });
+export const createNotificationsSchema = createNotificationSchema
+    .pick({ message: true, title: true, type: true, priority: true })
+    .extend({ userIds: z.array(z.uuid()).min(1) });
 //# sourceMappingURL=notifications-validator.js.map

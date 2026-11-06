@@ -23,7 +23,7 @@ const getQueryValue = (value) => {
 const getRequiredRoleId = (value) => {
     const roleId = Array.isArray(value) ? value[0] : value;
     if (!roleId) {
-        throw new AppError("Role id is required.", 400);
+        throw new AppError("Se requiere el identificador del rol.", 400);
     }
     return roleIdParamSchema.parse({
         id: roleId,

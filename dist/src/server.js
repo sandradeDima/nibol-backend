@@ -4,30 +4,38 @@ import { env } from "./utils/env.js";
 import { logger } from "./utils/logger.js";
 import { workflowTimerScheduler } from "./jobs/workflow-timer-scheduler.js";
 import { deadlineReminderScheduler } from "./jobs/deadline-monitor/deadline-reminder-scheduler.js";
+import { notificationEmailScheduler } from "./jobs/notification-email-scheduler.js";
+import { prisma } from "./utils/prisma.js";
 const server = createServer(app);
 const shutdown = (signal) => {
-    logger.info(`Received ${signal}. Shutting down server.`);
-    server.close(async (error) => {
-        if (error) {
-            logger.error("Server shutdown failed.", { message: error.message });
-            process.exit(1);
-        }
-        process.exit(0);
+    logger.info(`Se recibió la señal ${signal}. Se cerrará el servidor.`);
+    server.close((error) => {
+        void prisma.$disconnect().finally(() => {
+            if (error) {
+                logger.error("Falló el cierre del servidor.", { message: error.message });
+                process.exitCode = 1;
+                return;
+            }
+            process.exitCode = 0;
+        });
     });
 };
 server.listen(env.PORT, () => {
-    logger.info(`API server listening on http://localhost:${env.PORT}`);
+    logger.info(`Servidor de la API disponible en http://localhost:${env.PORT}`);
     workflowTimerScheduler.start();
     deadlineReminderScheduler.start();
+    notificationEmailScheduler.start();
 });
 process.on("SIGINT", () => {
     workflowTimerScheduler.stop();
     deadlineReminderScheduler.stop();
+    notificationEmailScheduler.stop();
     shutdown("SIGINT");
 });
 process.on("SIGTERM", () => {
     workflowTimerScheduler.stop();
     deadlineReminderScheduler.stop();
+    notificationEmailScheduler.stop();
     shutdown("SIGTERM");
 });
 //# sourceMappingURL=server.js.map

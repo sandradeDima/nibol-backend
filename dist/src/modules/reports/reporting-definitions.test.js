@@ -14,6 +14,7 @@ const scopedExecutor = {
 };
 const now = new Date("2026-08-12T12:00:00.000Z");
 test("clasifica vencimientos sin contar estados finales como atrasados", () => {
+    assert.equal(isObservationOverdue(new Date("2026-08-12T00:00:00.000Z"), { isFinal: false, key: "INICIADO" }, now), false);
     assert.equal(isObservationOverdue(new Date("2026-08-11T12:00:00.000Z"), {
         isFinal: false,
         key: "INICIADO",
@@ -28,8 +29,8 @@ test("clasifica vencimientos sin contar estados finales como atrasados", () => {
     }, 7, now), true);
 });
 test("asigna grupos y etiquetas de negocio deterministas", () => {
-    assert.equal(getObservationStatusGroup({ isFinal: false, key: "CON_AVANCE", name: "Con avance" }, false), "IN_REVIEW");
-    assert.equal(getObservationStatusGroup({ isFinal: false, key: "INICIADO", name: "Iniciado" }, true), "OVERDUE");
+    assert.equal(getObservationStatusGroup({ isFinal: false, isInitial: false, key: "CA", name: "Con avance" }, false), "IN_PROGRESS");
+    assert.equal(getObservationStatusGroup({ isFinal: false, isInitial: false, key: "I", name: "Iniciado" }, true), "OVERDUE");
     assert.equal(getRiskGroupLabel("ALTO", "Alto"), "Alto");
     assert.equal(getRiskGroupLabel("HIGH", "High"), "Alto");
 });
@@ -94,6 +95,15 @@ test("solo pendientes filtra por estado de observación y no por estado del plan
     const serialized = JSON.stringify(buildActionPlanWhere({ activeOnly: true }, scopedExecutor, now, "UTC"));
     assert.match(serialized, /"isFinal":false/);
     assert.doesNotMatch(serialized, /"status":\{"not":"CONCLUDED"\}/);
+});
+test("estado global separa observaciones pendientes y cerradas", () => {
+    const pending = JSON.stringify(buildActionPlanWhere({ globalStatus: "PENDING" }, scopedExecutor, now, "UTC"));
+    const closed = JSON.stringify(buildActionPlanWhere({ globalStatus: "CLOSED" }, scopedExecutor, now, "UTC"));
+    assert.match(pending, /"isFinal":false/);
+    assert.doesNotMatch(pending, /"isFinal":true/);
+    assert.match(closed, /"isFinal":true/);
+    assert.doesNotMatch(closed, /"isFinal":false/);
+    assert.equal(reportFiltersSchema.parse({ globalStatus: "CLOSED" }).globalStatus, "CLOSED");
 });
 test("combina estados de observación y plazo con OR dentro de cada dimensión", () => {
     const serialized = JSON.stringify(buildActionPlanWhere({

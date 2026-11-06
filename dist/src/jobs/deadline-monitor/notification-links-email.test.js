@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { deadlineReminderEmailTemplate } from "../../emails/templates/deadline-reminder-email.js";
+import { observationAssignmentEmailTemplate } from "../../emails/templates/observation-assignment-email.js";
 import { DEADLINE_REMINDER_ROLES } from "./deadline-reminder.constants.js";
 import { resolveNotificationTarget } from "../../utils/notification-links.js";
 test("resuelve el registro exacto de cada evento notificable", () => {
@@ -30,11 +31,14 @@ test("resuelve el registro exacto de cada evento notificable", () => {
     }), "/aprobaciones/flujos/task-1");
     assert.equal(resolveNotificationTarget({ entityType: "DEADLINE_REMINDER" }), "/planes-accion?filter.status=NOT_STARTED,STARTED,WITH_PROGRESS");
 });
-test("el digest muestra el total, colores canónicos y solo el top 8", () => {
+test("el recordatorio agrupa observaciones únicas por área y muestra los dos gráficos", () => {
     const sample = deadlineReminderEmailTemplate.sampleVariables;
     const plans = Array.from({ length: 10 }, (_, index) => ({
         ...sample.plans[0],
+        area: index % 2 === 0 ? "Finanzas" : "Operaciones",
         observation: `OBS-${index}`,
+        observationId: index === 8 ? "obs-0" : `obs-${index}`,
+        officialProgressPercent: index === 8 ? 20 : 60,
         plan: `Plan ${index}`,
         risk: index % 3 === 0 ? "Alto" : index % 3 === 1 ? "Medio" : "Bajo",
         riskColorToken: index % 3 === 0 ? "high" : index % 3 === 1 ? "medium" : "low",
@@ -50,14 +54,42 @@ test("el digest muestra el total, colores canónicos y solo el top 8", () => {
         },
         variables: { ...sample, plans },
     });
-    assert.match(rendered.html, /Total pendientes: 10/);
-    assert.match(rendered.html, /#D92D20/);
-    assert.match(rendered.html, /#DC6803/);
-    assert.match(rendered.html, /#027A48/);
-    assert.match(rendered.html, /OBS-7/);
-    assert.doesNotMatch(rendered.html, /OBS-8/);
+    assert.match(rendered.html, /FINANZAS &nbsp; 4 Observaciones/);
+    assert.match(rendered.html, /OPERACIONES &nbsp; 5 Observaciones/);
+    assert.match(rendered.html, /ESTATUS AVANCE PLAN DE REMEDIACIÓN/);
+    assert.match(rendered.html, /CALIFICACIÓN DEL RIESGO/);
+    assert.match(rendered.html, /Concluido \(CO\)/);
+    assert.match(rendered.text, /FINANZAS · 4 Observaciones/);
+    assert.match(rendered.text, /No iniciado 0, Iniciado 1, Con avance 3, Concluido 0/);
+    assert.match(rendered.text, /Calificación del riesgo: Bajo 1, Medio 1, Alto 2/);
+    assert.match(rendered.text, /OPERACIONES · 5 Observaciones/);
+    assert.doesNotMatch(rendered.html, /Al corte del/);
     assert.match(rendered.html, /Ver pendientes en NIBOL/);
+    assert.doesNotMatch(rendered.html, />(Responsable de área|Dueño del proceso|Ejecutor)<\/div>/);
+    assert.doesNotMatch(rendered.text, /^(Responsable de área|Dueño del proceso|Ejecutor)$/m);
     assert.match(rendered.subject, /^NIBOL ·/);
+});
+test("la asignación usa el digest consolidado de auditoría", () => {
+    const sample = observationAssignmentEmailTemplate.sampleVariables;
+    const rendered = observationAssignmentEmailTemplate.render({
+        brand: {
+            appName: "NIBOL Bolivia",
+            logoUrl: null,
+            primaryColor: "#07142d",
+            senderEmail: "no-reply@nibol.test",
+            senderName: "NIBOL",
+            supportEmail: "support@nibol.test",
+        },
+        variables: sample,
+    });
+    assert.match(rendered.html, /background:#19466f/);
+    assert.match(rendered.html, /Hallazgos asociados/);
+    assert.match(rendered.html, /Total Observaciones 1/);
+    assert.match(rendered.html, /Plazo máximo de remediación/);
+    assert.match(rendered.html, /Enlace a la plataforma/);
+    assert.ok(rendered.html.indexOf(">Alto<") < rendered.html.indexOf(">Bajo<"));
+    assert.doesNotMatch(rendered.html, /Nuevas observaciones asignadas/);
+    assert.doesNotMatch(rendered.html, /NIBOL BOLIVIA/);
 });
 test("el Jefe Auditor conserva visibilidad global sin recibir el digest operativo", () => {
     assert.equal(DEADLINE_REMINDER_ROLES.includes("AUDIT_CHIEF"), false);

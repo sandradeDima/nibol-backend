@@ -51,7 +51,19 @@ export const PERMISSION_RESOURCES = [
     ...CORE_PERMISSION_RESOURCES,
     ...generatedPermissionResources,
 ];
+const ADDITIONAL_MODULE_PERMISSION_RESOURCES = [
+    "reports",
+    "recommended_action_plans",
+    "evidence",
+    "deadline_extensions",
+    "observations.history",
+    "action_plans.history",
+];
 export const PERMISSION_ACTIONS = ["view", "create", "edit", "delete"];
+export const MODULE_PERMISSION_NAMES = [
+    ...PERMISSION_RESOURCES.map((resource) => `${resource}.view_module`),
+    ...ADDITIONAL_MODULE_PERMISSION_RESOURCES.map((resource) => `${resource}.view_module`),
+];
 export const buildPermissionName = (resource, action) => `${resource}.${action}`;
 export const DEFAULT_PERMISSION_NAMES = PERMISSION_RESOURCES.flatMap((resource) => PERMISSION_ACTIONS.map((action) => buildPermissionName(resource, action)));
 export const WORKFLOW_PERMISSION_NAMES = [
@@ -82,6 +94,10 @@ export const WORKFLOW_PERMISSION_NAMES = [
 export const REPORT_PERMISSION_NAMES = [
     "reports.view",
     "reports.export",
+];
+export const ACTIVITY_PERMISSION_NAMES = [
+    "activity.export",
+    "activity.technical",
 ];
 export const AUDIT_REPORT_PERMISSION_NAMES = [
     "audit_reports.view",
@@ -119,8 +135,10 @@ export const OBSERVATION_DOMAIN_PERMISSION_NAMES = [
 ];
 export const ALL_PERMISSION_NAMES = Array.from(new Set([
     ...DEFAULT_PERMISSION_NAMES,
+    ...MODULE_PERMISSION_NAMES,
     ...WORKFLOW_PERMISSION_NAMES,
     ...REPORT_PERMISSION_NAMES,
+    ...ACTIVITY_PERMISSION_NAMES,
     ...AUDIT_REPORT_PERMISSION_NAMES,
     ...OBSERVATION_DOMAIN_PERMISSION_NAMES,
 ]));
@@ -181,27 +199,41 @@ const AREA_PERMISSIONS = [
     "progress_evaluations.view",
     "reports.view",
 ];
+const withModuleViewPermissions = (permissionNames) => {
+    const moduleViewPermissions = permissionNames
+        .filter((permissionName) => permissionName.endsWith(".view"))
+        .filter((permissionName) => permissionName !== "activity.view")
+        .map((permissionName) => `${permissionName.slice(0, -".view".length)}.view_module`)
+        .filter((permissionName) => MODULE_PERMISSION_NAMES.includes(permissionName));
+    return [...permissionNames, ...new Set(moduleViewPermissions)];
+};
 export const ROLE_PERMISSION_NAMES = {
     [ADMIN_ROLE_CODE]: ALL_PERMISSION_NAMES,
-    AUDITOR: AUDITOR_PERMISSIONS,
+    AUDITOR: withModuleViewPermissions(AUDITOR_PERMISSIONS),
     AUDIT_CHIEF: [
         "users.view",
         "areas.view",
         "observations.view",
+        "observations.view_module",
         "observations.history.view",
         "recommended_action_plans.view",
         "action_plans.view",
+        "action_plans.view_module",
         "action_plans.history.view",
         "evidence.view",
         "deadline_extensions.view",
         "progress_evaluations.view",
         "reports.view",
+        "reports.view_module",
         "reports.export",
-        "audit_reports.view",
-        "audit_reports.export",
+        "notifications.view",
+        "notifications.view_module",
     ],
-    PROCESS_OWNER: AREA_PERMISSIONS,
-    AREA_RESPONSIBLE: [
+    PROCESS_OWNER: withModuleViewPermissions([
+        ...AREA_PERMISSIONS,
+        "action_plans.evaluate",
+    ]),
+    AREA_RESPONSIBLE: withModuleViewPermissions([
         ...AREA_PERMISSIONS,
         "workflow_tasks.approve",
         "workflow_tasks.reject",
@@ -209,15 +241,14 @@ export const ROLE_PERMISSION_NAMES = {
         "action_plans.submit_to_audit",
         "deadline_extensions.approve",
         "deadline_extensions.reject",
-    ],
-    EXECUTOR: [
+    ]),
+    EXECUTOR: withModuleViewPermissions([
         "notifications.view",
         "workflow_tasks.view",
         "workflow_tasks.complete",
         "observations.view",
         "action_plans.view",
         "action_plans.create",
-        "action_plans.edit",
         "action_plans.submit_to_audit",
         "evidence.view",
         "evidence.create",
@@ -228,7 +259,7 @@ export const ROLE_PERMISSION_NAMES = {
         "deadline_extensions.request",
         "progress_evaluations.view",
         "reports.view",
-    ],
+    ]),
 };
 export const CRITICAL_ADMIN_PERMISSIONS = [...ALL_PERMISSION_NAMES];
 //# sourceMappingURL=definitions.js.map

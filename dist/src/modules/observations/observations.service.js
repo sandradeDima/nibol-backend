@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
-import { NotificationDeliveryChannel, NotificationDeliveryStatus, } from "../../../generated/prisma/client.js";
+import {} from "../../../generated/prisma/client.js";
+import { NotificationDeliveryChannel, NotificationDeliveryStatus, } from "../../types/database-enums.js";
 import { authorizationService, buildActionPlanScopeWhere, buildObservationAreaScopeWhere, buildObservationScopeWhere, } from "../../services/authorization-service.js";
 import { notificationService } from "../../services/notification-service.js";
+import { isNotificationChannelEnabled } from "../../services/notification-preferences.js";
 import { emailService } from "../../emails/EmailService.js";
 import { AppError } from "../../utils/app-error.js";
 import { logger } from "../../utils/logger.js";
@@ -10,6 +12,7 @@ import { prisma } from "../../utils/prisma.js";
 import { isObservationOverdue } from "../reports/reporting-definitions.js";
 import { countWorkflowTasksForObservation, observationAggregationService, } from "./observation-aggregation.service.js";
 import { observationDeadlineService } from "./observation-deadline.service.js";
+import { notifyActionPlanAssigned } from "../remediation/action-plan-notification.service.js";
 const userSummarySelect = {
     email: true,
     id: true,
@@ -124,6 +127,10 @@ const buildObservationInclude = (access) => ({
         },
         where: buildActionPlanScopeWhere(access),
     },
+    deadlineExtensionRequests: {
+        select: { id: true },
+        where: { deletedAt: null, status: "MANAGER_APPROVED" },
+    },
     areaAssignments: {
         include: {
             actionPlans: {
@@ -155,14 +162,16 @@ const buildObservationInclude = (access) => ({
         orderBy: { risk: { name: "asc" } },
         select: { risk: { select: { id: true, name: true } } },
     },
-    status: { select: { id: true, isFinal: true, key: true, name: true } },
+    status: {
+        select: {
+            id: true,
+            isFinal: true,
+            isInitial: true,
+            key: true,
+            name: true,
+        },
+    },
 });
-const businessStatusLabel = {
-    CONCLUIDO: "Concluido",
-    CON_AVANCE: "Con avance",
-    INICIADO: "Iniciado",
-    NO_INICIADO: "No iniciado",
-};
 const getWorkflowTaskCounts = async (records) => {
     const evaluationIds = records.flatMap((record) => record.actionPlans.flatMap((plan) => plan.progressEvaluations.map((evaluation) => evaluation.id)));
     const taskCounts = new Map();
@@ -195,8 +204,6 @@ const getWorkflowTaskCounts = async (records) => {
 const getRecordTaskCount = (record, taskCounts) => countWorkflowTasksForObservation(record.actionPlans.flatMap((plan) => plan.progressEvaluations.map((evaluation) => evaluation.id)), taskCounts);
 export const buildObservationAccessWhere = buildObservationScopeWhere;
 const formatObservation = (record, taskCount = { completed: 0, total: 0 }) => {
-    const progressPercent = observationAggregationService.calculateProgress(record.actionPlans);
-    const businessStatus = observationAggregationService.calculateStatus(record.actionPlans, record.status.isFinal);
     const now = new Date();
     const isOverdue = isObservationOverdue(record.currentDueDate, record.status, now);
     return {
@@ -217,11 +224,7 @@ const formatObservation = (record, taskCount = { completed: 0, total: 0 }) => {
         auditorUser: record.auditorUser,
         category: record.category,
         currentDueDate: record.currentDueDate.toISOString(),
-        deadlineStatus: record.status.isFinal
-            ? "NO_APLICA"
-            : isOverdue
-                ? "VENCIDO"
-                : "VIGENTE",
+        deadlineStatus: getObservationDeadlineStatus(record.status.isFinal, isOverdue, record.deadlineExtensionRequests.length > 0),
         currentStage: record.currentStage,
         description: record.description,
         displayCode: `${record.auditReport.reportNumber} / OBS-${String(record.observationNumber).padStart(3, "0")}`,
@@ -232,16 +235,11 @@ const formatObservation = (record, taskCount = { completed: 0, total: 0 }) => {
         observationNumber: record.observationNumber,
         originalDueDate: record.originalDueDate.toISOString(),
         process: record.process,
-        progressPercent,
+        progressPercent: record.progressPercent,
         risks: record.risks.map(({ risk }) => risk),
         riskLevel: record.riskLevel,
         source: record.source,
-        status: {
-            id: record.status.id,
-            isFinal: record.status.isFinal,
-            key: businessStatus,
-            name: businessStatusLabel[businessStatus],
-        },
+        status: record.status,
         completedTaskCount: taskCount.completed,
         taskCount: taskCount.total,
         title: record.title,
@@ -259,7 +257,7 @@ const requireEntities = async (input) => {
     ]));
     const [auditReport, mainObservation, riskLevel, risks, areas, users] = await Promise.all([
         prisma.auditReport.findFirst({
-            select: { id: true, reportDate: true },
+            select: { id: true, reportDate: true, reportNumber: true },
             where: { deletedAt: null, id: input.auditReportId },
         }),
         prisma.observationDictionary.findFirst({
@@ -316,7 +314,7 @@ const findRecord = async (id, access) => {
         },
     });
     if (!record)
-        throw new AppError("Observation not found.", 404);
+        throw new AppError("No se encontró la observación.", 404);
     return record;
 };
 const formatRecord = async (record) => {
@@ -360,6 +358,21 @@ const extensionRequestForObservationWhere = (observationId) => ({
         { observationArea: { observationId } },
     ],
 });
+const actionPlanStatusByObservationStatus = {
+    CON_AVANCE: "WITH_PROGRESS",
+    CONCLUIDO: "CONCLUDED",
+    INICIADO: "STARTED",
+    NO_INICIADO: "NOT_STARTED",
+};
+export const getObservationDeadlineStatus = (isFinal, isOverdue, isReprogrammed) => {
+    if (isFinal)
+        return "VIGENTE";
+    if (isOverdue)
+        return "VENCIDO";
+    if (isReprogrammed)
+        return "REPROGRAMADO";
+    return "VIGENTE";
+};
 const isObservationState = (value) => ["PENDING", "CONCLUDED"].includes(value);
 const isObservationProgressStatus = (value) => ["NO_INICIADO", "INICIADO", "CON_AVANCE", "CONCLUIDO"].includes(value);
 const buildObservationStateWhere = (states) => {
@@ -368,12 +381,19 @@ const buildObservationStateWhere = (states) => {
         return null;
     return { status: { isFinal: selectedStates.has("CONCLUDED") } };
 };
-const buildObservationProgressWhere = (statuses) => {
+export const buildObservationProgressWhere = (statuses, access) => {
     if (statuses.length === 0)
         return null;
-    if (statuses.length === 1)
-        return buildBusinessStatusWhere(statuses[0]);
-    return { OR: statuses.map((status) => buildBusinessStatusWhere(status)) };
+    return {
+        actionPlans: {
+            some: {
+                ...buildActionPlanScopeWhere(access),
+                status: {
+                    in: statuses.map((status) => actionPlanStatusByObservationStatus[status]),
+                },
+            },
+        },
+    };
 };
 const buildObservationDeadlineWhereForValues = (statuses, now) => {
     if (statuses.length === 0)
@@ -384,59 +404,31 @@ const buildObservationDeadlineWhereForValues = (statuses, now) => {
         OR: statuses.map((status) => buildObservationDeadlineWhere(status, now)),
     };
 };
-const buildBusinessStatusWhere = (status) => {
-    switch (status) {
-        case "NO_INICIADO":
-            return {
-                OR: [
-                    { actionPlans: { none: { deletedAt: null } } },
-                    {
-                        actionPlans: {
-                            every: {
-                                OR: [{ deletedAt: { not: null } }, { status: "NOT_STARTED" }],
-                            },
-                        },
-                    },
-                ],
-            };
-        case "INICIADO":
-            return {
-                actionPlans: {
-                    none: { deletedAt: null, progressPercent: { gt: 0 } },
-                    some: { deletedAt: null, status: "STARTED" },
-                },
-                status: { isFinal: false },
-            };
-        case "CON_AVANCE":
-            return {
-                actionPlans: {
-                    some: {
-                        deletedAt: null,
-                        OR: [
-                            { progressPercent: { gt: 0 } },
-                            { status: { in: ["WITH_PROGRESS", "CONCLUDED"] } },
-                        ],
-                    },
-                },
-                status: { isFinal: false },
-            };
-        case "CONCLUIDO":
-            return { status: { isFinal: true } };
-    }
-};
-const buildObservationDeadlineWhere = (deadlineStatus, now) => {
+export const buildObservationDeadlineWhere = (deadlineStatus, now) => {
+    const approvedExtension = {
+        deletedAt: null,
+        status: "MANAGER_APPROVED",
+    };
     switch (deadlineStatus) {
         case "REPROGRAMADO":
             return {
+                currentDueDate: { gte: now },
                 deadlineExtensionRequests: {
-                    some: { deletedAt: null, status: "MANAGER_APPROVED" },
+                    some: approvedExtension,
                 },
+                status: { isFinal: false },
             };
         case "VENCIDO":
             return { currentDueDate: { lt: now }, status: { isFinal: false } };
         case "VIGENTE":
             return {
-                OR: [{ currentDueDate: { gte: now } }, { status: { isFinal: true } }],
+                OR: [
+                    {
+                        currentDueDate: { gte: now },
+                        deadlineExtensionRequests: { none: approvedExtension },
+                    },
+                    { status: { isFinal: true } },
+                ],
             };
     }
 };
@@ -525,7 +517,19 @@ export const observationsService = {
                 }
                 return observation;
             });
-            return formatRecord(await findRecord(created.id, access));
+            const record = await findRecord(created.id, access);
+            await Promise.all(input.actionPlans.map((plan, index) => notifyActionPlanAssigned({
+                dedupeKey: `action-plan-created-with-observation:${created.id}:${index}`,
+                entityId: created.id,
+                entityType: "OBSERVATION",
+                eventType: "ACTION_PLAN_CREATED_WITH_OBSERVATION",
+                observationDisplayCode: `${auditReport.reportNumber} / OBS-${String(record.observationNumber).padStart(3, "0")}`,
+                observationId: created.id,
+                observationTitle: record.title,
+                planDescription: plan.description,
+                userId: plan.responsibleUserId,
+            })));
+            return formatRecord(record);
         }
         catch (error) {
             if (error.code === "P2002") {
@@ -539,13 +543,13 @@ export const observationsService = {
             throw new AppError("No tiene permiso para cerrar observaciones.", 403);
         const existing = await findRecord(id, access);
         if (existing.status.isFinal) {
-            throw new AppError("The observation is already concluded.", 409);
+            throw new AppError("La observación ya está concluida.", 409);
         }
         if (existing.actionPlans.length === 0) {
-            throw new AppError("At least one action plan is required before closure.", 409);
+            throw new AppError("Debe existir al menos un plan de acción antes de cerrar la observación.", 409);
         }
         if (existing.actionPlans.some((plan) => plan.status !== "CONCLUDED")) {
-            throw new AppError("All action plans must be concluded before closing the observation.", 409);
+            throw new AppError("Todos los planes de acción deben estar concluidos antes de cerrar la observación.", 409);
         }
         const pendingEvaluations = await prisma.progressEvaluation.count({
             where: {
@@ -555,14 +559,14 @@ export const observationsService = {
             },
         });
         if (pendingEvaluations > 0) {
-            throw new AppError("Pending progress evaluations must be resolved before closure.", 409);
+            throw new AppError("Debe resolver las evaluaciones de avance pendientes antes de cerrar la observación.", 409);
         }
         const concludedStatus = await prisma.observationStatus.findFirst({
             select: { id: true },
-            where: { active: true, deletedAt: null, key: "CONCLUIDO" },
+            where: { active: true, deletedAt: null, isFinal: true },
         });
         if (!concludedStatus) {
-            throw new AppError("The CONCLUIDO observation status is not configured.", 500);
+            throw new AppError("No está configurado el estado final de la observación.", 500);
         }
         await prisma.observation.update({
             data: {
@@ -700,6 +704,7 @@ export const observationsService = {
             });
             if (updated.count !== uniqueIds.length)
                 throw new AppError("Una o más observaciones ya fueron enviadas.", 409);
+            const emailEnabled = await isNotificationChannelEnabled("OBSERVATION_ASSIGNMENT", "email", tx.systemParameter);
             for (const group of groups) {
                 const targetUrl = group.observationIds.length === 1
                     ? `/observaciones/${group.observationIds[0]}?tab=summary`
@@ -719,27 +724,30 @@ export const observationsService = {
                     targetUrl,
                     userId: group.userId,
                 }, { db: tx });
-                await notificationService.createDelivery({
-                    channel: NotificationDeliveryChannel.IN_APP,
-                    dedupeKey: buildObservationSendDedupeKey(operationId, group.userId, "IN_APP"),
-                    notificationId: notification.id,
-                    recipientEmail: group.email,
-                    recipientUserId: group.userId,
-                    status: NotificationDeliveryStatus.SENT,
-                }, { db: tx.notificationDelivery });
-                const delivery = await notificationService.createDelivery({
-                    channel: NotificationDeliveryChannel.EMAIL,
-                    dedupeKey: buildObservationSendDedupeKey(operationId, group.userId, "EMAIL"),
-                    notificationId: notification.id,
-                    recipientEmail: group.email,
-                    recipientUserId: group.userId,
-                    status: NotificationDeliveryStatus.PENDING,
-                }, { db: tx.notificationDelivery });
-                emailDeliveries.push({ deliveryId: delivery.id, group });
+                if (notification)
+                    await notificationService.createDelivery({
+                        channel: NotificationDeliveryChannel.IN_APP,
+                        dedupeKey: buildObservationSendDedupeKey(operationId, group.userId, "IN_APP"),
+                        notificationId: notification.id,
+                        recipientEmail: group.email,
+                        recipientUserId: group.userId,
+                        status: NotificationDeliveryStatus.SENT,
+                    }, { db: tx.notificationDelivery });
+                if (emailEnabled) {
+                    const delivery = await notificationService.createDelivery({
+                        channel: NotificationDeliveryChannel.EMAIL,
+                        dedupeKey: buildObservationSendDedupeKey(operationId, group.userId, "EMAIL"),
+                        ...(notification ? { notificationId: notification.id } : {}),
+                        recipientEmail: group.email,
+                        recipientUserId: group.userId,
+                        status: NotificationDeliveryStatus.PENDING,
+                    }, { db: tx.notificationDelivery });
+                    emailDeliveries.push({ deliveryId: delivery.id, group });
+                }
             }
         });
         void Promise.all(emailDeliveries.map(async ({ deliveryId, group }) => {
-            if (!(await notificationService.claimEmailDelivery(deliveryId)))
+            if (!(await notificationService.claimEmailDelivery(deliveryId, "OBSERVATION_ASSIGNMENT")))
                 return;
             const targetUrl = group.observationIds.length === 1
                 ? `/observaciones/${group.observationIds[0]}?tab=summary`
@@ -757,8 +765,8 @@ export const observationsService = {
             });
             await notificationService.completeEmailDelivery(deliveryId, result);
         })).catch((error) => {
-            logger.error("Observation assignment email delivery failed.", {
-                message: error instanceof Error ? error.message : "Unknown error",
+            logger.error("Falló la entrega del correo de asignación de la observación.", {
+                message: error instanceof Error ? error.message : "Error desconocido",
             });
         });
         const current = await Promise.all(uniqueIds.map((observationId) => findRecord(observationId, access)));
@@ -868,7 +876,7 @@ export const observationsService = {
                 ...new Set(query.observationStatus?.filter(isObservationProgressStatus) ?? []),
             ];
         const stateWhere = buildObservationStateWhere(stateValues);
-        const progressWhere = buildObservationProgressWhere(progressStatuses);
+        const progressWhere = buildObservationProgressWhere(progressStatuses, access);
         const deadlineWhere = buildObservationDeadlineWhereForValues(query.deadlineStatus ?? [], today);
         const where = {
             AND: [
@@ -986,6 +994,7 @@ export const observationsService = {
                         {
                             actionPlans: {
                                 some: {
+                                    deletedAt: null,
                                     responsibleUser: {
                                         OR: [
                                             { name: { contains: query.search } },
@@ -1030,7 +1039,7 @@ export const observationsService = {
         if (input.areaAssignments !== undefined &&
             !access.isAdmin &&
             !access.permissions.includes("observation_areas.manage")) {
-            throw new AppError("You cannot change observation area assignments.", 403);
+            throw new AppError("No puede cambiar las asignaciones de áreas de la observación.", 403);
         }
         const merged = {
             areaAssignments: input.areaAssignments ??
@@ -1061,7 +1070,7 @@ export const observationsService = {
         const retainedAreaIds = new Set(merged.areaAssignments.map((row) => row.areaId));
         const blockedRemoval = existing.areaAssignments.find((row) => !retainedAreaIds.has(row.areaId) && row.actionPlans.length > 0);
         if (blockedRemoval) {
-            throw new AppError(`Area ${blockedRemoval.area.name} cannot be removed while it has action plans.`, 409);
+            throw new AppError(`No se puede quitar el área ${blockedRemoval.area.name} mientras tenga planes de acción.`, 409);
         }
         try {
             await prisma.$transaction(async (tx) => {
@@ -1112,12 +1121,27 @@ export const observationsService = {
                     });
                 }
                 if (input.areaAssignments) {
-                    await tx.observationArea.deleteMany({
+                    const removedAreas = await tx.observationArea.findMany({
                         where: {
                             observationId: id,
                             areaId: { notIn: input.areaAssignments.map((row) => row.areaId) },
                         },
+                        select: { id: true },
                     });
+                    const removedAreaIds = removedAreas.map((area) => area.id);
+                    if (removedAreaIds.length > 0) {
+                        await tx.evidenceFile.updateMany({
+                            where: { observationAreaId: { in: removedAreaIds } },
+                            data: { observationAreaId: null },
+                        });
+                        await tx.deadlineExtensionRequest.updateMany({
+                            where: { observationAreaId: { in: removedAreaIds } },
+                            data: { observationAreaId: null },
+                        });
+                        await tx.observationArea.deleteMany({
+                            where: { id: { in: removedAreaIds } },
+                        });
+                    }
                     for (const row of input.areaAssignments) {
                         await tx.observationArea.upsert({
                             create: { observationId: id, ...row },
@@ -1135,7 +1159,7 @@ export const observationsService = {
         }
         catch (error) {
             if (error.code === "P2002") {
-                throw new AppError("That observation number already exists in the selected audit report.", 409);
+                throw new AppError("Ese número de observación ya existe en el informe de auditoría seleccionado.", 409);
             }
             throw error;
         }

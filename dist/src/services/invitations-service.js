@@ -134,7 +134,7 @@ const assertRoleExists = async (roleId) => {
         },
     });
     if (!role) {
-        throw new AppError("The selected role is invalid.", 400);
+        throw new AppError("El rol seleccionado no es válido.", 400);
     }
 };
 const assertEmailAvailableForInvitation = async (email) => {
@@ -147,7 +147,7 @@ const assertEmailAvailableForInvitation = async (email) => {
         },
     });
     if (existingUser) {
-        throw new AppError("A user with this email already exists.", 400);
+        throw new AppError("Ya existe un usuario con ese correo electrónico.", 400);
     }
 };
 const assertNoActiveInvitationForEmail = async (email) => {
@@ -165,7 +165,7 @@ const assertNoActiveInvitationForEmail = async (email) => {
         },
     });
     if (existingInvitation) {
-        throw new AppError("An active invitation already exists for this email address.", 400);
+        throw new AppError("Ya existe una invitación activa para este correo electrónico.", 400);
     }
 };
 const getInvitationRecordById = async (invitationId) => {
@@ -228,7 +228,7 @@ const sendInvitationEmail = async (invitation, invitedByName) => {
         },
     });
     if (!result.success) {
-        throw new AppError("The invitation email could not be sent.", 502);
+        throw new AppError("No se pudo enviar el correo de invitación.", 502);
     }
 };
 const getInvitationForToken = async (token) => {
@@ -261,19 +261,19 @@ const getInvitationForToken = async (token) => {
 const getValidInvitationForAcceptance = async (token) => {
     const invitation = await getInvitationForToken(token);
     if (!invitation) {
-        throw new AppError("This invitation is invalid or no longer available.", 400);
+        throw new AppError("Esta invitación no es válida o ya no está disponible.", 400);
     }
     if (invitation.deletedAt) {
-        throw new AppError("This invitation has been revoked.", 400);
+        throw new AppError("Esta invitación fue revocada.", 400);
     }
     if (invitation.acceptedAt) {
-        throw new AppError("This invitation has already been accepted.", 400);
+        throw new AppError("Esta invitación ya fue aceptada.", 400);
     }
     if (invitation.expiresAt.getTime() <= Date.now()) {
-        throw new AppError("This invitation has expired.", 400);
+        throw new AppError("Esta invitación venció.", 400);
     }
     if (invitation.role.deletedAt) {
-        throw new AppError("The assigned role is no longer available.", 400);
+        throw new AppError("El rol asignado ya no está disponible.", 400);
     }
     return invitation;
 };
@@ -346,6 +346,7 @@ export const invitationsService = {
         await assertEmailAvailableForInvitation(invitation.email);
         const passwordHash = await bcrypt.hash(input.password, 12);
         const acceptedAt = new Date();
+        const acceptedNotification = { current: null };
         await prisma.$transaction(async (transaction) => {
             const previousInvitationSnapshot = await getInvitationAuditSnapshot(transaction, invitation.id);
             const user = await transaction.user.create({
@@ -410,7 +411,7 @@ export const invitationsService = {
                     ipAddress: context?.ipAddress ?? null,
                     metadata: {
                         email: createdUser.email,
-                        summary: `${createdUser.name} joined through an invitation.`,
+                        summary: `${createdUser.name} se unió mediante una invitación.`,
                     },
                 }, {
                     db: transaction,
@@ -423,7 +424,7 @@ export const invitationsService = {
                         ipAddress: context?.ipAddress ?? null,
                         metadata: {
                             roles: roleNames,
-                            summary: `Assigned ${roleNames.join(", ")} to ${createdUser.name}.`,
+                            summary: `Se asignó el rol ${roleNames.join(", ")} a ${createdUser.name}.`,
                         },
                     }, {
                         db: transaction,
@@ -448,21 +449,32 @@ export const invitationsService = {
                     metadata: {
                         email: nextInvitationSnapshot.email,
                         roleName: nextInvitationSnapshot.roleName,
-                        summary: `${nextInvitationSnapshot.email} accepted an invitation.`,
+                        summary: `${nextInvitationSnapshot.email} aceptó una invitación.`,
                     },
                 }, {
                     db: transaction,
                 });
-                await notificationService.create({
-                    message: `${nextInvitationSnapshot.email} accepted the ${nextInvitationSnapshot.roleName} invitation.`,
-                    title: "Invitation accepted",
-                    type: "success",
+                acceptedNotification.current = {
+                    message: `${nextInvitationSnapshot.email} aceptó la invitación para el rol ${nextInvitationSnapshot.roleName}.`,
                     userId: invitation.createdBy.id,
-                }, {
-                    db: transaction,
-                });
+                };
+                const notification = acceptedNotification.current;
+                await notificationService.create({
+                    eventType: "INVITATION_ACCEPTED",
+                    message: notification.message,
+                    title: "Invitación aceptada",
+                    type: "success",
+                    userId: notification.userId,
+                }, { db: transaction });
             }
         });
+        if (acceptedNotification.current)
+            await notificationService.sendEmailNotification({
+                eventType: "INVITATION_ACCEPTED",
+                message: acceptedNotification.current.message,
+                title: "Invitación aceptada",
+                userId: acceptedNotification.current.userId,
+            });
         void emailService.sendTemplate({
             template: "welcome",
             to: invitation.email,
@@ -515,7 +527,7 @@ export const invitationsService = {
                     metadata: {
                         email: createdSnapshot.email,
                         roleName: createdSnapshot.roleName,
-                        summary: `Sent an invitation to ${createdSnapshot.email}.`,
+                        summary: `Se envió una invitación a ${createdSnapshot.email}.`,
                     },
                 }, {
                     db: transaction,
@@ -561,13 +573,13 @@ export const invitationsService = {
         }
         void notificationService
             .create({
-            message: `${invitationDetails.email} was invited as ${invitationDetails.role.name}.`,
-            title: "User invited",
+            message: `Se invitó a ${invitationDetails.email} con el rol ${invitationDetails.role.name}.`,
+            title: "Usuario invitado",
             type: "success",
             userId: createdById,
         })
             .catch((error) => {
-            logger.error("Failed to create invitation notification.", {
+            logger.error("No se pudo crear la notificación de invitación.", {
                 error: error instanceof Error ? error.message : String(error),
                 invitationId: invitation.id,
                 userId: createdById,
@@ -587,7 +599,7 @@ export const invitationsService = {
     async getInvitationById(invitationId) {
         const invitation = await getInvitationRecordById(invitationId);
         if (!invitation) {
-            throw new AppError("Invitation not found.", 404);
+            throw new AppError("No se encontró la invitación.", 404);
         }
         return mapInvitationRecord(invitation);
     },
@@ -660,16 +672,16 @@ export const invitationsService = {
             },
         });
         if (!invitation) {
-            throw new AppError("Invitation not found.", 404);
+            throw new AppError("No se encontró la invitación.", 404);
         }
         if (invitation.acceptedAt) {
-            throw new AppError("Accepted invitations cannot be resent.", 400);
+            throw new AppError("No se pueden reenviar invitaciones aceptadas.", 400);
         }
         if (invitation.deletedAt) {
-            throw new AppError("Revoked invitations cannot be resent.", 400);
+            throw new AppError("No se pueden reenviar invitaciones revocadas.", 400);
         }
         if (invitation.role.deletedAt) {
-            throw new AppError("The assigned role is no longer available.", 400);
+            throw new AppError("El rol asignado ya no está disponible.", 400);
         }
         await assertEmailAvailableForInvitation(invitation.email);
         const token = generateSecureToken();
@@ -704,7 +716,7 @@ export const invitationsService = {
                     metadata: {
                         email: nextSnapshot.email,
                         roleName: nextSnapshot.roleName,
-                        summary: `Resent an invitation to ${nextSnapshot.email}.`,
+                        summary: `Se reenvió una invitación a ${nextSnapshot.email}.`,
                     },
                 }, {
                     db: transaction,
@@ -745,10 +757,10 @@ export const invitationsService = {
             },
         });
         if (!invitation) {
-            throw new AppError("Invitation not found.", 404);
+            throw new AppError("No se encontró la invitación.", 404);
         }
         if (invitation.acceptedAt) {
-            throw new AppError("Accepted invitations cannot be revoked.", 400);
+            throw new AppError("No se pueden revocar invitaciones aceptadas.", 400);
         }
         if (invitation.deletedAt) {
             return this.getInvitationById(invitation.id);
@@ -783,7 +795,7 @@ export const invitationsService = {
                     metadata: {
                         email: nextSnapshot.email,
                         roleName: nextSnapshot.roleName,
-                        summary: `Revoked the invitation for ${nextSnapshot.email}.`,
+                        summary: `Se revocó la invitación de ${nextSnapshot.email}.`,
                     },
                 }, {
                     db: transaction,

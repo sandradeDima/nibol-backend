@@ -1,4 +1,5 @@
 import { normalizeWorkflowSimulationContext, } from "./workflow-rule-fields.js";
+import { parseDatabaseJson } from "../../services/logging-utils.js";
 const isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 const getCustom = (value) => {
     if (!isRecord(value))
@@ -41,6 +42,9 @@ export const buildWorkflowRuntimeContext = ({ actorUserId, context, processType,
     };
 };
 export const restoreWorkflowRuntimeContext = (processType, value) => {
+    if (typeof value === "string") {
+        value = parseDatabaseJson(value, "workflow_instances.context_json");
+    }
     const raw = isRecord(value) ? value : {};
     const normalized = normalizeWorkflowSimulationContext({
         ...raw,

@@ -20,7 +20,7 @@ export const adminSafeguardService = {
     async assertRoleDeletionAllowed(roleId) {
         const role = await getRole(roleId);
         if (isAdminRole(role?.code)) {
-            throw new AppError("Admin role cannot be deleted.", 400);
+            throw new AppError("No se puede eliminar el rol de administrador.", 400);
         }
     },
     async assertRoleNameUpdateAllowed(roleId, nextRoleName) {
@@ -29,7 +29,7 @@ export const adminSafeguardService = {
             return;
         }
         if (nextRoleName !== ADMIN_ROLE_NAME) {
-            throw new AppError("Admin role name cannot be changed.", 400);
+            throw new AppError("No se puede cambiar el nombre del rol de administrador.", 400);
         }
     },
     async assertUserRoleRemovalAllowed(userId, roleId) {
@@ -58,7 +58,7 @@ export const adminSafeguardService = {
             },
         });
         if (userStillHasAdminRole && adminCount <= 1) {
-            throw new AppError("Admin role cannot be removed from the last admin.", 400);
+            throw new AppError("No se puede quitar el rol de administrador al último administrador.", 400);
         }
     },
     async assertUserRoleUpdateAllowed(userId, nextRoleIds) {
@@ -87,7 +87,7 @@ export const adminSafeguardService = {
         const nextPermissionSet = new Set(nextPermissions);
         const missingCriticalPermissions = CRITICAL_ADMIN_PERMISSIONS.filter((permission) => !nextPermissionSet.has(permission));
         if (missingCriticalPermissions.length > 0) {
-            throw new AppError(`Admin role must keep critical permissions: ${missingCriticalPermissions.join(", ")}.`, 400);
+            throw new AppError(`El rol de administrador debe conservar estos permisos críticos: ${missingCriticalPermissions.join(", ")}.`, 400);
         }
     },
 };

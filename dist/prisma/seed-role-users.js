@@ -50,6 +50,9 @@ const roleUsers = [
 ];
 const getPassword = (roleCode) => roleCode === ADMIN_ROLE_CODE ? adminPassword : rolePassword;
 const seed = async () => {
+    if (isProduction) {
+        throw new Error("Role demo users may only be seeded outside production.");
+    }
     const summary = await prisma.$transaction(async (tx) => {
         const roleIds = new Map();
         const permissionIds = new Map();

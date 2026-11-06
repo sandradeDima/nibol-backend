@@ -1,6 +1,5 @@
-import { Prisma } from "../../generated/prisma/client.js";
 import { prisma } from "../utils/prisma.js";
-import { buildDateRangeFilter, deriveAuditAction, titleCaseEntityType, toLogJsonValue, } from "./logging-utils.js";
+import { buildDateRangeFilter, deriveAuditAction, parseDatabaseJson, titleCaseEntityType, toDatabaseJson, } from "./logging-utils.js";
 const buildOrderBy = (sortBy, sortDirection) => {
     switch (sortBy) {
         case "createdAt":
@@ -89,12 +88,12 @@ export const auditLogService = {
                     : {}),
                 ...(payload.newValues !== undefined
                     ? {
-                        newValues: toLogJsonValue(payload.newValues) ?? Prisma.JsonNull,
+                        newValues: toDatabaseJson(payload.newValues),
                     }
                     : {}),
                 ...(payload.oldValues !== undefined
                     ? {
-                        oldValues: toLogJsonValue(payload.oldValues) ?? Prisma.JsonNull,
+                        oldValues: toDatabaseJson(payload.oldValues),
                     }
                     : {}),
             },
@@ -121,7 +120,12 @@ export const auditLogService = {
             },
             where,
         });
-        const filteredAuditLogs = auditLogs.filter((auditLog) => {
+        const decodedAuditLogs = auditLogs.map((auditLog) => ({
+            ...auditLog,
+            newValues: parseDatabaseJson(auditLog.newValues, "audit_logs.new_values"),
+            oldValues: parseDatabaseJson(auditLog.oldValues, "audit_logs.old_values"),
+        }));
+        const filteredAuditLogs = decodedAuditLogs.filter((auditLog) => {
             if (!query.action) {
                 return true;
             }

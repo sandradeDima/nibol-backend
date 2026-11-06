@@ -1,6 +1,8 @@
 import { AppError } from "../../utils/app-error.js";
+import { env } from "../../utils/env.js";
 import { sendPaginated, sendSuccess } from "../../utils/response.js";
-import { buildExcelWorkbook, buildReportPdf, buildSimplePdf, } from "./reports.exports.js";
+import { buildExcelWorkbook, buildObservationDetailWorkbook, } from "./reports.exports.js";
+import { buildReportPdf } from "./reports.pdf.js";
 import { reportsService } from "./reports.service.js";
 import { auditReportExportQuerySchema, auditReportQuerySchema, reportExportQuerySchema, reportFiltersSchema, reportPreviewQuerySchema, reportQuerySchema, } from "./reports.validators.js";
 const getQueryValue = (value) => {
@@ -10,15 +12,27 @@ const getQueryValue = (value) => {
         return value[0];
     return undefined;
 };
+const auditTemplateLabels = {
+    ACTIVITY_AREA: "Actividad por área",
+    ACTIVITY_USER: "Actividad por usuario",
+    APPROVALS: "Aprobaciones y rechazos",
+    DEADLINES: "Fechas límite",
+    EVIDENCE: "Evidencias",
+    EXTENSIONS: "Ampliaciones",
+    HISTORY: "Historial de observación",
+    INCUMPLIMIENTOS: "Incumplimientos",
+    WORKFLOW_HISTORY: "Historial de flujos",
+};
 const getAccess = (request) => {
     if (!request.authorizationSummary) {
-        throw new AppError("Authorization required.", 401);
+        throw new AppError("Se requiere autorización.", 401);
     }
     return request.authorizationSummary;
 };
 const reportQueryInput = (request) => ({
     activeOnly: getQueryValue(request.query["filter.activeOnly"]),
     areaId: getQueryValue(request.query["filter.areaId"]),
+    areaIds: getQueryValue(request.query["filter.areaIds"]),
     areaResponsibleId: getQueryValue(request.query["filter.areaResponsibleId"]),
     auditReportId: getQueryValue(request.query["filter.auditReportId"]),
     dateFrom: getQueryValue(request.query["filter.dateFrom"]),
@@ -31,9 +45,11 @@ const reportQueryInput = (request) => ({
     dueSoon: getQueryValue(request.query["filter.dueSoon"]),
     dueSoonDays: getQueryValue(request.query["filter.dueSoonDays"]),
     executorId: getQueryValue(request.query["filter.executorId"]),
+    globalStatus: getQueryValue(request.query["filter.globalStatus"]),
     hasEvidence: getQueryValue(request.query["filter.hasEvidence"]),
     hasExtension: getQueryValue(request.query["filter.hasExtension"]),
     hasPlan: getQueryValue(request.query["filter.hasPlan"]),
+    includeActionPlans: getQueryValue(request.query.includeActionPlans),
     overdue: getQueryValue(request.query["filter.overdue"]),
     page: getQueryValue(request.query.page),
     perPage: getQueryValue(request.query.perPage),
@@ -41,11 +57,14 @@ const reportQueryInput = (request) => ({
     progressMax: getQueryValue(request.query["filter.progressMax"]),
     progressMin: getQueryValue(request.query["filter.progressMin"]),
     progressStatus: getQueryValue(request.query["filter.progressStatus"]),
+    progressStatuses: getQueryValue(request.query["filter.progressStatuses"]),
     processOwnerId: getQueryValue(request.query["filter.processOwnerId"]),
     reprogrammed: getQueryValue(request.query["filter.reprogrammed"]),
     reportName: getQueryValue(request.query.reportName),
+    pdfView: getQueryValue(request.query.pdfView),
     responsibleUserId: getQueryValue(request.query["filter.responsibleUserId"]),
     riskLevelId: getQueryValue(request.query["filter.riskLevelId"]),
+    riskLevelIds: getQueryValue(request.query["filter.riskLevelIds"]),
     search: getQueryValue(request.query["filter.search"]) ??
         getQueryValue(request.query.search),
     statusId: getQueryValue(request.query["filter.statusId"]),
@@ -122,19 +141,45 @@ export const reportsController = {
     },
     async exportReport(request, response) {
         const query = reportExportQuerySchema.parse(reportQueryInput(request));
-        const report = await reportsService.getPreview(query, getAccess(request));
         const format = getQueryValue(request.query.format) ?? "excel";
+        const report = await reportsService.getPreview(query, getAccess(request), format === "pdf" && query.includeActionPlans);
         const filters = report.filters;
         if (format === "pdf") {
-            sendFile(response, buildReportPdf({
-                charts: report.charts,
-                columns: report.columns,
+            if (query.pdfView !== "GENERATOR" && query.type !== "ACTION_PLANS")
+                throw new AppError("La vista PDF requiere planes de acción.", 400);
+            const access = getAccess(request);
+            const dashboard = ["REPORTS", "DASHBOARD"].includes(query.pdfView)
+                ? await reportsService.getDashboard(query, access)
+                : undefined;
+            const staticDashboard = query.pdfView === "REPORTS"
+                ? await reportsService.getDashboard(reportFiltersSchema.parse({}), access)
+                : undefined;
+            sendFile(response, await buildReportPdf({
+                ...(dashboard ? { dashboard } : {}),
+                filters,
+                preview: report,
+                reportName: report.reportName,
+                ...(staticDashboard ? { staticDashboard } : {}),
+                ...(report.actionPlanRows
+                    ? {
+                        actionPlanRows: report.actionPlanRows.map((row) => ({
+                            ...row,
+                            href: new URL(row.href, env.FRONTEND_URL).toString(),
+                        })),
+                    }
+                    : {}),
+                includeActionPlans: query.includeActionPlans,
+                view: query.pdfView,
+            }), "application/pdf", "reporte-nibol.pdf");
+            return;
+        }
+        if (query.type === "OBSERVATIONS") {
+            sendFile(response, buildObservationDetailWorkbook({
                 filters,
                 generatedAt: report.generatedAt,
                 reportName: report.reportName,
-                rows: report.rows,
-                summary: report.summary,
-            }), "application/pdf", "reporte-nibol.pdf");
+                rows: report.rows.map((row) => report.columns.map((column) => row[column])),
+            }), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "observaciones-detalle.xlsx");
             return;
         }
         sendFile(response, buildExcelWorkbook({
@@ -149,8 +194,9 @@ export const reportsController = {
     },
     async exportAudit(request, response) {
         const query = auditReportExportQuerySchema.parse(auditQueryInput(request));
-        const report = await reportsService.getAuditReport(query, getAccess(request));
+        const access = getAccess(request);
         const format = getQueryValue(request.query.format) ?? "excel";
+        const report = await reportsService.getAuditReport(format === "pdf" ? { ...query, page: 1 } : query, access);
         const reportName = `Reporte de Auditoría — ${query.template}`;
         const filters = {
             Área: query.areaId ?? "Todas",
@@ -161,12 +207,18 @@ export const reportsController = {
             Usuario: query.userId ?? "Todos",
         };
         if (format === "pdf") {
-            sendFile(response, buildSimplePdf({
-                columns: report.columns,
+            if (["HISTORY", "ACTIVITY_AREA", "ACTIVITY_USER", "APPROVALS"].includes(query.template)) {
+                for (let page = 2; (page - 1) * query.perPage < report.summary.total; page += 1) {
+                    const next = await reportsService.getAuditReport({ ...query, page }, access);
+                    report.rows.push(...next.rows);
+                    report.timeline?.push(...(next.timeline ?? []));
+                }
+            }
+            sendFile(response, await buildReportPdf({
+                audit: report,
                 filters,
-                generatedAt: report.generatedAt,
-                reportName,
-                rows: report.rows,
+                reportName: auditTemplateLabels[query.template],
+                view: "AUDIT",
             }), "application/pdf", "reporte-auditoria-nibol.pdf");
             return;
         }

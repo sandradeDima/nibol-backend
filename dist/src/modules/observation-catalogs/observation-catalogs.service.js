@@ -2,7 +2,7 @@ import { AppError } from "../../utils/app-error.js";
 import { prisma } from "../../utils/prisma.js";
 const duplicate = (error) => {
     if (error.code === "P2002")
-        throw new AppError("A catalog entry with that name already exists.", 409);
+        throw new AppError("Ya existe una entrada del catálogo con ese nombre.", 409);
     throw error;
 };
 export const observationCatalogsService = {
@@ -99,7 +99,7 @@ export const observationCatalogsService = {
             where: { id },
         });
         if (!record)
-            throw new AppError("Dictionary entry not found.", 404);
+            throw new AppError("No se encontró la entrada del diccionario.", 404);
         try {
             return await prisma.observationDictionary.update({
                 data: {
@@ -119,7 +119,7 @@ export const observationCatalogsService = {
     async updateRisk(id, input) {
         const record = await prisma.risk.findUnique({ where: { id } });
         if (!record)
-            throw new AppError("Risk not found.", 404);
+            throw new AppError("No se encontró el riesgo.", 404);
         try {
             return await prisma.risk.update({
                 data: {

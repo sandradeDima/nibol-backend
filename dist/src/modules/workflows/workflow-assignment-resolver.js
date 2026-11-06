@@ -131,7 +131,7 @@ export const resolveRuntimeAssignment = async ({ configuration, context, db, }) 
         return direct;
     const strategy = (configuration.assignmentStrategy ?? "UNASSIGNED");
     const reason = strategy === "MANAGEMENT"
-        ? "La estrategia MANAGEMENT no está disponible en el runtime."
+        ? "La estrategia MANAGEMENT no está disponible durante la ejecución."
         : `No se pudo resolver la asignación ${strategy}.`;
     const fallback = await resolveFallback(db, configuration, reason);
     if (fallback)

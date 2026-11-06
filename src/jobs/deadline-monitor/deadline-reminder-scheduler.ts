@@ -14,7 +14,10 @@ const laPazTime = new Intl.DateTimeFormat("en-GB", {
 // shortcut: assumes 24-hour La Paz days; recalculate by date if that timezone adopts DST.
 const millisecondsUntilNextRun = (): number => {
   const now = new Date();
-  const [hour, minute, second] = laPazTime.format(now).split(":").map(Number);
+  const [hour, minute, second] = laPazTime
+    .format(now)
+    .split(":")
+    .map(Number) as [number, number, number];
   const secondsUntilRun =
     (8 * 60 * 60 - (hour * 60 * 60 + minute * 60 + second) + 86_400) %
       86_400 || 86_400;

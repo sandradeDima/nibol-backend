@@ -50,7 +50,7 @@ const observationInclude = {
     },
     auditReport: { select: { reportNumber: true } },
     riskLevel: { select: { colorToken: true, key: true, name: true } },
-    status: { select: { isFinal: true, key: true, name: true } },
+    status: { select: { isFinal: true, isInitial: true, key: true, name: true } },
 };
 const buildObservationInclude = (access) => ({
     ...observationInclude,
@@ -417,7 +417,7 @@ const operationalAttention = (value, access) => [...value.data.observations]
             item.currentDueDate <=
                 new Date(value.data.now.getTime() + value.data.days * DAY))
             return 1;
-        if (["INICIADO", "CON_AVANCE"].includes(item.status.key))
+        if (!item.status.isInitial && !item.status.isFinal)
             return 2;
         return 3;
     };
@@ -443,8 +443,17 @@ const operationalAttention = (value, access) => [...value.data.observations]
     return { ...row, href: `/observaciones?${filters.toString()}` };
 });
 const roleDashboardRoles = new Set([
+    "SYSTEM_ADMIN",
+    "AUDITOR",
+    "AUDIT_CHIEF",
     "AREA_RESPONSIBLE",
     "EXECUTOR",
+    "PROCESS_OWNER",
+]);
+const rolesWithResponsibleHierarchy = new Set([
+    "SYSTEM_ADMIN",
+    "AUDITOR",
+    "AUDIT_CHIEF",
     "PROCESS_OWNER",
 ]);
 const roleActionPlanWhere = (access, query) => ({
@@ -458,7 +467,8 @@ const roleActionPlanWhere = (access, query) => ({
 const roleObservationAreaWhere = (access, query) => ({
     ...buildObservationAreaScopeWhere(access),
     ...(query.areaId ? { areaId: query.areaId } : {}),
-    ...(access.roleCode === "PROCESS_OWNER" && query.areaResponsibleUserId?.length
+    ...(rolesWithResponsibleHierarchy.has(access.roleCode) &&
+        query.areaResponsibleUserId?.length
         ? { areaResponsibleUserId: { in: query.areaResponsibleUserId } }
         : {}),
     ...(access.roleCode !== "EXECUTOR" && query.executorId?.length
@@ -562,7 +572,7 @@ const roleObservationInclude = (access, query) => ({
     },
     auditReport: { select: { reportNumber: true } },
     riskLevel: { select: { colorToken: true, key: true, name: true } },
-    status: { select: { isFinal: true, key: true, name: true } },
+    status: { select: { isFinal: true, isInitial: true, key: true, name: true } },
 });
 const roleAssignmentSelect = {
     actionPlans: {
@@ -673,7 +683,7 @@ export const buildRoleDashboardHierarchy = (records, roleCode) => {
             areas.set(assignment.area.id, area);
             addToRoleAggregate(area.aggregate, record);
             const plans = assignment.actionPlans;
-            if (roleCode === "PROCESS_OWNER") {
+            if (rolesWithResponsibleHierarchy.has(roleCode)) {
                 const responsible = getRoleChild(area, assignment.areaResponsible.id, assignment.areaResponsible.name);
                 addToRoleAggregate(responsible.aggregate, record);
                 for (const plan of plans) {
@@ -708,7 +718,7 @@ export const buildRoleDashboardHierarchy = (records, roleCode) => {
         .sort((left, right) => left.name.localeCompare(right.name, "es"))
         .map((area) => ({
         ...roleAggregateValues(area.aggregate),
-        ...(roleCode === "PROCESS_OWNER"
+        ...(rolesWithResponsibleHierarchy.has(roleCode)
             ? { responsibles: sortedRoleChildren(area).map(toResponsible) }
             : { executors: sortedRoleChildren(area).map(toExecutor) }),
         id: area.id,
@@ -741,7 +751,7 @@ const roleObservationRow = (record, now) => {
     };
 };
 const priority = (code, label, count, href) => ({ code, count, href, label });
-const quickActions = (access, query) => {
+export const buildRoleDashboardQuickActions = (access, query, dueSoonDays) => {
     if (access.roleCode !== "EXECUTOR")
         return [];
     const planParams = new URLSearchParams({
@@ -750,24 +760,24 @@ const quickActions = (access, query) => {
     if (query.areaId)
         planParams.set("filter.areaId", query.areaId);
     const planHref = `/planes-accion?${planParams.toString()}`;
+    const overdueParams = new URLSearchParams(planParams);
+    overdueParams.set("filter.deadlineStatus", "VENCIDO");
+    const upcomingParams = new URLSearchParams(planParams);
+    upcomingParams.set("filter.deadlineStatus", "VIGENTE");
+    const dueSoon = new Date(Date.now() + dueSoonDays * DAY);
+    upcomingParams.set("filter.dueDateTo", dueSoon.toISOString());
     return [
         {
-            code: "SEND_PROGRESS",
-            description: "Registra y envía un nuevo avance.",
-            href: planHref,
-            label: "Enviar avance",
+            code: "OVERDUE_PLANS",
+            description: "Revisa los planes fuera de plazo.",
+            href: `/planes-accion?${overdueParams.toString()}`,
+            label: "Planes de acción vencidos",
         },
         {
-            code: "UPLOAD_EVIDENCE",
-            description: "Adjunta respaldo a un plan de acción.",
-            href: planHref,
-            label: "Cargar evidencia",
-        },
-        {
-            code: "UPDATE_PLAN",
-            description: "Actualiza fechas, descripción o progreso.",
-            href: planHref,
-            label: "Actualizar plan",
+            code: "UPCOMING_PLANS",
+            description: "Atiende los planes con vencimiento próximo.",
+            href: `/planes-accion?${upcomingParams.toString()}`,
+            label: "Planes próximos a vencer",
         },
         {
             code: "REQUEST_EXTENSION",
@@ -775,21 +785,16 @@ const quickActions = (access, query) => {
             href: planHref,
             label: "Solicitar ampliación",
         },
-        {
-            code: "VIEW_TIMELINE",
-            description: "Consulta fechas y próximos hitos.",
-            href: "/cronograma",
-            label: "Ver cronograma",
-        },
     ];
 };
 export const dashboardService = {
     async getRoleDashboard(access, query) {
         if (!roleDashboardRoles.has(access.roleCode))
-            throw new AppError("Este dashboard no está disponible para su rol.", 403);
+            throw new AppError("Este panel no está disponible para su rol.", 403);
         const roleCode = access.roleCode;
         const roleQuery = { ...query, search: query.search ?? "" };
-        if ((roleCode !== "PROCESS_OWNER" &&
+        const dueSoonDays = await reminderDays();
+        if ((!rolesWithResponsibleHierarchy.has(roleCode) &&
             roleQuery.areaResponsibleUserId?.length) ||
             (roleCode === "EXECUTOR" && roleQuery.executorId?.length))
             throw new AppError("Uno de los filtros no está disponible para su rol.", 403);
@@ -805,7 +810,7 @@ export const dashboardService = {
         if (roleQuery.areaId && !areas.some((area) => area.id === roleQuery.areaId))
             throw new AppError("El área seleccionada no está dentro de su alcance.", 403);
         const areaAssignments = assignments.filter((assignment) => !roleQuery.areaId || assignment.area.id === roleQuery.areaId);
-        const responsibles = roleCode === "PROCESS_OWNER"
+        const responsibles = rolesWithResponsibleHierarchy.has(roleCode)
             ? uniqueRoleOptions(areaAssignments.map(({ areaResponsible }) => areaResponsible))
             : [];
         if (roleQuery.areaResponsibleUserId?.some((selectedId) => !responsibles.some((responsible) => responsible.id === selectedId)))
@@ -813,6 +818,7 @@ export const dashboardService = {
         const executors = uniqueRoleOptions(areaAssignments.flatMap((assignment) => relevantPlans(assignment, access).map(({ responsibleUser }) => responsibleUser)));
         if (roleQuery.executorId?.some((selectedId) => !executors.some((executor) => executor.id === selectedId)))
             throw new AppError("El ejecutor seleccionado no está dentro de su alcance.", 403);
+        const now = new Date();
         const [observations, globalObservations] = await Promise.all([
             prisma.observation.findMany({
                 include: roleObservationInclude(access, roleQuery),
@@ -820,14 +826,17 @@ export const dashboardService = {
                 where: roleObservationWhere(access, roleQuery),
             }),
             prisma.observation.findMany({
-                select: { status: { select: { isFinal: true } } },
+                select: {
+                    currentDueDate: true,
+                    status: { select: { isFinal: true } },
+                },
                 where: roleObservationWhere(access, { search: "" }),
             }),
         ]);
         const observationIds = observations.map(({ id }) => id);
         const observationAreaIds = observations.flatMap((observation) => observation.areaAssignments.map(({ id }) => id));
         const actionPlanIds = observations.flatMap((observation) => observation.areaAssignments.flatMap((assignment) => assignment.actionPlans.map(({ id }) => id)));
-        const [pendingExtensions, pendingReviews] = await Promise.all([
+        const [pendingExtensions, pendingReviews, priorityOverdueObservations] = await Promise.all([
             prisma.deadlineExtensionRequest.count({
                 where: {
                     AND: [
@@ -852,16 +861,25 @@ export const dashboardService = {
                     ],
                 },
             }),
+            prisma.observation.count({
+                where: {
+                    ...roleObservationWhere(access, {
+                        ...roleQuery,
+                        observationState: "PENDING",
+                    }),
+                    currentDueDate: { lt: now },
+                },
+            }),
         ]);
-        const now = new Date();
         const pendingObservations = observations.filter((observation) => !observation.status.isFinal);
         const concludedObservations = observations.filter((observation) => observation.status.isFinal);
         const globalPendingObservations = globalObservations.filter((observation) => !observation.status.isFinal).length;
+        const globalOverdueObservations = globalObservations.filter((observation) => !observation.status.isFinal && observation.currentDueDate < now).length;
         const overdueObservations = pendingObservations.filter((observation) => observation.currentDueDate < now).length;
         const priorities = roleCode === "EXECUTOR"
             ? []
             : [
-                priority("OVERDUE", "Vencidas", overdueObservations, observationsHref(roleQuery, {
+                priority("OVERDUE", "Vencidas", priorityOverdueObservations, observationsHref(roleQuery, {
                     "filter.deadlineStatus": "VENCIDO",
                     "filter.observationState": "PENDING",
                 })),
@@ -874,13 +892,14 @@ export const dashboardService = {
             generatedAt: now.toISOString(),
             globalSummary: {
                 concludedObservations: globalObservations.length - globalPendingObservations,
+                overdueObservations: globalOverdueObservations,
                 pendingObservations: globalPendingObservations,
                 totalObservations: globalObservations.length,
             },
             hierarchy: buildRoleDashboardHierarchy(observations, roleCode),
             observations: observations.map((observation) => roleObservationRow(observation, now)),
             priorities,
-            quickActions: quickActions(access, roleQuery),
+            quickActions: buildRoleDashboardQuickActions(access, roleQuery, dueSoonDays),
             roleCode,
             selectedAreaId: roleQuery.areaId ?? null,
             selectedExecutorId: roleQuery.executorId?.[0] ?? null,
@@ -935,8 +954,7 @@ export const dashboardService = {
             reminderDaysBeforeDue: value.data.days,
             summary: {
                 concludedObservations: value.data.observations.filter((item) => item.status.isFinal).length,
-                inProgressObservations: value.data.observations.filter((item) => !item.status.isFinal &&
-                    ["INICIADO", "CON_AVANCE"].includes(item.status.key)).length,
+                inProgressObservations: value.data.observations.filter((item) => !item.status.isInitial && !item.status.isFinal).length,
                 overdueObservations: value.overdue.length,
                 pendingObservations: value.open.length,
                 pendingApprovals: pendingProgress + pendingExtensions,

@@ -2,7 +2,7 @@ import { AppError } from "../../utils/app-error.js";
 import { prisma } from "../../utils/prisma.js";
 import { workflowInstanceService } from "./workflow-instance.service.js";
 import { getWorkflowEntityAdapter } from "./workflow-entity-adapters.js";
-import { deliverWorkflowNotificationsForInstance } from "./workflow-notification.service.js";
+import { deliverWorkflowNotificationsInBackground } from "./workflow-notification.service.js";
 const dbAsTransaction = prisma;
 const entityLinkField = {
     DEADLINE_EXTENSION: "deadlineExtensionRequest",
@@ -36,38 +36,38 @@ const getLinkedInstanceId = async (processType, entityId) => {
             return null;
     }
 };
-const linkEntity = async (processType, entityId, workflowInstanceId) => {
+const linkEntity = async (processType, entityId, workflowInstanceId, previousInstanceId = null) => {
     switch (processType) {
         case "DEADLINE_EXTENSION":
             return ((await prisma.deadlineExtensionRequest.updateMany({
                 data: { workflowInstanceId },
-                where: { id: entityId, workflowInstanceId: null },
+                where: { id: entityId, workflowInstanceId: previousInstanceId },
             })).count === 1);
         case "EVIDENCE_REVIEW":
             return ((await prisma.evidenceFile.updateMany({
                 data: { workflowInstanceId },
-                where: { id: entityId, workflowInstanceId: null },
+                where: { id: entityId, workflowInstanceId: previousInstanceId },
             })).count === 1);
         case "OBSERVATION_CLOSURE":
             return ((await prisma.progressEvaluation.updateMany({
                 data: { workflowInstanceId },
-                where: { id: entityId, workflowInstanceId: null },
+                where: { id: entityId, workflowInstanceId: previousInstanceId },
             })).count === 1);
         case "REMEDIATION_PLAN_APPROVAL":
             return ((await prisma.remediationPlan.updateMany({
                 data: { workflowInstanceId },
-                where: { id: entityId, workflowInstanceId: null },
+                where: { id: entityId, workflowInstanceId: previousInstanceId },
             })).count === 1);
         default:
             return false;
     }
 };
-const cancelOrphanedInstance = async (instanceId) => {
+const cancelOrphanedInstance = async (instanceId, finalResult = "DUPLICATE_INTEGRATION") => {
     const now = new Date();
     await prisma.workflowInstance.updateMany({
         data: {
             completedAt: now,
-            finalResult: "DUPLICATE_INTEGRATION",
+            finalResult,
             status: "CANCELLED",
         },
         where: { id: instanceId },
@@ -94,7 +94,7 @@ const getActivePublishedWorkflow = async (processType) => {
         },
     });
     if (definitions.length > 1) {
-        throw new AppError("Hay varios workflows publicados para este proceso. Corrija la configuración antes de continuar.", 409);
+        throw new AppError("Hay varios flujos de trabajo publicados para este proceso. Corrija la configuración antes de continuar.", 409);
     }
     return definitions[0] ?? null;
 };
@@ -141,6 +141,25 @@ const canUseWorkflowForEntity = async (processType, entityId) => {
     // record already linked to an instance is handled before this guard.
     return !publishedAt || createdAt.getTime() >= publishedAt.getTime();
 };
+const assertReviewTask = async (processType, instanceId) => {
+    if (!["DEADLINE_EXTENSION", "OBSERVATION_CLOSURE"].includes(processType))
+        return;
+    const task = await prisma.workflowTask.findFirst({
+        select: { id: true },
+        where: {
+            workflowInstanceId: instanceId,
+            instance: { status: { in: ["ACTIVE", "WAITING"] } },
+            status: { in: ["PENDING", "IN_PROGRESS"] },
+            OR: [
+                { assignedUserId: { not: null } },
+                { assignedRoleId: { not: null } },
+                { assignedAreaId: { not: null } },
+            ],
+        },
+    });
+    if (!task)
+        throw new AppError("El flujo de trabajo no tiene una tarea de revisión activa asignada. Revise la instancia y su versión publicada antes de reintentar el envío.", 409);
+};
 export const workflowIntegrationService = {
     async hasActivePublishedWorkflow(processType) {
         return hasActivePublishedWorkflow(processType);
@@ -152,12 +171,18 @@ export const workflowIntegrationService = {
         const adapter = getWorkflowEntityAdapter(input.processType);
         if (!adapter)
             return { instanceId: "", started: false, status: null };
-        if (!(await canUseWorkflowForEntity(input.processType, input.entityId))) {
+        const linkedInstanceId = await getLinkedInstanceId(input.processType, input.entityId);
+        if (linkedInstanceId && linkedInstanceId !== input.replaceInstanceId) {
+            await assertReviewTask(input.processType, linkedInstanceId);
+            return { instanceId: linkedInstanceId, started: false, status: null };
+        }
+        if (input.replaceInstanceId) {
+            if (!(await hasActivePublishedWorkflow(input.processType)))
+                throw new AppError("El registro ya utilizó un flujo de trabajo. Debe existir una versión publicada para reenviarlo.", 409);
+        }
+        else if (!(await canUseWorkflowForEntity(input.processType, input.entityId))) {
             return { instanceId: "", started: false, status: null };
         }
-        const linkedInstanceId = await getLinkedInstanceId(input.processType, input.entityId);
-        if (linkedInstanceId)
-            return { instanceId: linkedInstanceId, started: false, status: null };
         await adapter.validateStart({
             actorUserId: input.actorUserId,
             db: dbAsTransaction,
@@ -175,18 +200,26 @@ export const workflowIntegrationService = {
             processType: input.processType,
         }, input.access, { deferNotifications: true, internal: true });
         if (!started || typeof started.id !== "string") {
-            throw new AppError("No se pudo iniciar el workflow de integración.", 500);
+            throw new AppError("No se pudo iniciar el flujo de trabajo de integración.", 500);
         }
-        const linked = await linkEntity(input.processType, input.entityId, started.id);
+        try {
+            await assertReviewTask(input.processType, started.id);
+        }
+        catch (error) {
+            await cancelOrphanedInstance(started.id, "REVIEW_TASK_UNAVAILABLE");
+            throw error;
+        }
+        const linked = await linkEntity(input.processType, input.entityId, started.id, input.replaceInstanceId ?? null);
         if (!linked) {
             const existingInstanceId = await getLinkedInstanceId(input.processType, input.entityId);
             await cancelOrphanedInstance(started.id);
             if (existingInstanceId) {
+                await assertReviewTask(input.processType, existingInstanceId);
                 return { instanceId: existingInstanceId, started: false, status: null };
             }
-            throw new AppError("No se pudo vincular el workflow al registro.", 409);
+            throw new AppError("No se pudo vincular el flujo de trabajo al registro.", 409);
         }
-        await deliverWorkflowNotificationsForInstance(started.id);
+        deliverWorkflowNotificationsInBackground(started.id);
         return { instanceId: started.id, started: true, status: started.status };
     },
     async getEntityWorkflowLink(processType, entityId) {

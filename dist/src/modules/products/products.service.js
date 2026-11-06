@@ -63,7 +63,7 @@ const findRecordOrThrow = async (id) => {
         },
     });
     if (!record) {
-        throw new AppError("Product not found.", 404);
+        throw new AppError("No se encontró el producto.", 404);
     }
     return record;
 };

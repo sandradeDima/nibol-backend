@@ -16,7 +16,7 @@ const queryValue = (value) => typeof value === "string"
         : undefined;
 const requireAccess = (request) => {
     if (!request.authorizationSummary)
-        throw new AppError("Authorization required.", 401);
+        throw new AppError("Se requiere autorización.", 401);
     return request.authorizationSummary;
 };
 const observationId = (request) => observationIdParamSchema.parse({ id: queryValue(request.params.id) }).id;

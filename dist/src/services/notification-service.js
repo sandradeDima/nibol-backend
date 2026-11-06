@@ -1,5 +1,11 @@
-import { NotificationDeliveryChannel, NotificationDeliveryStatus, NotificationPriority as PrismaNotificationPriority, NotificationType as PrismaNotificationType, } from "../../generated/prisma/client.js";
+import { randomUUID } from "node:crypto";
+import {} from "../../generated/prisma/client.js";
+import { NotificationDeliveryChannel, NotificationDeliveryStatus, NotificationPriority as DatabaseNotificationPriority, NotificationPriority as PrismaNotificationPriority, NotificationType as DatabaseNotificationType, NotificationType as PrismaNotificationType, parseDatabaseEnum, } from "../types/database-enums.js";
 import { AppError } from "../utils/app-error.js";
+import { buildFrontendUrl } from "../utils/notification-links.js";
+import { logger } from "../utils/logger.js";
+import { parseDatabaseJson, toDatabaseJson } from "./logging-utils.js";
+import { isNotificationChannelEnabled } from "./notification-preferences.js";
 import { resolveNotificationTarget } from "../utils/notification-links.js";
 import { prisma } from "../utils/prisma.js";
 const notificationDeliveryMaxAttempts = 3;
@@ -19,26 +25,29 @@ const notificationPriorityMap = {
 };
 const toPrismaNotificationType = (value) => notificationTypeMap[value ?? "info"];
 const toPrismaNotificationPriority = (value) => notificationPriorityMap[value ?? "NORMAL"];
-const mapNotificationRecord = (notification) => ({
-    createdAt: notification.createdAt.toISOString(),
-    entityId: notification.entityId,
-    entityType: notification.entityType,
-    eventType: notification.eventType,
-    id: notification.id,
-    isRead: notification.isRead,
-    message: notification.message,
-    priority: notification.priority,
-    readAt: notification.readAt?.toISOString() ?? null,
-    targetUrl: notification.targetUrl,
-    title: notification.title,
-    type: notification.type === PrismaNotificationType.ERROR
-        ? "error"
-        : notification.type === PrismaNotificationType.SUCCESS
-            ? "success"
-            : notification.type === PrismaNotificationType.WARNING
-                ? "warning"
-                : "info",
-});
+const mapNotificationRecord = (notification) => {
+    const type = parseDatabaseEnum(DatabaseNotificationType, notification.type, "notifications.type");
+    return {
+        createdAt: notification.createdAt.toISOString(),
+        entityId: notification.entityId,
+        entityType: notification.entityType,
+        eventType: notification.eventType,
+        id: notification.id,
+        isRead: notification.isRead,
+        message: notification.message,
+        priority: parseDatabaseEnum(DatabaseNotificationPriority, notification.priority, "notifications.priority"),
+        readAt: notification.readAt?.toISOString() ?? null,
+        targetUrl: notification.targetUrl,
+        title: notification.title,
+        type: type === PrismaNotificationType.ERROR
+            ? "error"
+            : type === PrismaNotificationType.SUCCESS
+                ? "success"
+                : type === PrismaNotificationType.WARNING
+                    ? "warning"
+                    : "info",
+    };
+};
 const buildWhereClause = (userId, query) => ({
     deletedAt: null,
     ...(query.dateFrom || query.dateTo
@@ -90,6 +99,9 @@ const getNotificationForUser = async (userId, notificationId, db = prisma) => db
 export const notificationService = {
     async create(input, options) {
         const db = options?.db ?? prisma;
+        const internalEnabled = await isNotificationChannelEnabled(input.eventType, "internal", db.systemParameter);
+        if (!internalEnabled)
+            return null;
         const targetUrl = input.targetUrl !== undefined
             ? input.targetUrl
             : resolveNotificationTarget(input);
@@ -120,18 +132,79 @@ export const notificationService = {
         const db = options?.db ?? prisma;
         const userIds = Array.from(new Set(input.userIds.filter(Boolean)));
         if (userIds.length === 0) {
-            return { createdCount: 0 };
+            return { createdCount: 0, emailCount: 0, suppressed: false };
         }
-        const created = await db.notification.createMany({
-            data: userIds.map((userId) => ({
-                message: input.message.trim(),
-                priority: toPrismaNotificationPriority(input.priority),
-                title: input.title.trim(),
-                type: toPrismaNotificationType(input.type),
+        const [internalEnabled, emailEnabled] = await Promise.all([
+            isNotificationChannelEnabled(null, "internal", db.systemParameter),
+            isNotificationChannelEnabled(null, "email", db.systemParameter),
+        ]);
+        const created = internalEnabled
+            ? await db.notification.createMany({
+                data: userIds.map((userId) => ({
+                    message: input.message.trim(),
+                    priority: toPrismaNotificationPriority(input.priority),
+                    title: input.title.trim(),
+                    type: toPrismaNotificationType(input.type),
+                    userId,
+                })),
+            })
+            : { count: 0 };
+        let emailCount = 0;
+        if (emailEnabled && !options?.db) {
+            const batchId = randomUUID();
+            const results = await Promise.all(userIds.map((userId) => notificationService.sendEmailNotification({
+                dedupeKey: `manual:${batchId}:${userId}`,
+                eventType: null,
+                message: input.message,
+                title: input.title,
                 userId,
-            })),
+            })));
+            emailCount = results.filter(Boolean).length;
+        }
+        return {
+            createdCount: created.count,
+            emailCount,
+            suppressed: !internalEnabled && !emailEnabled,
+        };
+    },
+    async sendEmailNotification(input) {
+        if (!(await isNotificationChannelEnabled(input.eventType, "email")))
+            return false;
+        const recipient = await prisma.user.findFirst({
+            select: { email: true, name: true },
+            where: { deletedAt: null, id: input.userId, isActive: true },
         });
-        return { createdCount: created.count };
+        if (!recipient?.email)
+            return false;
+        const delivery = await notificationService.createDelivery({
+            channel: NotificationDeliveryChannel.EMAIL,
+            dedupeKey: `${input.dedupeKey ?? randomUUID()}:${input.userId}:EMAIL`,
+            ...(input.notificationId ? { notificationId: input.notificationId } : {}),
+            payloadJson: {
+                eventType: input.eventType ?? null,
+                message: input.message,
+                targetUrl: input.targetUrl ?? "/notificaciones",
+                title: input.title,
+                userName: recipient.name,
+            },
+            recipientEmail: recipient.email,
+            recipientUserId: input.userId,
+        });
+        if (delivery.status === NotificationDeliveryStatus.SKIPPED)
+            return false;
+        if (delivery.status === NotificationDeliveryStatus.SENT)
+            return true;
+        if (delivery.attempts >= notificationDeliveryMaxAttempts)
+            return false;
+        void notificationService
+            .deliverEmailNotification(delivery.id)
+            .catch((error) => {
+            logger.warn("No se pudo iniciar la entrega de una notificación por correo.", {
+                deliveryId: delivery.id,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        });
+        return true;
     },
     async createDelivery(input, options) {
         const db = options?.db ?? prisma.notificationDelivery;
@@ -149,7 +222,7 @@ export const notificationService = {
                     ? { notificationId: input.notificationId }
                     : {}),
                 ...(input.payloadJson !== undefined
-                    ? { payloadJson: input.payloadJson }
+                    ? { payloadJson: toDatabaseJson(input.payloadJson) }
                     : {}),
                 ...(input.recipientEmail !== undefined
                     ? { recipientEmail: input.recipientEmail }
@@ -172,7 +245,31 @@ export const notificationService = {
             return db.findUniqueOrThrow({ where: { dedupeKey: input.dedupeKey } });
         }
     },
-    async claimEmailDelivery(deliveryId) {
+    async claimEmailDelivery(deliveryId, eventType) {
+        const delivery = await prisma.notificationDelivery.findUnique({
+            select: { notification: { select: { eventType: true } } },
+            where: { id: deliveryId },
+        });
+        if (delivery &&
+            !(await isNotificationChannelEnabled(eventType !== undefined ? eventType : delivery.notification?.eventType, "email"))) {
+            await prisma.notificationDelivery.updateMany({
+                data: {
+                    errorMessage: "La categoría de notificación está desactivada.",
+                    status: NotificationDeliveryStatus.SKIPPED,
+                },
+                where: {
+                    channel: NotificationDeliveryChannel.EMAIL,
+                    id: deliveryId,
+                    status: {
+                        in: [
+                            NotificationDeliveryStatus.PENDING,
+                            NotificationDeliveryStatus.FAILED,
+                        ],
+                    },
+                },
+            });
+            return false;
+        }
         const now = new Date();
         const claimed = await prisma.notificationDelivery.updateMany({
             data: {
@@ -221,10 +318,133 @@ export const notificationService = {
             where: { id: deliveryId },
         });
     },
+    async deliverEmailNotification(deliveryId) {
+        const delivery = await prisma.notificationDelivery.findUnique({
+            select: {
+                payloadJson: true,
+                recipientEmail: true,
+                recipientUser: { select: { name: true } },
+            },
+            where: { id: deliveryId },
+        });
+        if (!delivery)
+            return false;
+        let payload;
+        try {
+            payload = parseDatabaseJson(delivery.payloadJson, "notification_deliveries.payload_json", (value) => {
+                if (typeof value !== "object" ||
+                    value === null ||
+                    (typeof value.eventType !==
+                        "string" &&
+                        value.eventType !== null) ||
+                    typeof value.message !== "string" ||
+                    typeof value.targetUrl !== "string" ||
+                    typeof value.title !== "string") {
+                    throw new Error("La carga útil de notificación no es válida.");
+                }
+                return value;
+            });
+        }
+        catch (error) {
+            await prisma.notificationDelivery.update({
+                data: {
+                    errorMessage: error instanceof Error ? error.message : String(error),
+                    status: NotificationDeliveryStatus.SKIPPED,
+                },
+                where: { id: deliveryId },
+            });
+            return false;
+        }
+        if (!payload || !delivery.recipientEmail) {
+            await prisma.notificationDelivery.update({
+                data: {
+                    errorMessage: "La entrega no tiene destinatario o carga útil válida.",
+                    status: NotificationDeliveryStatus.SKIPPED,
+                },
+                where: { id: deliveryId },
+            });
+            return false;
+        }
+        if (!(await notificationService.claimEmailDelivery(deliveryId, payload.eventType)))
+            return false;
+        try {
+            const { emailService } = await import("../emails/EmailService.js");
+            const result = await emailService.sendTemplate({
+                template: "genericNotification",
+                to: delivery.recipientEmail,
+                variables: {
+                    actionLabel: "Ver notificación",
+                    actionLink: buildFrontendUrl(payload.targetUrl),
+                    message: payload.message,
+                    title: payload.title,
+                    userName: payload.userName ?? delivery.recipientUser?.name ?? "",
+                },
+            });
+            await notificationService.completeEmailDelivery(deliveryId, result);
+            return result.success;
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            try {
+                await notificationService.completeEmailDelivery(deliveryId, {
+                    error: message,
+                    success: false,
+                });
+            }
+            catch (completionError) {
+                logger.error("No se pudo actualizar el estado de entrega del correo.", {
+                    deliveryId,
+                    error: completionError instanceof Error
+                        ? completionError.message
+                        : String(completionError),
+                });
+            }
+            logger.warn("Falló la entrega de una notificación por correo.", {
+                deliveryId,
+                error: message,
+            });
+            return false;
+        }
+    },
+    async deliverPendingEmailNotifications(limit = 100) {
+        const now = new Date();
+        const deliveries = await prisma.notificationDelivery.findMany({
+            orderBy: [{ lastAttemptAt: "asc" }, { createdAt: "asc" }],
+            select: { id: true },
+            take: Math.max(1, Math.min(500, limit)),
+            where: {
+                attempts: { lt: notificationDeliveryMaxAttempts },
+                channel: NotificationDeliveryChannel.EMAIL,
+                dedupeKey: { not: { startsWith: "deadline-reminder:" } },
+                OR: [
+                    { lastAttemptAt: null, status: NotificationDeliveryStatus.PENDING },
+                    {
+                        lastAttemptAt: {
+                            lt: new Date(now.getTime() - notificationDeliveryClaimLeaseMs),
+                        },
+                        status: NotificationDeliveryStatus.PENDING,
+                    },
+                    {
+                        lastAttemptAt: {
+                            lt: new Date(now.getTime() - notificationDeliveryRetryDelayMs),
+                        },
+                        status: NotificationDeliveryStatus.FAILED,
+                    },
+                ],
+                payloadJson: { not: null },
+            },
+        });
+        let sentCount = 0;
+        for (const delivery of deliveries) {
+            if (await notificationService.deliverEmailNotification(delivery.id))
+                sentCount += 1;
+        }
+        return sentCount;
+    },
     async delete(notificationId, userId) {
         const existingNotification = await getNotificationForUser(userId, notificationId);
         if (!existingNotification) {
-            throw new AppError("Notification not found.", 404);
+            throw new AppError("No se encontró la notificación.", 404);
         }
         await prisma.notification.update({
             data: { deletedAt: new Date() },
@@ -260,7 +480,7 @@ export const notificationService = {
         const db = options?.db ?? prisma;
         const existingNotification = await getNotificationForUser(userId, notificationId, db);
         if (!existingNotification) {
-            throw new AppError("Notification not found.", 404);
+            throw new AppError("No se encontró la notificación.", 404);
         }
         if (existingNotification.isRead) {
             return mapNotificationRecord(existingNotification);

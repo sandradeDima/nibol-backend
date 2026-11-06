@@ -4,6 +4,7 @@ import { prisma } from "../../utils/prisma.js";
 import { buildObservationAttentionWhere, observationCompletenessService, } from "../observations/observation-completeness.service.js";
 import { buildObservationScopeWhere, getActionPlanDeadlineStatus, getBusinessDateKey, getDateOnlyKey, getEffectiveActionPlanDueDate, getOfficialActionPlanProgress, reportDeadlineStatusOptions, isApprovedDeadlineExtension, OFFICIAL_ACTION_PLAN_STATUSES, getDaysBetween, getObservationStatusGroup, getRiskGroupLabel, hasGlobalBusinessAccess, isObservationClosed, isObservationDueSoon, isObservationOverdue, REPORT_DEFAULT_DUE_SOON_DAYS, } from "./reporting-definitions.js";
 import { AppError } from "../../utils/app-error.js";
+import { observationDetailHeaders } from "./reports.exports.js";
 const reportsPrisma = prisma;
 export const getReportFilterCapabilities = (access) => {
     const global = access.isAdmin ||
@@ -19,10 +20,15 @@ export const getReportFilterCapabilities = (access) => {
         processOwner: global,
     };
 };
+const getReportAreaIds = (filters) => filters.areaIds?.length
+    ? filters.areaIds
+    : filters.areaId
+        ? [filters.areaId]
+        : undefined;
 export const assertReportFilterAccess = (filters, access) => {
     const capabilities = getReportFilterCapabilities(access);
     const requested = [
-        [Boolean(filters.areaId), capabilities.area, "Área"],
+        [Boolean(getReportAreaIds(filters)?.length), capabilities.area, "Área"],
         [
             Boolean(filters.areaResponsibleId?.length),
             capabilities.areaResponsible,
@@ -36,7 +42,9 @@ export const assertReportFilterAccess = (filters, access) => {
         [Boolean(filters.executorId?.length), capabilities.executor, "Ejecutor"],
         [
             Boolean(filters.processOwnerId?.length),
-            capabilities.processOwner,
+            capabilities.processOwner ||
+                (access.roleCode === "PROCESS_OWNER" &&
+                    filters.processOwnerId?.every((id) => id === access.userId) === true),
             "Dueño del proceso",
         ],
     ];
@@ -59,10 +67,12 @@ const areaSummarySelect = {
 const observationIdentitySelect = {
     auditReport: { select: { reportNumber: true } },
     id: true,
+    mainObservation: { select: { name: true } },
     observationNumber: true,
     title: true,
 };
 const observationDisplayCode = (observation) => `${observation.auditReport.reportNumber} / OBS-${String(observation.observationNumber).padStart(3, "0")}`;
+const observationDisplayNumber = (observation) => `${observation.auditReport.reportNumber}-${String(observation.observationNumber).padStart(2, "0")}`;
 const observationReportSelect = {
     areaAssignments: {
         select: {
@@ -123,6 +133,7 @@ const buildObservationWhere = (filters, access) => {
         buildObservationScopeWhere(access),
     ];
     const periodFilter = dateRange(filters.dateFrom, filters.dateTo);
+    const areaIds = getReportAreaIds(filters);
     if (periodFilter) {
         conditions.push(filters.periodField === "reportDate"
             ? { auditReport: { reportDate: periodFilter } }
@@ -130,13 +141,19 @@ const buildObservationWhere = (filters, access) => {
                 [filters.periodField ?? "createdAt"]: periodFilter,
             });
     }
-    if (filters.areaId)
-        conditions.push({ areaAssignments: { some: { areaId: filters.areaId } } });
+    if (areaIds?.length)
+        conditions.push({ areaAssignments: { some: { areaId: { in: areaIds } } } });
     if (filters.auditReportId?.length)
         conditions.push({ auditReportId: { in: filters.auditReportId } });
+    if (filters.globalStatus)
+        conditions.push({
+            status: { isFinal: filters.globalStatus === "CLOSED" },
+        });
     if (filters.activeOnly)
         conditions.push({ status: { isFinal: false } });
-    if (filters.riskLevelId)
+    if (filters.riskLevelIds?.length)
+        conditions.push({ riskLevelId: { in: filters.riskLevelIds } });
+    else if (filters.riskLevelId)
         conditions.push({ riskLevelId: filters.riskLevelId });
     if (filters.observationStatusIds?.length)
         conditions.push({ statusId: { in: filters.observationStatusIds } });
@@ -298,6 +315,7 @@ const actionPlanReportSelect = {
                 select: { id: true, reportNumber: true, reportDate: true, title: true },
             },
             id: true,
+            mainObservation: { select: { name: true } },
             observationNumber: true,
             currentDueDate: true,
             riskLevel: {
@@ -308,7 +326,9 @@ const actionPlanReportSelect = {
                     name: true,
                 },
             },
-            status: { select: { isFinal: true, key: true, name: true } },
+            status: {
+                select: { isFinal: true, isInitial: true, key: true, name: true },
+            },
             title: true,
         },
     },
@@ -384,6 +404,7 @@ export const buildActionPlanWhere = (filters, access, now = new Date(), timeZone
     const period = filters.periodField === "currentDueDate"
         ? undefined
         : actionPlanDateFilter(filters.periodField, filters.dateFrom, filters.dateTo);
+    const areaIds = getReportAreaIds(filters);
     if (period)
         conditions.push(period);
     const effectivePeriod = filters.periodField === "currentDueDate"
@@ -395,8 +416,8 @@ export const buildActionPlanWhere = (filters, access, now = new Date(), timeZone
         conditions.push({
             observation: { auditReportId: { in: filters.auditReportId } },
         });
-    if (filters.areaId)
-        conditions.push({ observationArea: { areaId: filters.areaId } });
+    if (areaIds?.length)
+        conditions.push({ observationArea: { areaId: { in: areaIds } } });
     if (filters.areaResponsibleId?.length)
         conditions.push({
             observationArea: {
@@ -418,15 +439,25 @@ export const buildActionPlanWhere = (filters, access, now = new Date(), timeZone
         if (executorIds.length)
             conditions.push({ responsibleUserId: { in: executorIds } });
     }
-    if (filters.riskLevelId)
+    if (filters.riskLevelIds?.length)
+        conditions.push({
+            observation: { riskLevelId: { in: filters.riskLevelIds } },
+        });
+    else if (filters.riskLevelId)
         conditions.push({ observation: { riskLevelId: filters.riskLevelId } });
+    if (filters.globalStatus)
+        conditions.push({
+            observation: { status: { isFinal: filters.globalStatus === "CLOSED" } },
+        });
     if (filters.observationStatusIds?.length)
         conditions.push({
             observation: { statusId: { in: filters.observationStatusIds } },
         });
     else if (filters.statusId)
         conditions.push({ observation: { statusId: filters.statusId } });
-    if (filters.progressStatus)
+    if (filters.progressStatuses?.length)
+        conditions.push({ status: { in: filters.progressStatuses } });
+    else if (filters.progressStatus)
         conditions.push({ status: filters.progressStatus });
     if (filters.activeOnly)
         conditions.push({ observation: { status: { isFinal: false } } });
@@ -545,6 +576,8 @@ const mapActionPlanRow = (record, asOf, timeZone) => {
         observation: {
             code: observationCode,
             id: observation.id,
+            mainObservation: observation.mainObservation.name,
+            number: observationDisplayNumber(observation),
             status: observation.status,
             title: observation.title,
         },
@@ -638,7 +671,9 @@ const buildOperationalRows = (rows, cutoffDateKey, dueSoonDays) => {
                 key: row.observation.status.key,
                 name: row.observation.status.name,
             },
-            title: `${row.observation.code} · ${row.observation.title}`,
+            mainObservation: row.observation.mainObservation,
+            number: row.observation.number,
+            title: row.observation.title,
         });
     });
     const upcomingActionPlans = rows
@@ -658,6 +693,8 @@ const buildOperationalRows = (rows, cutoffDateKey, dueSoonDays) => {
         executorName: row.executor?.name ?? "Sin asignar",
         href: row.href,
         observationCode: row.observation.code,
+        observationNumber: row.observation.number,
+        mainObservation: row.observation.mainObservation ?? "—",
         observationStatus: row.observation.status.name,
         progress: {
             code: row.officialProgress.code,
@@ -892,7 +929,10 @@ const toActionPlanFlatRow = (row) => ({
     Informe: row.observation.code.split(" / ")[0],
     "Nivel de riesgo": row.riskLevel.name,
     "Estado de observación": row.observation.status.name,
-    Observación: `${row.observation.code} · ${row.observation.title}`,
+    "Número de observación": row.observation.number,
+    "Observación principal": row.observation.mainObservation,
+    "Título de observación": row.observation.title,
+    "Responsable de área": row.areaResponsible?.name ?? "Sin asignar",
     Plan: row.title,
     Reprogramado: row.reprogrammed ? "Sí" : "No",
 });
@@ -900,11 +940,14 @@ const getActionPlanReportRows = (query, dashboard) => {
     const rows = dashboard.rows.map(toActionPlanFlatRow);
     const columns = [
         "Informe",
-        "Observación",
+        "Número de observación",
+        "Observación principal",
+        "Título de observación",
         "Plan",
         "Área",
         "Nivel de riesgo",
         "Dueño del proceso",
+        "Responsable de área",
         "Ejecutor",
         "Estado de observación",
         "Estado del plan de acción",
@@ -1004,7 +1047,13 @@ const getReportOptions = async (access) => {
         }),
         reportsPrisma.observationStatus.findMany({
             orderBy: { sortOrder: "asc" },
-            select: { id: true, isFinal: true, key: true, name: true },
+            select: {
+                id: true,
+                isFinal: true,
+                isInitial: true,
+                key: true,
+                name: true,
+            },
             where: { active: true, deletedAt: null },
         }),
     ]);
@@ -1200,11 +1249,15 @@ const getMonthRange = (dateFrom, dateTo, cutoffDate) => {
 const buildFilterLabelMap = (filters, dashboard) => {
     const rows = Array.isArray(dashboard.rows) ? dashboard.rows : [];
     const cutoffDate = filters.cutoffDate ?? dashboard.cutoffDate;
+    const areaIds = getReportAreaIds(filters);
     return {
         "Fecha de corte": cutoffDate ? formatReportDateKey(cutoffDate) : "Actual",
-        Área: filters.areaId
-            ? (rows.find((row) => row.area.id === filters.areaId)?.area.name ??
-                "Área seleccionada")
+        Área: areaIds?.length
+            ? [
+                ...new Set(rows
+                    .filter((row) => areaIds.includes(row.area.id))
+                    .map((row) => row.area.name)),
+            ].join(", ") || "Área seleccionada"
             : "Todas",
         "Dueño del proceso": filters.processOwnerId?.length
             ? [
@@ -1222,14 +1275,21 @@ const buildFilterLabelMap = (filters, dashboard) => {
             : filters.statusId
                 ? "Estado seleccionado"
                 : "Todos",
-        "Estado del plan de acción": filters.progressStatus
-            ? {
-                CONCLUDED: "Concluido",
-                NOT_STARTED: "No iniciado",
-                STARTED: "Iniciado",
-                WITH_PROGRESS: "Con avance",
-            }[filters.progressStatus]
-            : "Todos",
+        "Estado global": filters.globalStatus === "PENDING"
+            ? "Pendiente"
+            : filters.globalStatus === "CLOSED"
+                ? "Cerrada"
+                : "Todos",
+        "Estado del plan de acción": filters.progressStatuses?.length
+            ? `${filters.progressStatuses.length} estados seleccionados`
+            : filters.progressStatus
+                ? {
+                    CONCLUDED: "Concluido",
+                    NOT_STARTED: "No iniciado",
+                    STARTED: "Iniciado",
+                    WITH_PROGRESS: "Con avance",
+                }[filters.progressStatus]
+                : "Todos",
         "Estado según plazo": filters.deadlineStatuses?.length
             ? filters.deadlineStatuses
                 .map((status) => (status === "VENCIDO" ? "Vencido" : "Vigente"))
@@ -1247,7 +1307,11 @@ const buildFilterLabelMap = (filters, dashboard) => {
         Período: filters.dateFrom || filters.dateTo
             ? `${filters.dateFrom ?? "Inicio"} – ${filters.dateTo ?? "Hoy"}`
             : "Período actual",
-        Riesgo: filters.riskLevelId ? "Nivel seleccionado" : "Todos",
+        Riesgo: filters.riskLevelIds?.length
+            ? `${filters.riskLevelIds.length} niveles seleccionados`
+            : filters.riskLevelId
+                ? "Nivel seleccionado"
+                : "Todos",
         "Responsable de área": filters.areaResponsibleId?.length
             ? "Responsable seleccionado"
             : "Todos",
@@ -1273,7 +1337,7 @@ const getDashboard = async (filters, access) => {
         AND: [where, buildObservationAttentionWhere("DUE_SOON", dueSoonDays)],
     };
     const inProcessWhere = {
-        AND: [where, { status: { key: { in: ["INICIADO", "CON_AVANCE"] } } }],
+        AND: [where, { status: { isInitial: false, isFinal: false } }],
     };
     const closedWhere = { AND: [where, { status: { isFinal: true } }] };
     const [total, open, closed, overdue, dueSoon, inProcess, observations, closureMap,] = await Promise.all([
@@ -1298,7 +1362,9 @@ const getDashboard = async (filters, access) => {
                 riskLevel: {
                     select: { colorToken: true, id: true, key: true, name: true },
                 },
-                status: { select: { isFinal: true, key: true, name: true } },
+                status: {
+                    select: { isFinal: true, isInitial: true, key: true, name: true },
+                },
                 updatedAt: true,
             },
             where,
@@ -1329,13 +1395,11 @@ const getDashboard = async (filters, access) => {
             key: statusGroup,
             label: statusGroup === "IN_PROGRESS"
                 ? "En proceso"
-                : statusGroup === "IN_REVIEW"
-                    ? "En revisión"
-                    : statusGroup === "CLOSED"
-                        ? "Cerradas"
-                        : statusGroup === "OVERDUE"
-                            ? "Vencidas"
-                            : "Abiertas",
+                : statusGroup === "CLOSED"
+                    ? "Cerradas"
+                    : statusGroup === "OVERDUE"
+                        ? "Vencidas"
+                        : "Abiertas",
             value: 0,
             ...(statusGroup === "OVERDUE"
                 ? { href: "/observaciones?filter.overdue=true" }
@@ -1377,8 +1441,7 @@ const getDashboard = async (filters, access) => {
             else {
                 currentArea.open += 1;
             }
-            if (observation.status.key === "INICIADO" ||
-                observation.status.key === "CON_AVANCE")
+            if (!observation.status.isInitial && !observation.status.isFinal)
                 currentArea.inProcess += 1;
             if (observationOverdue)
                 currentArea.overdue += 1;
@@ -1488,16 +1551,149 @@ const getDashboard = async (filters, access) => {
         },
     };
 };
-const toObservationFlatRow = (row) => ({
-    Área: row.area.name,
-    Avance: `${row.progressPercent}%`,
-    Código: row.code,
-    Estado: row.effectiveStatus.name,
-    Fecha: row.dueDate,
-    Observación: row.title,
-    Responsable: row.responsibleUser?.name ?? "Sin asignar",
-    Riesgo: row.riskLevel.name,
-});
+export const mapObservationDetailRows = (observations, query, now, timeZone) => {
+    const areaIds = getReportAreaIds(query);
+    return observations.flatMap((observation) => {
+        const base = {
+            "Informe de Auditoría": observation.auditReport.reportNumber,
+            "Título de informe": observation.auditReport.title,
+            "Fecha de informe": observation.auditReport.reportDate.toISOString(),
+            "Número de observación": observationDisplayNumber(observation),
+            "Observación principal": observation.mainObservation.name,
+            "Título de observación": observation.title,
+            "Observación detallada": observation.description,
+            Recomendación: observation.auditRecommendation,
+            "Riesgos asociados": observation.risks
+                .map((item) => `▪ ${item.risk.name}`)
+                .join("\n"),
+            "Nivel de riesgo": observation.riskLevel.name,
+            "Fecha compromiso (vencimiento)": observation.currentDueDate.toISOString(),
+            "Estado general OT": observation.status.name,
+        };
+        const plans = observation.actionPlans.filter((plan) => {
+            const area = plan.observationArea;
+            const deadline = getActionPlanDeadlineStatus(plan, now, timeZone);
+            return ((!areaIds?.length || areaIds.includes(area.area.id)) &&
+                (!query.areaResponsibleId?.length ||
+                    query.areaResponsibleId.includes(area.areaResponsible.id)) &&
+                (!query.processOwnerId?.length ||
+                    query.processOwnerId.includes(area.processOwner.id)) &&
+                (!query.executorId?.length ||
+                    query.executorId.includes(plan.responsibleUser.id)) &&
+                (!query.responsibleUserId ||
+                    [
+                        plan.responsibleUser.id,
+                        area.areaResponsible.id,
+                        area.processOwner.id,
+                    ].includes(query.responsibleUserId)) &&
+                (!query.progressStatuses?.length
+                    ? !query.progressStatus || plan.status === query.progressStatus
+                    : query.progressStatuses.includes(plan.status)) &&
+                (!query.deadlineStatus || deadline === query.deadlineStatus) &&
+                (!query.deadlineStatuses?.length ||
+                    query.deadlineStatuses.includes(deadline)) &&
+                (query.reprogrammed === undefined ||
+                    plan.deadlineExtensionRequests.some(isApprovedDeadlineExtension) ===
+                        query.reprogrammed));
+        });
+        return plans.map((plan) => {
+            const extension = plan.deadlineExtensionRequests.find(isApprovedDeadlineExtension);
+            const area = plan.observationArea;
+            const progress = getOfficialActionPlanProgress(plan.status);
+            return {
+                ...base,
+                Área: area.area.name,
+                "Dueño de proceso": area.processOwner.name,
+                "Responsable de área": area.areaResponsible.name,
+                "Plan de acción": plan.description,
+                "Ejecutor (reporte)": plan.responsibleUser.name,
+                "Fecha compromiso (plan de acción)": getEffectiveActionPlanDueDate(plan).toISOString(),
+                "N° reprogramacion": extension ? 1 : "",
+                "Fecha reprogramación": extension?.proposedDueDate.toISOString() ?? "",
+                "Comentario 1": plan.comments[0]?.body ?? "",
+                "Comentario 2": plan.comments[1]?.body ?? "",
+                "Estado según avance": `${progress.label} (${progress.code})`,
+                "Estado según plazo": getActionPlanDeadlineStatus(plan, now, timeZone) === "VENCIDO"
+                    ? "Vencido"
+                    : "Vigente",
+            };
+        });
+    });
+};
+const getObservationDetailRows = async (query, access) => {
+    const where = {
+        AND: [
+            buildObservationWhere(query, access),
+            { actionPlans: { some: buildActionPlanScopeWhere(access) } },
+        ],
+    };
+    const total = await reportsPrisma.observation.count({ where });
+    // shortcut: exports load all matching observations in memory; stream them if report volumes outgrow the PDF renderer.
+    if (total > 5000 && query.perPage < 5000)
+        throw new AppError("El reporte supera 5.000 observaciones. Aplique filtros para reducirlo.", 413);
+    const observations = await reportsPrisma.observation.findMany({
+        orderBy: [
+            { auditReport: { reportNumber: "asc" } },
+            { observationNumber: "asc" },
+        ],
+        select: {
+            actionPlans: {
+                orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+                select: {
+                    comments: {
+                        orderBy: { createdAt: "asc" },
+                        select: { body: true },
+                        where: {
+                            deletedAt: null,
+                            ...(hasGlobalBusinessAccess(access)
+                                ? {}
+                                : { visibility: { in: ["AREA_VISIBLE", "SYSTEM"] } }),
+                        },
+                    },
+                    currentDueDate: true,
+                    deadlineExtensionRequests: {
+                        orderBy: { updatedAt: "desc" },
+                        select: { proposedDueDate: true, status: true },
+                        where: { deletedAt: null },
+                    },
+                    description: true,
+                    observationArea: {
+                        select: {
+                            area: { select: areaSummarySelect },
+                            areaResponsible: { select: userSummarySelect },
+                            processOwner: { select: userSummarySelect },
+                        },
+                    },
+                    responsibleUser: { select: userSummarySelect },
+                    status: true,
+                },
+                where: buildActionPlanScopeWhere(access),
+            },
+            auditRecommendation: true,
+            auditReport: {
+                select: { reportDate: true, reportNumber: true, title: true },
+            },
+            currentDueDate: true,
+            description: true,
+            mainObservation: { select: { name: true } },
+            observationNumber: true,
+            riskLevel: { select: { name: true } },
+            risks: {
+                orderBy: { risk: { name: "asc" } },
+                select: { risk: { select: { name: true } } },
+            },
+            status: { select: { name: true } },
+            title: true,
+        },
+        where,
+    });
+    const timeZone = await getReportingTimeZone();
+    const now = query.cutoffDate
+        ? getCutoffAsOfDate(query.cutoffDate, timeZone)
+        : new Date();
+    const rows = mapObservationDetailRows(observations, query, now, timeZone);
+    return { columns: [...observationDetailHeaders], rows, total: rows.length };
+};
 // Observation-grain rows used by the dedicated report generator.
 const getReportRows = async (query, access, dashboard) => {
     const observationWhere = buildObservationWhere(query, access);
@@ -1518,18 +1714,31 @@ const getReportRows = async (query, access, dashboard) => {
                     responsibleUser: { select: userSummarySelect },
                     status: true,
                     description: true,
+                    observationArea: {
+                        select: {
+                            areaResponsible: { select: userSummarySelect },
+                        },
+                    },
                 },
                 where: {
                     AND: [
                         buildActionPlanScopeWhere(access),
                         { observation: observationWhere },
+                        ...(query.progressStatuses?.length
+                            ? [{ status: { in: query.progressStatuses } }]
+                            : query.progressStatus
+                                ? [{ status: query.progressStatus }]
+                                : []),
                     ],
                 },
             });
             return {
                 columns: [
                     "Plan de acción",
-                    "Observación",
+                    "Número de observación",
+                    "Observación principal",
+                    "Título de observación",
+                    "Responsable de área",
                     "Responsable",
                     "Fecha límite",
                     "Avance",
@@ -1542,7 +1751,10 @@ const getReportRows = async (query, access, dashboard) => {
                         "Plan de acción": actionPlan.description,
                         "Fecha límite": effectiveDueDate.toISOString(),
                         Estado: actionPlan.status,
-                        Observación: `${observationDisplayCode(actionPlan.observation)} · ${actionPlan.observation.title}`,
+                        "Número de observación": observationDisplayNumber(actionPlan.observation),
+                        "Observación principal": actionPlan.observation.mainObservation.name,
+                        "Título de observación": actionPlan.observation.title,
+                        "Responsable de área": actionPlan.observationArea.areaResponsible?.name ?? "Sin asignar",
                         Responsable: actionPlan.responsibleUser?.name ?? "Sin asignar",
                     };
                 }),
@@ -1570,7 +1782,9 @@ const getReportRows = async (query, access, dashboard) => {
             });
             return {
                 columns: [
-                    "Observación",
+                    "Número de observación",
+                    "Observación principal",
+                    "Título de observación",
                     "Evidencia",
                     "Tipo",
                     "Cargada por",
@@ -1582,7 +1796,9 @@ const getReportRows = async (query, access, dashboard) => {
                     "Cargada por": evidence.uploadedByUser.name,
                     Evidencia: evidence.originalName,
                     Fecha: evidence.createdAt.toISOString(),
-                    Observación: `${observationDisplayCode(evidence.observation)} · ${evidence.observation.title}`,
+                    "Número de observación": observationDisplayNumber(evidence.observation),
+                    "Observación principal": evidence.observation.mainObservation.name,
+                    "Título de observación": evidence.observation.title,
                     Tipo: `${evidence.context} · ${evidence.mimeType}`,
                 })),
                 total: evidences.length,
@@ -1628,7 +1844,9 @@ const getReportRows = async (query, access, dashboard) => {
             });
             return {
                 columns: [
-                    "Observación",
+                    "Número de observación",
+                    "Observación principal",
+                    "Título de observación",
                     "Área",
                     "Solicitante",
                     "Fecha original",
@@ -1642,9 +1860,11 @@ const getReportRows = async (query, access, dashboard) => {
                         Estado: request.status,
                         "Fecha original": request.previousDueDate.toISOString(),
                         "Fecha solicitada": request.proposedDueDate.toISOString(),
-                        Observación: observation
-                            ? `${observationDisplayCode(observation)} · ${observation.title}`
+                        "Número de observación": observation
+                            ? observationDisplayNumber(observation)
                             : "—",
+                        "Observación principal": observation?.mainObservation.name ?? "—",
+                        "Título de observación": observation?.title ?? "—",
                         Solicitante: request.requestedByUser.name,
                     };
                 }),
@@ -1721,21 +1941,7 @@ const getReportRows = async (query, access, dashboard) => {
             };
         case "OBSERVATIONS":
         default: {
-            const result = await getObservationRows(query, access, { limit: 5000 });
-            return {
-                columns: [
-                    "Código",
-                    "Observación",
-                    "Área",
-                    "Responsable",
-                    "Riesgo",
-                    "Estado",
-                    "Fecha",
-                    "Avance",
-                ],
-                rows: result.data.map(toObservationFlatRow),
-                total: result.total,
-            };
+            return getObservationDetailRows(query, access);
         }
     }
 };
@@ -1838,9 +2044,13 @@ const getAuditHistory = async (query, access) => {
             entityId: true,
             observation: {
                 select: {
-                    area: { select: areaSummarySelect },
-                    code: true,
-                    title: true,
+                    areaAssignments: {
+                        select: { area: { select: areaSummarySelect } },
+                        take: 1,
+                    },
+                    auditReport: { select: { reportNumber: true } },
+                    mainObservation: { select: { name: true } },
+                    observationNumber: true,
                 },
             },
             title: true,
@@ -1855,7 +2065,18 @@ const getAuditHistory = async (query, access) => {
                     OR: [
                         { title: { contains: query.search } },
                         { description: { contains: query.search } },
-                        { observation: { code: { contains: query.search } } },
+                        {
+                            observation: {
+                                auditReport: {
+                                    reportNumber: { contains: query.search },
+                                },
+                            },
+                        },
+                        {
+                            observation: {
+                                mainObservation: { name: { contains: query.search } },
+                            },
+                        },
                     ],
                 }
                 : {}),
@@ -1864,11 +2085,14 @@ const getAuditHistory = async (query, access) => {
     const normalizedRows = activities.map((activity) => ({
         action: activity.action,
         actor: activity.actorUser?.name ?? "Sistema",
-        area: activity.observation?.area.name ?? "—",
+        area: activity.observation?.areaAssignments[0]?.area.name ?? "—",
         date: activity.createdAt.toISOString(),
         description: activity.description ?? activity.title,
         event: getActivityLabel(activity.activityType, activity.action),
-        observation: activity.observation?.code ?? "—",
+        "Número de observación": activity.observation
+            ? observationDisplayNumber(activity.observation)
+            : "—",
+        "Observación principal": activity.observation?.mainObservation.name ?? "—",
         result: getActivityResult(activity.activityType),
     }));
     const filteredRows = normalizedRows.filter((row) => {
@@ -1904,7 +2128,8 @@ const getAuditHistory = async (query, access) => {
     return {
         columns: [
             "Fecha",
-            "Observación",
+            "Número de observación",
+            "Observación principal",
             "Área",
             "Responsable",
             "Acción",
@@ -1939,7 +2164,9 @@ const getAuditStructuredRows = async (query, access) => {
         });
         return {
             columns: [
-                "Observación",
+                "Número de observación",
+                "Observación principal",
+                "Título de observación",
                 "Evidencia",
                 "Tipo",
                 "Cargado por",
@@ -1951,7 +2178,9 @@ const getAuditStructuredRows = async (query, access) => {
                 "Cargado por": evidence.uploadedByUser.name,
                 Evidencia: evidence.originalName,
                 Fecha: evidence.createdAt.toISOString(),
-                Observación: `${observationDisplayCode(evidence.observation)} · ${evidence.observation.title}`,
+                "Número de observación": observationDisplayNumber(evidence.observation),
+                "Observación principal": evidence.observation.mainObservation.name,
+                "Título de observación": evidence.observation.title,
                 Revisión: "Pendiente de revisión documental",
                 Tipo: `${evidence.context} · ${evidence.mimeType}`,
             })),
@@ -2009,7 +2238,8 @@ const getAuditStructuredRows = async (query, access) => {
         return {
             columns: query.template === "DEADLINES"
                 ? [
-                    "Observación",
+                    "Número de observación",
+                    "Observación principal",
                     "Área",
                     "Responsable",
                     "Riesgo",
@@ -2020,7 +2250,8 @@ const getAuditStructuredRows = async (query, access) => {
                     "Días vencidos",
                 ]
                 : [
-                    "Observación",
+                    "Número de observación",
+                    "Observación principal",
                     "Área",
                     "Solicitante",
                     "Fecha original",
@@ -2047,9 +2278,10 @@ const getAuditStructuredRows = async (query, access) => {
                         Estado: request.status,
                         "Fecha actual": effectiveDueDate.toISOString(),
                         "Fecha original": request.previousDueDate.toISOString(),
-                        Observación: observation
-                            ? observationDisplayCode(observation)
+                        "Número de observación": observation
+                            ? observationDisplayNumber(observation)
                             : "—",
+                        "Observación principal": observation?.mainObservation.name ?? "—",
                         Responsable: request.requestedByUser.name,
                         Riesgo: observation?.riskLevel.name ?? "—",
                     }
@@ -2058,9 +2290,10 @@ const getAuditStructuredRows = async (query, access) => {
                         Estado: request.status,
                         "Fecha original": request.previousDueDate.toISOString(),
                         "Fecha solicitada": request.proposedDueDate.toISOString(),
-                        Observación: observation
-                            ? observationDisplayCode(observation)
+                        "Número de observación": observation
+                            ? observationDisplayNumber(observation)
                             : "—",
+                        "Observación principal": observation?.mainObservation.name ?? "—",
                         Solicitante: request.requestedByUser.name,
                     };
             }),
@@ -2085,6 +2318,7 @@ const getAuditStructuredRows = async (query, access) => {
                 auditReport: { select: { reportNumber: true } },
                 currentDueDate: true,
                 id: true,
+                mainObservation: { select: { name: true } },
                 observationNumber: true,
                 riskLevel: { select: { name: true } },
                 title: true,
@@ -2093,7 +2327,9 @@ const getAuditStructuredRows = async (query, access) => {
         });
         return {
             columns: [
-                "Observación",
+                "Número de observación",
+                "Observación principal",
+                "Título de observación",
                 "Área",
                 "Responsable",
                 "Riesgo",
@@ -2108,7 +2344,9 @@ const getAuditStructuredRows = async (query, access) => {
                     (1000 * 60 * 60 * 24))),
                 "Fecha límite": observation.currentDueDate.toISOString(),
                 Estado: "Vencida",
-                Observación: `${observationDisplayCode(observation)} · ${observation.title}`,
+                "Número de observación": observationDisplayNumber(observation),
+                "Observación principal": observation.mainObservation.name,
+                "Título de observación": observation.title,
                 Responsable: observation.areaAssignments[0]?.areaResponsible.name ?? "Sin asignar",
                 Riesgo: observation.riskLevel.name,
             })),
@@ -2224,7 +2462,8 @@ export const reportsService = {
     async listObservations(query, access) {
         return getObservationRows(query, access);
     },
-    async getPreview(query, access) {
+    async getPreview(query, access, includeActionPlanRows = false) {
+        assertReportFilterAccess(query, access);
         const dashboard = query.type === "ACTION_PLANS"
             ? await getActionPlanDashboard(query, access)
             : await getDashboard(query, access);
@@ -2239,6 +2478,9 @@ export const reportsService = {
             reportName: query.reportName,
             reportType: query.type,
             rows: report.rows,
+            ...(includeActionPlanRows && query.type === "ACTION_PLANS"
+                ? { actionPlanRows: dashboard.rows }
+                : {}),
             summary: dashboard.summary,
             total: report.total,
         };

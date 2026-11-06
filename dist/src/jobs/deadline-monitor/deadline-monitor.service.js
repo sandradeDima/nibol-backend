@@ -1,10 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { NotificationDeliveryChannel, NotificationDeliveryStatus, NotificationPriority, ScheduledJobExecutionStatus, } from "../../../generated/prisma/client.js";
+import { NotificationDeliveryChannel, NotificationDeliveryStatus, NotificationPriority, ScheduledJobExecutionStatus, } from "../../types/database-enums.js";
+import { toDatabaseJson } from "../../services/logging-utils.js";
 import { emailService } from "../../emails/EmailService.js";
 import { prisma } from "../../utils/prisma.js";
 import { buildFrontendUrl, resolveNotificationTarget, } from "../../utils/notification-links.js";
 import { logger } from "../../utils/logger.js";
 import { entityActivityService } from "../../services/entity-activity-service.js";
+import { isNotificationChannelEnabled } from "../../services/notification-preferences.js";
 import { getEffectiveActionPlanDueDate } from "../../modules/reports/reporting-definitions.js";
 import { AUTOMATIC_NOTIFICATION_TYPES, DEADLINE_MONITOR_JOB_NAME, DEADLINE_MONITOR_PARAMETER_DEFAULTS, } from "./deadline-monitor.constants.js";
 const userSelect = {
@@ -175,8 +177,16 @@ const createDelivery = async (input) => {
     }
 };
 const emitEvent = async (context, event, recipient, cycle) => {
+    const [internalEnabled, emailEnabled] = await Promise.all([
+        context.parameters.notify_in_app &&
+            isNotificationChannelEnabled(event.eventType, "internal"),
+        context.parameters.notify_by_email &&
+            isNotificationChannelEnabled(event.eventType, "email"),
+    ]);
+    if (!internalEnabled && !emailEnabled)
+        return;
     const baseKey = `${event.eventType}:${event.entityType}:${event.entityId}:${recipient.id}:${cycle}`;
-    if (context.parameters.notify_in_app) {
+    if (internalEnabled) {
         const dedupeKey = `${baseKey}:IN_APP`;
         let notification = await prisma.notification.findUnique({
             where: { dedupeKey },
@@ -223,7 +233,7 @@ const emitEvent = async (context, event, recipient, cycle) => {
             status: NotificationDeliveryStatus.SENT,
         });
     }
-    if (!context.parameters.notify_by_email || !recipient.email)
+    if (!emailEnabled || !recipient.email)
         return;
     const emailDelivery = await createDelivery({
         channel: NotificationDeliveryChannel.EMAIL,
@@ -277,7 +287,7 @@ const emitEvent = async (context, event, recipient, cycle) => {
 const recordFailure = (context, entityType, entityId, error) => {
     context.summary.failuresCount += 1;
     context.summary.failures.push({ entityId, entityType });
-    logger.error("Deadline monitor entity failed.", {
+    logger.error("Falló la entidad del monitor de plazos.", {
         entityId,
         entityType,
         message: errorMessage(error),
@@ -634,11 +644,11 @@ const processPendingExtensions = async (context, auditRecipients, now) => {
 const finalizeExecution = async (executionId, context, status, error) => {
     await prisma.scheduledJobExecution.update({
         data: {
-            detailsJson: {
+            detailsJson: toDatabaseJson({
                 failures: context.summary.failures.slice(0, 100),
                 processedActionPlans: context.summary.processedActionPlans,
                 processedObservations: context.summary.processedObservations,
-            },
+            }),
             errorMessage: error ?? null,
             emailsSent: context.summary.emailsSent,
             failuresCount: context.summary.failuresCount,
@@ -763,7 +773,7 @@ export const deadlineMonitorService = {
             summary.status = "FAILED";
             summary.finishedAt = new Date().toISOString();
             await finalizeExecution(execution.id, context, "FAILED", errorMessage(error));
-            logger.error("Deadline monitor failed.", {
+            logger.error("Falló el monitor de plazos.", {
                 message: errorMessage(error),
             });
             return summary;

@@ -42,13 +42,35 @@ const getRequestEmail = (body) => {
         ? email.trim()
         : null;
 };
+const microsoftProvider = env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET
+    ? {
+        clientId: env.MICROSOFT_CLIENT_ID,
+        clientSecret: env.MICROSOFT_CLIENT_SECRET,
+        disableDefaultScope: true,
+        disableProfilePhoto: true,
+        disableSignUp: true,
+        mapProfileToUser: (profile) => ({
+            email: profile.email ?? profile.preferred_username,
+        }),
+        redirectURI: `${env.FRONTEND_URL}/api/auth/callback/microsoft`,
+        scope: ["openid", "profile", "email"],
+        tenantId: env.MICROSOFT_TENANT_ID,
+    }
+    : undefined;
 export const auth = betterAuth({
     basePath: "/api/auth",
-    baseURL: env.BETTER_AUTH_URL,
+    baseURL: env.BETTER_AUTH_URL.replace(/\/+$/, ""),
     database: prismaAdapter(prisma, {
-        provider: "mysql",
+        provider: "sqlserver",
         transaction: true,
     }),
+    account: {
+        accountLinking: {
+            enabled: true,
+            trustedProviders: ["microsoft"],
+        },
+        encryptOAuthTokens: true,
+    },
     databaseHooks: {
         account: {
             create: {
@@ -68,6 +90,23 @@ export const auth = betterAuth({
         },
         session: {
             create: {
+                before: async (session) => {
+                    const user = await prisma.user.findUnique({
+                        select: {
+                            deletedAt: true,
+                            isActive: true,
+                        },
+                        where: {
+                            id: session.userId,
+                        },
+                    });
+                    if (!user?.isActive || user.deletedAt) {
+                        throw APIError.from("FORBIDDEN", {
+                            code: "ACCOUNT_INACTIVE",
+                            message: "Esta cuenta está inactiva.",
+                        });
+                    }
+                },
                 after: async (session) => {
                     await prisma.user.update({
                         data: {
@@ -87,13 +126,13 @@ export const auth = betterAuth({
         onPasswordReset: async ({ user }) => {
             void notificationService
                 .create({
-                message: "Your password was reset successfully. If this wasn't you, contact support immediately.",
-                title: "Password reset",
+                message: "Su contraseña se restableció correctamente. Si no realizó este cambio, comuníquese con soporte de inmediato.",
+                title: "Contraseña restablecida",
                 type: "warning",
                 userId: user.id,
             })
                 .catch((error) => {
-                logger.error("Failed to create password reset notification.", {
+                logger.error("No se pudo crear la notificación para restablecer la contraseña.", {
                     error: error instanceof Error ? error.message : String(error),
                     userId: user.id,
                 });
@@ -145,8 +184,8 @@ export const auth = betterAuth({
                             email,
                             reason: response.message,
                             summary: email
-                                ? `A login attempt failed for ${email}.`
-                                : "A login attempt failed.",
+                                ? `Falló un intento de inicio de sesión para ${email}.`
+                                : "Falló un intento de inicio de sesión.",
                         },
                     });
                     return;
@@ -159,7 +198,7 @@ export const auth = betterAuth({
                         ipAddress: ctx.context.newSession.session.ipAddress ?? ipAddress ?? null,
                         metadata: {
                             email: ctx.context.newSession.user.email,
-                            summary: `${ctx.context.newSession.user.email} signed in successfully.`,
+                            summary: `${ctx.context.newSession.user.email} inició sesión correctamente.`,
                         },
                         userId: ctx.context.newSession.user.id,
                     });
@@ -176,7 +215,7 @@ export const auth = betterAuth({
                     ipAddress: ctx.context.session.session.ipAddress ?? ipAddress ?? null,
                     metadata: {
                         email: ctx.context.session.user.email,
-                        summary: `${ctx.context.session.user.email} signed out successfully.`,
+                        summary: `${ctx.context.session.user.email} cerró sesión correctamente.`,
                     },
                     userId: ctx.context.session.user.id,
                 });
@@ -192,7 +231,7 @@ export const auth = betterAuth({
                     ipAddress: ctx.context.newSession.session.ipAddress ?? ipAddress ?? null,
                     metadata: {
                         email: ctx.context.newSession.user.email,
-                        summary: `${ctx.context.newSession.user.email} registered a new account.`,
+                        summary: `${ctx.context.newSession.user.email} registró una cuenta nueva.`,
                     },
                     userId: ctx.context.newSession.user.id,
                 });
@@ -200,8 +239,21 @@ export const auth = betterAuth({
         }),
     },
     secret: env.BETTER_AUTH_SECRET,
+    socialProviders: microsoftProvider
+        ? {
+            microsoft: microsoftProvider,
+        }
+        : undefined,
     trustedOrigins: [env.FRONTEND_URL],
     user: {
+        additionalFields: {
+            jobTitle: {
+                fieldName: "jobTitle",
+                input: false,
+                required: false,
+                type: "string",
+            },
+        },
         fields: {
             image: "avatar",
         },
@@ -220,7 +272,7 @@ export const appendAuthHeaders = (response, headers) => {
         response.append(key, value);
     });
 };
-logger.info("Better Auth configured.", {
+logger.info("Better Auth quedó configurado.", {
     baseUrl: env.BETTER_AUTH_URL,
 });
 //# sourceMappingURL=auth.js.map

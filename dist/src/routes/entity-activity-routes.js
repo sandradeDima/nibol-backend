@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { asyncHandler } from "../middleware/async-handler.js";
-import { requireAnyPermission } from "../middleware/authorization-middleware.js";
+import { requireAnyPermission, requirePermission, } from "../middleware/authorization-middleware.js";
 import { activityLogService } from "../services/activity-log-service.js";
 import { entityActivityService } from "../services/entity-activity-service.js";
 import { AppError } from "../utils/app-error.js";
@@ -38,13 +38,28 @@ const getQueryValue = (value) => {
 const getParamValue = (value) => {
     const result = Array.isArray(value) ? value[0] : value;
     if (!result)
-        throw new AppError("Entity parameter is required.", 400);
+        throw new AppError("Se requiere el parámetro de entidad.", 400);
     return result;
 };
 const getAccess = (request) => {
     if (!request.authorizationSummary)
-        throw new AppError("Authorization required.", 401);
+        throw new AppError("Se requiere autorización.", 401);
     return request.authorizationSummary;
+};
+const requireEntityHistoryPermission = (request, _response, next) => {
+    const entityType = getParamValue(request.params.entityType).toUpperCase();
+    const specificPermission = entityType === "OBSERVATION"
+        ? "observations.history.view"
+        : entityType === "ACTION_PLAN"
+            ? "action_plans.history.view"
+            : null;
+    const access = getAccess(request);
+    const canViewGenericActivity = access.isAdmin ||
+        ["activity.view", "activity_logs.view"].some((permission) => access.permissions.includes(permission));
+    if (canViewGenericActivity ||
+        (specificPermission && access.permissions.includes(specificPermission)))
+        return next();
+    next(new AppError("No tiene permiso para ver este historial.", 403));
 };
 const parseQuery = (request) => {
     const pageSize = getQueryValue(request.query.pageSize) ??
@@ -76,17 +91,29 @@ const parseQuery = (request) => {
     });
 };
 export const entityActivityRouter = Router();
-const activityAccess = requireAnyPermission([
+const activityAccess = [
+    requirePermission("activity.view_module"),
+    requireAnyPermission([
+        "activity.view",
+        "activity_logs.view",
+        "observations.view",
+    ]),
+];
+entityActivityRouter.get("/observations/:id/history", requireAnyPermission([
+    "observations.history.view",
     "activity.view",
     "activity_logs.view",
-    "observations.view",
-]);
-entityActivityRouter.get("/observations/:id/history", activityAccess, asyncHandler(async (request, response) => {
+]), asyncHandler(async (request, response) => {
     const query = parseQuery(request);
     const result = await entityActivityService.list({ ...query, observationId: getParamValue(request.params.id) }, getAccess(request));
     sendPaginated(response, result.data, result.pagination);
 }));
-entityActivityRouter.get("/entities/:entityType/:entityId/history", activityAccess, asyncHandler(async (request, response) => {
+entityActivityRouter.get("/entities/:entityType/:entityId/history", requireAnyPermission([
+    "observations.history.view",
+    "action_plans.history.view",
+    "activity.view",
+    "activity_logs.view",
+]), requireEntityHistoryPermission, asyncHandler(async (request, response) => {
     const query = parseQuery(request);
     const result = await entityActivityService.list({
         ...query,
@@ -100,7 +127,7 @@ entityActivityRouter.get("/activity", activityAccess, asyncHandler(async (reques
     const result = await entityActivityService.list(query, getAccess(request));
     sendPaginated(response, result.data, result.pagination);
 }));
-entityActivityRouter.get("/activity/export", activityAccess, asyncHandler(async (request, response) => {
+entityActivityRouter.get("/activity/export", activityAccess, requirePermission("activity.export"), asyncHandler(async (request, response) => {
     const query = parseQuery(request);
     const access = getAccess(request);
     const csv = await entityActivityService.export(query, access);

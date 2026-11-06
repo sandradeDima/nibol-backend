@@ -10,13 +10,13 @@ import { actionPlanIdParamSchema, commentIdParamSchema, createCommentSchema, cre
 const value = (input) => typeof input === "string" ? input : undefined;
 const access = (request) => {
     if (!request.authorizationSummary)
-        throw new AppError("Authorization required.", 401);
+        throw new AppError("Se requiere autorización.", 401);
     return request.authorizationSummary;
 };
 const idWith = (request, schema) => schema.parse({ id: value(request.params.id) }).id;
 const files = (request) => {
     if (!Array.isArray(request.files) || request.files.length === 0)
-        throw new AppError("At least one file is required.", 400);
+        throw new AppError("Debe adjuntar al menos un archivo.", 400);
     return request.files.map((file) => ({
         buffer: file.buffer,
         mimetype: file.mimetype,

@@ -1,10 +1,15 @@
-import { authorizationService, buildActionPlanScopeWhere, buildObservationAreaScopeWhere, buildObservationScopeWhere, buildRemediationPlanScopeWhere, } from "../../services/authorization-service.js";
+import { ActionPlanStatus, parseDatabaseEnum, } from "../../types/database-enums.js";
+import { authorizationService, buildAssignedObservationAreaScopeWhere, buildActionPlanScopeWhere, buildObservationScopeWhere, buildRemediationPlanScopeWhere, } from "../../services/authorization-service.js";
+import { notificationService } from "../../services/notification-service.js";
 import { AppError } from "../../utils/app-error.js";
+import { buildObservationUrl } from "../../utils/observation-links.js";
 import { prisma } from "../../utils/prisma.js";
-import { observationAggregationService } from "../observations/observation-aggregation.service.js";
+import { lockObservationForActionPlanUpdate, recalculateObservationFromActionPlans, } from "../observations/observation-aggregation.service.js";
+import { notifyActionPlanAssigned, notifyActionPlanExecutorChanged, } from "./action-plan-notification.service.js";
 import { observationDeadlineService } from "../observations/observation-deadline.service.js";
 import { workflowIntegrationService } from "../workflows/workflow-integration.service.js";
 import { getActionPlanDeadlineStatus, getEffectiveActionPlanDueDate, getOfficialActionPlanProgress, isApprovedDeadlineExtension, } from "../reports/reporting-definitions.js";
+import { buildProgressNotification, formatObservationReference, } from "../progress/progress-notification.js";
 const userSelect = {
     email: true,
     id: true,
@@ -119,11 +124,16 @@ const format = (record) => {
         reprogrammed: Boolean(record.deadlineExtensionRequests.find(isApprovedDeadlineExtension)),
         responsibleUser: record.responsibleUser,
         sortOrder: record.sortOrder,
-        status: record.status,
-        statusLabel: labels[record.status],
+        status: parseDatabaseEnum(ActionPlanStatus, record.status, "action_plans.status"),
+        statusLabel: labels[parseDatabaseEnum(ActionPlanStatus, record.status, "action_plans.status")],
         updatedAt: record.updatedAt.toISOString(),
     };
 };
+const assignmentContext = (record) => ({
+    areaResponsibleUserId: record.observationArea.areaResponsible.id,
+    executorUserId: record.responsibleUser.id,
+    processOwnerUserId: record.observationArea.processOwner.id,
+});
 const accessWhere = (access) => buildActionPlanScopeWhere(access);
 export const buildApprovedCompletionEvaluationWhere = (actionPlanId) => ({
     actionPlanId,
@@ -196,11 +206,15 @@ const find = async (id, access) => {
 const validateAssignment = async (observationId, observationAreaId, responsibleUserId, access) => {
     const [observationArea, user] = await Promise.all([
         prisma.observationArea.findFirst({
-            select: { id: true },
+            select: {
+                areaResponsibleUserId: true,
+                id: true,
+                processOwnerUserId: true,
+            },
             where: {
                 id: observationAreaId,
                 observationId,
-                ...buildObservationAreaScopeWhere(access),
+                ...buildAssignedObservationAreaScopeWhere(access),
             },
         }),
         prisma.user.findFirst({
@@ -212,12 +226,7 @@ const validateAssignment = async (observationId, observationAreaId, responsibleU
         throw new AppError("El área seleccionada no pertenece a esta observación.", 400);
     if (!user)
         throw new AppError("El ejecutor seleccionado no existe o está inactivo.", 400);
-    const executorRole = await prisma.userRole.findFirst({
-        select: { userId: true },
-        where: { userId: responsibleUserId, role: { code: "EXECUTOR" } },
-    });
-    if (!executorRole)
-        throw new AppError("El usuario seleccionado no es un ejecutor.", 400);
+    return observationArea;
 };
 const remediationPlanInclude = {
     area: { select: { id: true, name: true } },
@@ -254,40 +263,13 @@ const findRemediationPlan = async (id, access) => {
             where: {
                 observationId: record.observationId,
                 areaId: record.area.id,
-                ...buildObservationAreaScopeWhere(access),
+                ...buildAssignedObservationAreaScopeWhere(access),
             },
         });
         if (!allowedArea)
             throw new AppError("No se encontró el plan de acción recomendado.", 404);
     }
     return record;
-};
-export const recalculateObservationFromActionPlans = async (tx, observationId) => {
-    const [observation, actionPlans] = await Promise.all([
-        tx.observation.findUnique({
-            select: { status: { select: { isFinal: true } } },
-            where: { id: observationId },
-        }),
-        tx.actionPlan.findMany({
-            select: { progressPercent: true, status: true },
-            where: { deletedAt: null, observationId },
-        }),
-    ]);
-    if (!observation)
-        return;
-    const progressPercent = observationAggregationService.calculateProgress(actionPlans);
-    const key = observationAggregationService.calculateStatus(actionPlans, observation.status.isFinal);
-    const status = await tx.observationStatus.findFirst({
-        select: { id: true },
-        where: { active: true, deletedAt: null, key },
-    });
-    await tx.observation.update({
-        data: {
-            progressPercent,
-            ...(status ? { statusId: status.id } : {}),
-        },
-        where: { id: observationId },
-    });
 };
 export const remediationService = {
     async createRemediationPlan(observationId, input, access) {
@@ -303,7 +285,7 @@ export const remediationService = {
                         id: observationId,
                         ...buildObservationScopeWhere(access),
                     },
-                    ...buildObservationAreaScopeWhere(access),
+                    ...buildAssignedObservationAreaScopeWhere(access),
                 },
             }),
             input.ownerUserId
@@ -313,7 +295,6 @@ export const remediationService = {
                         deletedAt: null,
                         id: input.ownerUserId,
                         isActive: true,
-                        userRoles: { some: { role: { code: "EXECUTOR" } } },
                     },
                 })
                 : Promise.resolve(null),
@@ -386,7 +367,6 @@ export const remediationService = {
                     deletedAt: null,
                     id: input.ownerUserId,
                     isActive: true,
-                    userRoles: { some: { role: { code: "EXECUTOR" } } },
                 },
             });
             if (!owner)
@@ -486,8 +466,6 @@ export const remediationService = {
         };
     },
     async createActionPlan(observationId, input, access) {
-        if (!authorizationService.can(access, "action_plans.create"))
-            throw new AppError("No tiene permiso para crear planes de acción.", 403);
         const observation = await prisma.observation.findFirst({
             select: { id: true },
             where: {
@@ -499,12 +477,18 @@ export const remediationService = {
         if (!observation)
             throw new AppError("No se encontró la observación.", 404);
         await validateDueDate(observationId, input.dueDate);
-        if (access.dataScope === "ASSIGNED" &&
-            input.responsibleUserId !== access.userId) {
+        const areaAssignment = await validateAssignment(observationId, input.observationAreaId, input.responsibleUserId, access);
+        const assignments = {
+            areaResponsibleUserId: areaAssignment.areaResponsibleUserId,
+            processOwnerUserId: areaAssignment.processOwnerUserId,
+        };
+        if (!(await authorizationService.canForAssignments(access, "action_plans.create", assignments)))
+            throw new AppError("No tiene permiso para crear planes de acción.", 403);
+        if (input.responsibleUserId !== access.userId &&
+            !(await authorizationService.canForAssignments(access, "action_plans.assign_executor", assignments, false)))
             throw new AppError("No puede asignar un plan a otro ejecutor.", 403);
-        }
-        await validateAssignment(observationId, input.observationAreaId, input.responsibleUserId, access);
         const created = await prisma.$transaction(async (tx) => {
+            await lockObservationForActionPlanUpdate(tx, observationId);
             const actionPlan = await tx.actionPlan.create({
                 data: {
                     currentDueDate: input.dueDate,
@@ -533,12 +517,24 @@ export const remediationService = {
             await recalculateObservationFromActionPlans(tx, observationId);
             return actionPlan;
         });
-        return format(await find(created.id, access));
+        const actionPlan = await find(created.id, access);
+        await notifyActionPlanAssigned({
+            dedupeKey: `action-plan-created-after-observation:${actionPlan.id}`,
+            entityId: actionPlan.id,
+            entityType: "ACTION_PLAN",
+            eventType: "ACTION_PLAN_CREATED_AFTER_OBSERVATION",
+            observationDisplayCode: `${actionPlan.observation.auditReport.reportNumber} / OBS-${String(actionPlan.observation.observationNumber).padStart(3, "0")}`,
+            observationId: actionPlan.observation.id,
+            observationTitle: actionPlan.observation.title,
+            planDescription: actionPlan.description,
+            userId: actionPlan.responsibleUser.id,
+        });
+        return format(actionPlan);
     },
     async deleteActionPlan(id, access) {
-        if (!authorizationService.can(access, "action_plans.delete"))
-            throw new AppError("No tiene permiso para eliminar planes de acción.", 403);
         const previous = await find(id, access);
+        if (!(await authorizationService.canForAssignments(access, "action_plans.delete", assignmentContext(previous), false)))
+            throw new AppError("No tiene permiso para eliminar planes de acción.", 403);
         const deletedAt = new Date();
         await prisma.$transaction(async (tx) => {
             const [evaluations, evidence, extensions] = await Promise.all([
@@ -561,6 +557,7 @@ export const remediationService = {
                     .filter((workflowInstanceId) => Boolean(workflowInstanceId))),
             ];
             await cancelLinkedWorkflowInstances(tx, workflowInstanceIds, deletedAt);
+            await lockObservationForActionPlanUpdate(tx, previous.observation.id);
             const deleted = await tx.actionPlan.updateMany({
                 data: { deletedAt, deletedById: access.userId },
                 where: { deletedAt: null, id },
@@ -654,7 +651,7 @@ export const remediationService = {
                     ...(query.observationId
                         ? { observationId: query.observationId }
                         : {}),
-                    ...buildObservationAreaScopeWhere(access),
+                    ...buildAssignedObservationAreaScopeWhere(access),
                 },
             });
             if (!observationArea)
@@ -704,9 +701,6 @@ export const remediationService = {
             deletedAt: null,
             isActive: true,
             ...(access.dataScope === "ASSIGNED" ? { id: access.userId } : {}),
-            userRoles: {
-                some: { role: { code: "EXECUTOR", deletedAt: null } },
-            },
         };
         const executorCandidates = query.observationId || query.observationAreaId
             ? await prisma.user.findMany({
@@ -889,13 +883,77 @@ export const remediationService = {
         });
         if (pendingEvaluation)
             throw new AppError("No se puede concluir un plan con un avance pendiente de revisión.", 409);
+        let observationWasConcluded = false;
+        const wasAlreadyConcluded = previous.status === "CONCLUDED";
         await prisma.$transaction(async (tx) => {
+            await lockObservationForActionPlanUpdate(tx, previous.observation.id);
             await tx.actionPlan.update({
                 data: { completedAt: new Date(), status: "CONCLUDED" },
                 where: { id },
             });
             await recalculateObservationFromActionPlans(tx, previous.observation.id);
+            if (!wasAlreadyConcluded) {
+                const plans = await tx.actionPlan.findMany({
+                    select: { status: true },
+                    where: { deletedAt: null, observationId: previous.observation.id },
+                });
+                observationWasConcluded =
+                    plans.length > 0 && plans.every((plan) => plan.status === "CONCLUDED");
+            }
         });
+        if (!wasAlreadyConcluded) {
+            const details = {
+                actionPlanTitle: previous.description,
+                observationReference: formatObservationReference(previous.observation.auditReport.reportNumber, previous.observation.observationNumber),
+                observationTitle: previous.observation.title,
+            };
+            const completed = buildProgressNotification("planCompleted", details);
+            await notificationService.create({
+                entityId: id,
+                entityType: "ACTION_PLAN",
+                eventType: completed.eventType,
+                message: completed.message,
+                targetUrl: buildObservationUrl(previous.observation.id, {
+                    planId: id,
+                    tab: "plans",
+                }),
+                title: completed.title,
+                type: completed.type,
+                userId: previous.responsibleUser.id,
+            });
+            if (observationWasConcluded) {
+                const plans = await prisma.actionPlan.findMany({
+                    select: {
+                        observationArea: {
+                            select: {
+                                areaResponsibleUserId: true,
+                                processOwnerUserId: true,
+                            },
+                        },
+                        responsibleUserId: true,
+                    },
+                    where: { deletedAt: null, observationId: previous.observation.id },
+                });
+                const recipientIds = Array.from(new Set(plans.flatMap((plan) => [
+                    plan.responsibleUserId,
+                    plan.observationArea.areaResponsibleUserId,
+                    plan.observationArea.processOwnerUserId,
+                ]).filter((userId) => Boolean(userId))));
+                const closed = buildProgressNotification("observationCompleted", details);
+                await Promise.all(recipientIds.map((userId) => notificationService.create({
+                    entityId: previous.observation.id,
+                    entityType: "OBSERVATION",
+                    eventType: closed.eventType,
+                    message: closed.message,
+                    targetUrl: buildObservationUrl(previous.observation.id, {
+                        tab: "summary",
+                    }),
+                    title: closed.title,
+                    type: closed.type,
+                    userId,
+                })));
+            }
+        }
         return {
             current: format(await find(id, access)),
             previous: format(previous),
@@ -904,24 +962,21 @@ export const remediationService = {
     async updateActionPlan(id, input, access) {
         const previous = await find(id, access);
         const isRecommendedPlan = Boolean(previous.remediationPlanId);
-        const canEditRecommendedPlan = authorizationService.can(access, "recommended_action_plans.edit");
+        const assignments = assignmentContext(previous);
+        const canEditRecommendedPlan = await authorizationService.canForAssignments(access, "recommended_action_plans.edit", assignments);
         if (input.observationAreaId !== undefined &&
             input.observationAreaId !== previous.observationAreaId)
             throw new AppError("El área del plan no puede cambiarse.", 403);
-        const hasAssignmentChange = input.responsibleUserId !== undefined;
+        const hasAssignmentChange = input.responsibleUserId !== undefined &&
+            input.responsibleUserId !== previous.responsibleUser.id;
         const hasContentChange = Object.keys(input).some((key) => !["observationAreaId", "responsibleUserId"].includes(key));
         if (hasContentChange &&
-            (!authorizationService.can(access, "action_plans.edit") ||
+            (!(await authorizationService.canForAssignments(access, "action_plans.edit", assignments)) ||
                 (isRecommendedPlan && !canEditRecommendedPlan)))
             throw new AppError("No tiene permiso para editar este plan.", 403);
         if (hasAssignmentChange &&
-            !authorizationService.can(access, "action_plans.assign_executor"))
+            !(await authorizationService.canForAssignments(access, "action_plans.assign_executor", assignments, false)))
             throw new AppError("No tiene permisos para reasignar este plan de acción.", 403);
-        if (input.responsibleUserId !== undefined &&
-            input.responsibleUserId !== access.userId &&
-            access.dataScope === "ASSIGNED") {
-            throw new AppError("No puede cambiar el ejecutor del plan.", 403);
-        }
         await validateAssignment(previous.observation.id, input.observationAreaId ?? previous.observationAreaId, input.responsibleUserId ?? previous.responsibleUser.id, access);
         const dueDateChanged = input.dueDate !== undefined &&
             input.dueDate.toISOString().slice(0, 10) !==
@@ -954,8 +1009,22 @@ export const remediationService = {
             },
             where: { id },
         });
+        const current = await find(id, access);
+        if (hasAssignmentChange &&
+            current.responsibleUser.id !== previous.responsibleUser.id) {
+            const observationDisplayCode = `${previous.observation.auditReport.reportNumber} / OBS-${String(previous.observation.observationNumber).padStart(3, "0")}`;
+            await notifyActionPlanExecutorChanged({
+                actionPlanId: id,
+                newExecutor: current.responsibleUser,
+                observationDisplayCode,
+                observationId: previous.observation.id,
+                observationTitle: previous.observation.title,
+                planDescription: current.description,
+                previousExecutor: previous.responsibleUser,
+            });
+        }
         return {
-            current: format(await find(id, access)),
+            current: format(current),
             previous: format(previous),
         };
     },

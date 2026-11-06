@@ -26,7 +26,7 @@ settingsRouter.put("/settings", requirePermission("settings.edit"), requireAdmin
 settingsRouter.put("/settings/logo", requirePermission("settings.edit"), requireAdmin(), upload.single("logo"), asyncHandler(async (request, response) => {
     const file = request.file;
     if (!file) {
-        throw new AppError("Logo file is required.", 400);
+        throw new AppError("Debe seleccionar un archivo de logotipo.", 400);
     }
     const metadata = logoUploadSchema.parse({
         mimetype: file.mimetype,

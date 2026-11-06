@@ -79,12 +79,6 @@ export const getActionPlanDeadlineStatus = (plan, now = new Date(), timeZone = "
         : "VIGENTE";
 };
 export const isActionPlanOverdue = (plan, now = new Date(), timeZone = "UTC") => getActionPlanDeadlineStatus(plan, now, timeZone) === "VENCIDO";
-export const CLOSED_OBSERVATION_STATUS_KEYS = new Set(["CONCLUIDO"]);
-export const OPEN_OBSERVATION_STATUS_KEYS = new Set([
-    "NO_INICIADO",
-    "INICIADO",
-    "CON_AVANCE",
-]);
 export const hasGlobalBusinessAccess = (access) => {
     return access.dataScope === "ALL" || access.dataScope === "AUDIT_SCOPE";
 };
@@ -101,10 +95,11 @@ export const buildObservationScopeWhere = (access) => {
     };
 };
 export const isObservationClosed = (status) => {
-    return (Boolean(status.isFinal) || CLOSED_OBSERVATION_STATUS_KEYS.has(status.key));
+    return Boolean(status.isFinal);
 };
 export const isObservationOverdue = (dueDate, status, now = new Date()) => {
-    return !isObservationClosed(status) && dueDate.getTime() < now.getTime();
+    return (!isObservationClosed(status) &&
+        getDateOnlyKey(dueDate) < getBusinessDateKey(now));
 };
 export const isObservationDueSoon = (dueDate, status, dueSoonDays = REPORT_DEFAULT_DUE_SOON_DAYS, now = new Date()) => {
     if (isObservationClosed(status) ||
@@ -123,13 +118,7 @@ export const getObservationStatusGroup = (status, overdue) => {
     if (isObservationClosed(status)) {
         return "CLOSED";
     }
-    if (status.key === "CON_AVANCE") {
-        return "IN_REVIEW";
-    }
-    if (status.key === "INICIADO") {
-        return "IN_PROGRESS";
-    }
-    return "OPEN";
+    return status.isInitial ? "OPEN" : "IN_PROGRESS";
 };
 export const getRiskGroupLabel = (key, name) => {
     const normalized = key.toUpperCase();

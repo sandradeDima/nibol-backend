@@ -9,7 +9,7 @@ import { actionPlanIdParamSchema, actionPlanOptionsQuerySchema, createActionPlan
 const value = (input) => typeof input === "string" ? input : undefined;
 const access = (request) => {
     if (!request.authorizationSummary)
-        throw new AppError("Authorization required.", 401);
+        throw new AppError("Se requiere autorización.", 401);
     return request.authorizationSummary;
 };
 const actionPlanId = (request) => actionPlanIdParamSchema.parse({ id: value(request.params.id) }).id;

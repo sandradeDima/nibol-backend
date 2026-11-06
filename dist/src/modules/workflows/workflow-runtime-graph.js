@@ -1,3 +1,4 @@
+import { parseDatabaseJson } from "../../services/logging-utils.js";
 import { workflowNodeConfigurationSchema, } from "./workflows.validators.js";
 import { WorkflowRuntimeError, WORKFLOW_RUNTIME_ERROR_CODES, } from "./workflow-runtime-errors.js";
 const graphInclude = {
@@ -21,7 +22,7 @@ const graphInclude = {
     },
 };
 const parseNodeConfiguration = (node) => {
-    const parsed = workflowNodeConfigurationSchema.safeParse(node.configurationJson);
+    const parsed = workflowNodeConfigurationSchema.safeParse(parseDatabaseJson(node.configurationJson, "workflow_nodes.configuration_json"));
     if (!parsed.success || parsed.data.nodeType !== node.type) {
         throw new WorkflowRuntimeError(WORKFLOW_RUNTIME_ERROR_CODES.RUNTIME_CONFIGURATION, `La configuración publicada del nodo ${node.nodeKey} no es válida para ejecución.`, 409, { nodeKey: node.nodeKey, nodeType: node.type });
     }
@@ -34,7 +35,7 @@ const toGraphConditionGroup = (group) => ({
         operator: condition.operator,
         resultLabel: null,
         sequence: condition.sequence,
-        value: condition.valueJson,
+        value: parseDatabaseJson(condition.valueJson, "workflow_condition_rules.value_json"),
     })),
     description: group.description,
     id: group.id,
@@ -46,7 +47,7 @@ export const loadPinnedWorkflowGraph = async (db, versionId) => {
         where: { id: versionId },
     }));
     if (!version) {
-        throw new WorkflowRuntimeError(WORKFLOW_RUNTIME_ERROR_CODES.VERSION_NOT_PUBLISHED, "La versión fijada del workflow ya no está disponible para ejecución.", 409);
+        throw new WorkflowRuntimeError(WORKFLOW_RUNTIME_ERROR_CODES.VERSION_NOT_PUBLISHED, "La versión fijada del flujo de trabajo ya no está disponible para ejecución.", 409);
     }
     const nodes = version.nodes.map((node) => ({
         assignmentStrategy: node.assignmentStrategy,

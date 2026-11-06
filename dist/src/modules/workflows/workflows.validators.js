@@ -32,7 +32,7 @@ export const updateWorkflowMetadataSchema = z
 })
     .strict()
     .refine((value) => Object.keys(value).length > 0, {
-    message: "Debe proporcionar al menos un campo para actualizar el workflow.",
+    message: "Debe proporcionar al menos un campo para actualizar el flujo de trabajo.",
 });
 export const createDraftVersionSchema = z.object({
     changeDescription: nullableVersionNotesSchema,

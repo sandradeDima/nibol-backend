@@ -119,10 +119,10 @@ export const buildObservationActionItems = (context, access, now = new Date()) =
         items.push({
             actionLabel: "Subir evidencia",
             actionType: "ADD_FINDING_EVIDENCE",
-            actionUrl: `${observationUrl}?tab=detail#documentos-observacion`,
+            actionUrl: `${observationUrl}/editar`,
             code: "FINDING_EVIDENCE_MISSING",
             label: "Falta evidencia del hallazgo",
-            permission: "evidence.create",
+            permission: "observations.edit",
             severity: "WARNING",
         });
     }
@@ -146,19 +146,6 @@ export const buildObservationActionItems = (context, access, now = new Date()) =
             label: "La fecha límite está vencida",
             permission: "deadline_extensions.request",
             severity: "CRITICAL",
-        });
-    }
-    const allConcluded = context.actionPlans.length > 0 &&
-        context.actionPlans.every((plan) => plan.status === "CONCLUDED");
-    if (allConcluded && context.pendingReviewCount === 0) {
-        items.push({
-            actionLabel: "Solicitar cierre",
-            actionType: "REQUEST_CLOSURE",
-            actionUrl: `${observationUrl}#cierre-observacion`,
-            code: "READY_TO_CLOSE",
-            label: "La observación está lista para revisión de cierre",
-            permission: "observations.close",
-            severity: "INFO",
         });
     }
     const rank = { CRITICAL: 3, INFO: 1, WARNING: 2 };

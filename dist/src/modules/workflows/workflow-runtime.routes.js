@@ -4,6 +4,7 @@ import { requireAnyPermission, requirePermission, } from "../../middleware/autho
 import { workflowRuntimeController } from "./workflow-runtime.controller.js";
 import { WORKFLOW_INSTANCE_PERMISSIONS, WORKFLOW_PERMISSIONS, WORKFLOW_TASK_PERMISSIONS, WORKFLOW_TIMER_PERMISSIONS, } from "./workflows.permissions.js";
 export const workflowRuntimeRouter = Router();
+const workflowTaskPermissions = Object.values(WORKFLOW_TASK_PERMISSIONS);
 workflowRuntimeRouter.get("/workflow-instances/start-options", requirePermission(WORKFLOW_INSTANCE_PERMISSIONS.start), asyncHandler(workflowRuntimeController.getStartOptions));
 workflowRuntimeRouter.post("/workflow-instances", requirePermission(WORKFLOW_INSTANCE_PERMISSIONS.start), asyncHandler(workflowRuntimeController.startInstance));
 workflowRuntimeRouter.get("/workflow-instances/:instanceId/history", requireAnyPermission([
@@ -18,8 +19,8 @@ workflowRuntimeRouter.get("/workflow-instances/:instanceId", requireAnyPermissio
     WORKFLOW_PERMISSIONS.viewInstances,
     WORKFLOW_TASK_PERMISSIONS.view,
 ]), asyncHandler(workflowRuntimeController.getInstance));
-workflowRuntimeRouter.get("/workflow-tasks/my-pending", requirePermission(WORKFLOW_TASK_PERMISSIONS.view), asyncHandler(workflowRuntimeController.listMyPending));
-workflowRuntimeRouter.get("/workflow-tasks/:taskId", requirePermission(WORKFLOW_TASK_PERMISSIONS.view), asyncHandler(workflowRuntimeController.getTask));
+workflowRuntimeRouter.get("/workflow-tasks/my-pending", requireAnyPermission(workflowTaskPermissions), asyncHandler(workflowRuntimeController.listMyPending));
+workflowRuntimeRouter.get("/workflow-tasks/:taskId", requireAnyPermission(workflowTaskPermissions), asyncHandler(workflowRuntimeController.getTask));
 workflowRuntimeRouter.post("/workflow-tasks/:taskId/approve", requirePermission(WORKFLOW_TASK_PERMISSIONS.approve), asyncHandler(workflowRuntimeController.approve));
 workflowRuntimeRouter.post("/workflow-tasks/:taskId/reject", requirePermission(WORKFLOW_TASK_PERMISSIONS.reject), asyncHandler(workflowRuntimeController.reject));
 workflowRuntimeRouter.post("/workflow-tasks/:taskId/observe", requirePermission(WORKFLOW_TASK_PERMISSIONS.observe), asyncHandler(workflowRuntimeController.observe));

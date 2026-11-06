@@ -1,15 +1,18 @@
-import { NotificationDeliveryChannel, NotificationDeliveryStatus, NotificationPriority, NotificationType, } from "../../../generated/prisma/client.js";
+import { NotificationDeliveryChannel, NotificationDeliveryStatus, NotificationPriority, NotificationType, parseDatabaseEnum, } from "../../types/database-enums.js";
 import { emailService } from "../../emails/EmailService.js";
 import { logger } from "../../utils/logger.js";
 import { buildFrontendUrl, resolveNotificationTarget, } from "../../utils/notification-links.js";
+import { buildObservationUrl } from "../../utils/observation-links.js";
 import { prisma } from "../../utils/prisma.js";
-import { toLogJsonValue } from "../../services/logging-utils.js";
+import { toDatabaseJson } from "../../services/logging-utils.js";
+import { isNotificationChannelEnabled } from "../../services/notification-preferences.js";
 import { restoreWorkflowRuntimeContext } from "./workflow-runtime-context.js";
 import { writeRuntimeAuditEvent, writeRuntimeTransitionLog, } from "./workflow-runtime-events.js";
+import { buildProgressNotification } from "../progress/progress-notification.js";
 const WORKFLOW_NOTIFICATION_MAX_ATTEMPTS = 3;
 const WORKFLOW_NOTIFICATION_RETRY_DELAY_MS = 5 * 60_000;
 const WORKFLOW_NOTIFICATION_CLAIM_LEASE_MS = 15 * 60_000;
-const asJson = (value) => toLogJsonValue(value) ?? {};
+const asJson = (value) => toDatabaseJson(value);
 const dedupePrefix = (event) => [
     "workflow",
     event.eventType,
@@ -45,13 +48,15 @@ const createNotificationIfMissing = async (db, input) => {
                 eventType: input.eventType,
                 message: input.message,
                 priority: input.priority,
+                ...(input.hideFromInApp ? { deletedAt: new Date() } : {}),
                 targetUrl: input.targetUrl,
                 title: input.title,
-                type: input.priority === NotificationPriority.CRITICAL
-                    ? NotificationType.ERROR
-                    : input.priority === NotificationPriority.HIGH
-                        ? NotificationType.WARNING
-                        : NotificationType.INFO,
+                type: input.type ??
+                    (input.priority === NotificationPriority.CRITICAL
+                        ? NotificationType.ERROR
+                        : input.priority === NotificationPriority.HIGH
+                            ? NotificationType.WARNING
+                            : NotificationType.INFO),
                 userId: input.userId,
             },
         });
@@ -215,6 +220,14 @@ export const resolveWorkflowNotificationRecipients = async ({ db, instanceId, co
 export const createWorkflowNotificationIntent = async (db, event) => {
     const recipients = uniqueRecipients(event.recipients);
     const channel = event.channel ?? "INTERNAL";
+    const [internalEnabled, emailEnabled] = await Promise.all([
+        (channel === "INTERNAL" || channel === "BOTH") &&
+            isNotificationChannelEnabled(event.eventType, "internal", db.systemParameter),
+        (channel === "EMAIL" || channel === "BOTH") &&
+            isNotificationChannelEnabled(event.eventType, "email", db.systemParameter),
+    ]);
+    if (!internalEnabled && !emailEnabled)
+        return { createdDeliveries: [], recipientCount: 0 };
     const baseKey = dedupePrefix(event);
     const entityId = event.entityId ?? event.instanceId;
     const entityType = event.entityType ?? "workflow_instance";
@@ -235,11 +248,13 @@ export const createWorkflowNotificationIntent = async (db, event) => {
             eventType: event.eventType,
             message: event.message,
             priority,
+            hideFromInApp: !internalEnabled,
             targetUrl,
             title: event.title,
+            ...(event.type !== undefined ? { type: event.type } : {}),
             userId: recipient.id,
         });
-        if (channel === "INTERNAL" || channel === "BOTH") {
+        if (internalEnabled) {
             const delivery = await createDeliveryIfMissing(db, {
                 channel: NotificationDeliveryChannel.IN_APP,
                 dedupeKey: buildWorkflowNotificationDedupeKey(event, recipient.id, "IN_APP"),
@@ -248,7 +263,7 @@ export const createWorkflowNotificationIntent = async (db, event) => {
             });
             createdDeliveries.push(delivery.id);
         }
-        if ((channel === "EMAIL" || channel === "BOTH") && recipient.email) {
+        if (emailEnabled && recipient.email) {
             const delivery = await createDeliveryIfMissing(db, {
                 channel: NotificationDeliveryChannel.EMAIL,
                 dedupeKey: buildWorkflowNotificationDedupeKey(event, recipient.id, "EMAIL"),
@@ -322,7 +337,7 @@ const recordNotificationFailure = async (deliveryId, message) => {
         });
     }
     catch (failure) {
-        logger.warn("Could not record workflow notification failure event.", {
+        logger.warn("No se pudo registrar el evento de fallo de notificación del flujo de trabajo.", {
             deliveryId,
             errorCode: "WORKFLOW_NOTIFICATION_FAILURE_EVENT_FAILED",
             message: safeErrorMessage(failure),
@@ -346,15 +361,32 @@ export const deliverWorkflowNotificationDelivery = async (deliveryId) => {
             status: NotificationDeliveryStatus.SKIPPED,
         };
     }
-    if (delivery.status === NotificationDeliveryStatus.SENT) {
-        return { attempted: false, deliveryId, status: delivery.status };
+    const deliveryStatus = parseDatabaseEnum(NotificationDeliveryStatus, delivery.status, "notification_deliveries.status");
+    if (deliveryStatus === NotificationDeliveryStatus.SENT) {
+        return { attempted: false, deliveryId, status: deliveryStatus };
     }
-    if (delivery.status === NotificationDeliveryStatus.FAILED &&
+    if (delivery.notification &&
+        !(await isNotificationChannelEnabled(delivery.notification.eventType, "email"))) {
+        await prisma.notificationDelivery.update({
+            data: {
+                errorMessage: "La categoría de notificación está desactivada.",
+                lastAttemptAt: new Date(),
+                status: NotificationDeliveryStatus.SKIPPED,
+            },
+            where: { id: deliveryId },
+        });
+        return {
+            attempted: false,
+            deliveryId,
+            status: NotificationDeliveryStatus.SKIPPED,
+        };
+    }
+    if (deliveryStatus === NotificationDeliveryStatus.FAILED &&
         delivery.attempts >= WORKFLOW_NOTIFICATION_MAX_ATTEMPTS) {
-        return { attempted: false, deliveryId, status: delivery.status };
+        return { attempted: false, deliveryId, status: deliveryStatus };
     }
     if (delivery.channel !== NotificationDeliveryChannel.EMAIL) {
-        return { attempted: false, deliveryId, status: delivery.status };
+        return { attempted: false, deliveryId, status: deliveryStatus };
     }
     if (!delivery.recipientUser?.isActive || !delivery.recipientUser.email) {
         await prisma.notificationDelivery.update({
@@ -409,7 +441,9 @@ export const deliverWorkflowNotificationDelivery = async (deliveryId) => {
         return {
             attempted: false,
             deliveryId,
-            status: current?.status ?? NotificationDeliveryStatus.SKIPPED,
+            status: current
+                ? parseDatabaseEnum(NotificationDeliveryStatus, current.status, "notification_deliveries.status")
+                : NotificationDeliveryStatus.SKIPPED,
         };
     }
     const result = await emailService.sendTemplate({
@@ -423,14 +457,14 @@ export const deliverWorkflowNotificationDelivery = async (deliveryId) => {
                 }
                 : {}),
             message: delivery.notification?.message ?? "Tiene una notificación pendiente.",
-            title: delivery.notification?.title ?? "Notificación de workflow",
+            title: delivery.notification?.title ?? "Notificación",
             userName: delivery.recipientUser.name,
         },
     });
     if (!result.success) {
         const error = await markDeliveryFailed(deliveryId, result.error ?? "No fue posible enviar el correo.");
         await recordNotificationFailure(deliveryId, error);
-        logger.warn("Workflow notification email failed.", {
+        logger.warn("Falló el correo de notificación del flujo de trabajo.", {
             deliveryId,
             errorCode: "WORKFLOW_NOTIFICATION_EMAIL_FAILED",
         });
@@ -536,22 +570,155 @@ export const deliverPendingWorkflowNotificationDeliveries = async (limit = 100) 
     }
     return outcomes;
 };
+export const deliverWorkflowNotificationsInBackground = (instanceId) => {
+    void deliverWorkflowNotificationsForInstance(instanceId).catch((error) => {
+        logger.warn("No se pudo iniciar la entrega de notificaciones del flujo.", {
+            error: safeErrorMessage(error),
+            instanceId,
+        });
+    });
+};
 export const buildWorkflowTaskUrl = (taskId) => `/aprobaciones/flujos/${taskId}`;
+export const buildDeadlineExtensionOutcomeNotification = ({ actionPlanTitle, approved, entityId, observationReference, targetUrl, }) => {
+    const outcome = approved ? "aprobada" : "rechazada";
+    const actionPlan = actionPlanTitle
+        ? ` del plan de acción “${actionPlanTitle}”`
+        : "";
+    const reference = observationReference ? ` (${observationReference})` : "";
+    return {
+        eventType: approved ? "EXTENSION_APPROVED" : "EXTENSION_REJECTED",
+        message: `La solicitud de ampliación de plazo${actionPlan}${reference} fue ${outcome}.`,
+        priority: approved
+            ? NotificationPriority.NORMAL
+            : NotificationPriority.HIGH,
+        targetUrl: targetUrl ??
+            `/ampliaciones-plazo?extensionId=${encodeURIComponent(entityId)}`,
+        title: `Ampliación de plazo ${outcome}`,
+        type: approved ? NotificationType.SUCCESS : NotificationType.WARNING,
+    };
+};
+const getWorkflowRecordLabels = async (db, context) => {
+    const actionPlanId = context.custom.actionPlanId;
+    const observationId = context.custom.observationId;
+    const [actionPlan, observation] = await Promise.all([
+        typeof actionPlanId === "string"
+            ? db.actionPlan.findFirst({
+                select: { title: true },
+                where: { deletedAt: null, id: actionPlanId },
+            })
+            : null,
+        typeof observationId === "string"
+            ? db.observation.findFirst({
+                select: {
+                    auditReport: { select: { reportNumber: true } },
+                    observationNumber: true,
+                    title: true,
+                },
+                where: { deletedAt: null, id: observationId },
+            })
+            : null,
+    ]);
+    return {
+        actionPlanTitle: actionPlan?.title ?? null,
+        evidenceName: typeof context.custom.evidenceName === "string"
+            ? context.custom.evidenceName.trim() || null
+            : null,
+        observationReference: observation
+            ? `${observation.auditReport.reportNumber} / OBS-${String(observation.observationNumber).padStart(3, "0")}`
+            : null,
+        observationTitle: observation?.title ?? null,
+        requestTitle: typeof context.custom.title === "string"
+            ? context.custom.title.trim() || null
+            : null,
+    };
+};
+const getWorkflowApprovalSubject = async (db, context) => {
+    const labels = await getWorkflowRecordLabels(db, context);
+    const observation = labels.observationTitle
+        ? `la observación “${labels.observationTitle}”`
+        : "la observación relacionada";
+    switch (context.processType) {
+        case "DEADLINE_EXTENSION":
+            return labels.actionPlanTitle
+                ? `la ampliación de plazo del plan de acción “${labels.actionPlanTitle}”`
+                : `la ampliación de plazo de ${observation}`;
+        case "OBSERVATION_CLOSURE":
+            return `el cierre de ${observation}`;
+        case "EVIDENCE_REVIEW":
+            return labels.evidenceName
+                ? `la evidencia “${labels.evidenceName}”`
+                : `la revisión de evidencia de ${observation}`;
+        case "REMEDIATION_PLAN_APPROVAL":
+            return `el plan de acción recomendado para ${observation}`;
+        default:
+            if (labels.requestTitle)
+                return `la solicitud “${labels.requestTitle}”`;
+            if (labels.actionPlanTitle)
+                return `el plan de acción “${labels.actionPlanTitle}”`;
+            return observation;
+    }
+};
 export const buildWorkflowInstanceUrl = (instanceId) => `/configuracion/flujos/instancias/${instanceId}`;
-export const createTaskAssignedNotification = async ({ db, instance, task, recipients, }) => createWorkflowNotificationIntent(db, {
-    channel: "BOTH",
-    entityId: task.id,
-    entityType: "workflow_task",
-    eventType: "workflow.task.assigned",
-    instanceId: instance.id,
-    message: `Tiene una tarea de workflow pendiente: ${task.nodeName}.`,
-    priority: NotificationPriority.HIGH,
-    recipients,
-    targetUrl: buildWorkflowTaskUrl(task.id),
-    title: "Nueva tarea de aprobación",
-    taskId: task.id,
-    visitSequence: task.visitSequence,
-});
+export const createTaskAssignedNotification = async ({ context, db, instance, task, recipients, }) => {
+    const labels = instance.processType === "DEADLINE_EXTENSION" ||
+        instance.processType === "OBSERVATION_CLOSURE"
+        ? await getWorkflowRecordLabels(db, context)
+        : null;
+    if (instance.processType === "OBSERVATION_CLOSURE") {
+        const content = buildProgressNotification("pending", {
+            actionPlanTitle: labels?.actionPlanTitle ?? "Plan de acción",
+            observationReference: labels?.observationReference ?? "",
+            observationTitle: labels?.observationTitle ?? "observación",
+        });
+        const observationId = String(context.custom.observationId ?? "");
+        const planId = String(context.custom.actionPlanId ?? "");
+        return createWorkflowNotificationIntent(db, {
+            channel: "INTERNAL",
+            entityId: instance.entityId,
+            entityType: "PROGRESS_EVALUATION",
+            eventType: content.eventType,
+            instanceId: instance.id,
+            message: content.message,
+            priority: NotificationPriority.HIGH,
+            recipients,
+            targetUrl: observationId
+                ? buildObservationUrl(observationId, {
+                    advanceId: instance.entityId,
+                    ...(planId ? { planId } : {}),
+                    tab: "plans",
+                })
+                : buildWorkflowTaskUrl(task.id),
+            title: content.title,
+            type: content.type,
+            taskId: task.id,
+            visitSequence: task.visitSequence,
+        });
+    }
+    const targetUrl = instance.processType === "DEADLINE_EXTENSION"
+        ? `/aprobaciones/pendientes?tab=extensions&extensionId=${encodeURIComponent(instance.entityId)}`
+        : buildWorkflowTaskUrl(task.id);
+    const message = instance.processType === "DEADLINE_EXTENSION"
+        ? `${task.nodeName} ${labels?.actionPlanTitle
+            ? `del plan de acción “${labels.actionPlanTitle}”`
+            : `de la observación “${labels?.observationTitle ?? "relacionada"}”`}.`
+        : `Tiene una tarea pendiente: ${task.nodeName}.`;
+    return createWorkflowNotificationIntent(db, {
+        channel: "BOTH",
+        entityId: task.id,
+        entityType: "workflow_task",
+        eventType: "workflow.task.assigned",
+        instanceId: instance.id,
+        message,
+        priority: NotificationPriority.HIGH,
+        recipients,
+        targetUrl,
+        title: instance.processType === "DEADLINE_EXTENSION"
+            ? "Ampliación de plazo pendiente de aprobación"
+            : "Nueva tarea de aprobación",
+        taskId: task.id,
+        visitSequence: task.visitSequence,
+    });
+};
 export const createWorkflowReminderNotification = async ({ db, instance, task, recipients, timerId, }) => createWorkflowNotificationIntent(db, {
     channel: "BOTH",
     entityId: task.id,
@@ -581,6 +748,11 @@ export const createWorkflowOverdueNotification = async ({ db, instance, task, re
     visitSequence: task.visitSequence,
 });
 export const createWorkflowDecisionNotification = async ({ actorUserId, context, db, instanceId, task, action, }) => {
+    if (context.processType === "DEADLINE_EXTENSION" ||
+        context.processType === "OBSERVATION_CLOSURE") {
+        return { createdDeliveries: [], recipientCount: 0 };
+    }
+    const subject = await getWorkflowApprovalSubject(db, context);
     const recipients = (await getWorkflowParticipantRecipients({ context, db, instanceId })).filter((recipient) => recipient.id !== actorUserId);
     const labels = {
         APPROVE: "aprobada",
@@ -593,18 +765,145 @@ export const createWorkflowDecisionNotification = async ({ actorUserId, context,
         channel: "BOTH",
         eventType: `workflow.task.${action.toLowerCase()}`,
         instanceId,
-        message: `La tarea “${task.nodeName}” fue ${labels[action]}.`,
+        message: `La tarea “${task.nodeName}” fue ${labels[action]} para ${subject}.`,
         priority: action === "REJECT" || action === "REQUEST_CORRECTION"
             ? NotificationPriority.HIGH
             : NotificationPriority.NORMAL,
         recipients,
         targetUrl: buildWorkflowTaskUrl(task.id),
-        title: "Actualización de tarea de workflow",
+        title: `Actualización de aprobación: ${subject}`.slice(0, 191),
         taskId: task.id,
         visitSequence: task.visitSequence,
     });
 };
-export const createWorkflowCompletionNotification = async ({ context, db, finalResult, instanceId, targetUrl, }) => {
+export const createWorkflowCompletionNotification = async ({ context, db, entityId, finalResult, instanceId, targetUrl, }) => {
+    if (context.processType === "OBSERVATION_CLOSURE") {
+        if (!entityId ||
+            !["APPROVED", "CLOSED", "REJECTED", "EXPIRED"].includes(finalResult))
+            return { createdDeliveries: [], recipientCount: 0 };
+        const labels = await getWorkflowRecordLabels(db, context);
+        const approved = ["APPROVED", "CLOSED"].includes(finalResult);
+        const content = buildProgressNotification(approved ? "approved" : "returned", {
+            actionPlanTitle: labels.actionPlanTitle ?? "Plan de acción",
+            observationReference: labels.observationReference ?? "",
+            observationTitle: labels.observationTitle ?? "observación",
+        });
+        const observationId = String(context.custom.observationId ?? "");
+        const actionPlanId = String(context.custom.actionPlanId ?? "");
+        const recipients = await getUserRecipients(db, context.requesterUserId ? [context.requesterUserId] : []);
+        const result = await createWorkflowNotificationIntent(db, {
+            channel: "INTERNAL",
+            entityId,
+            entityType: "PROGRESS_EVALUATION",
+            eventType: content.eventType,
+            instanceId,
+            message: content.message,
+            priority: approved ? NotificationPriority.NORMAL : NotificationPriority.HIGH,
+            recipients,
+            targetUrl: observationId
+                ? buildObservationUrl(observationId, {
+                    advanceId: entityId,
+                    ...(actionPlanId ? { planId: actionPlanId } : {}),
+                    tab: "plans",
+                })
+                : targetUrl ?? buildWorkflowInstanceUrl(instanceId),
+            title: content.title,
+            type: content.type,
+            visitSequence: 0,
+        });
+        if (!approved || !observationId || !actionPlanId)
+            return result;
+        const plans = await db.actionPlan.findMany({
+            select: {
+                id: true,
+                observationArea: {
+                    select: {
+                        areaResponsibleUserId: true,
+                        processOwnerUserId: true,
+                    },
+                },
+                responsibleUserId: true,
+                status: true,
+            },
+            where: { deletedAt: null, observationId },
+        });
+        const completedPlan = plans.find((plan) => plan.id === actionPlanId && plan.status === "CONCLUDED");
+        if (!completedPlan)
+            return result;
+        const planCompleted = buildProgressNotification("planCompleted", {
+            actionPlanTitle: labels.actionPlanTitle ?? "Plan de acción",
+            observationReference: labels.observationReference ?? "",
+            observationTitle: labels.observationTitle ?? "observación",
+        });
+        const planTargetUrl = buildObservationUrl(observationId, {
+            planId: actionPlanId,
+            tab: "plans",
+        });
+        await createWorkflowNotificationIntent(db, {
+            channel: "INTERNAL",
+            entityId: actionPlanId,
+            entityType: "ACTION_PLAN",
+            eventType: planCompleted.eventType,
+            instanceId,
+            message: planCompleted.message,
+            recipients: await getUserRecipients(db, completedPlan.responsibleUserId ? [completedPlan.responsibleUserId] : []),
+            targetUrl: planTargetUrl,
+            title: planCompleted.title,
+            type: planCompleted.type,
+            visitSequence: 0,
+        });
+        if (plans.length > 0 && plans.every((plan) => plan.status === "CONCLUDED")) {
+            const closed = buildProgressNotification("observationCompleted", {
+                actionPlanTitle: labels.actionPlanTitle ?? "Plan de acción",
+                observationReference: labels.observationReference ?? "",
+                observationTitle: labels.observationTitle ?? "observación",
+            });
+            const recipientIds = plans.flatMap((plan) => [
+                plan.responsibleUserId,
+                plan.observationArea.areaResponsibleUserId,
+                plan.observationArea.processOwnerUserId,
+            ]);
+            await createWorkflowNotificationIntent(db, {
+                channel: "INTERNAL",
+                entityId: observationId,
+                entityType: "OBSERVATION",
+                eventType: closed.eventType,
+                instanceId,
+                message: closed.message,
+                recipients: await getUserRecipients(db, recipientIds.filter((userId) => Boolean(userId))),
+                targetUrl: buildObservationUrl(observationId, { tab: "summary" }),
+                title: closed.title,
+                type: closed.type,
+                visitSequence: 0,
+            });
+        }
+        return result;
+    }
+    if (context.processType === "DEADLINE_EXTENSION") {
+        if (!entityId || !["APPROVED", "CLOSED", "REJECTED"].includes(finalResult))
+            return { createdDeliveries: [], recipientCount: 0 };
+        const recipients = await getUserRecipients(db, context.requesterUserId ? [context.requesterUserId] : []);
+        if (recipients.length === 0)
+            return { createdDeliveries: [], recipientCount: 0 };
+        const approved = ["APPROVED", "CLOSED"].includes(finalResult);
+        const labels = await getWorkflowRecordLabels(db, context);
+        const outcome = buildDeadlineExtensionOutcomeNotification({
+            actionPlanTitle: labels.actionPlanTitle,
+            approved,
+            entityId,
+            observationReference: labels.observationReference,
+            ...(targetUrl !== undefined ? { targetUrl } : {}),
+        });
+        return createWorkflowNotificationIntent(db, {
+            channel: "INTERNAL",
+            entityId,
+            entityType: "DEADLINE_EXTENSION_REQUEST",
+            instanceId,
+            recipients,
+            ...outcome,
+            visitSequence: 0,
+        });
+    }
     const recipients = await getWorkflowParticipantRecipients({
         context,
         db,
@@ -612,20 +911,23 @@ export const createWorkflowCompletionNotification = async ({ context, db, finalR
     });
     if (recipients.length === 0)
         return { createdDeliveries: [], recipientCount: 0 };
+    const subject = await getWorkflowApprovalSubject(db, context);
     const approved = ["APPROVED", "CLOSED"].includes(finalResult);
     return createWorkflowNotificationIntent(db, {
         channel: "BOTH",
         eventType: "workflow.instance.completed",
         instanceId,
         message: approved
-            ? "El workflow finalizó correctamente."
-            : `El workflow finalizó con resultado ${finalResult}.`,
+            ? `El flujo de aprobación fue completado correctamente para ${subject}.`
+            : `El flujo de aprobación finalizó con el resultado ${finalResult} para ${subject}.`,
         priority: approved
             ? NotificationPriority.NORMAL
             : NotificationPriority.HIGH,
         recipients,
         targetUrl: targetUrl ?? buildWorkflowInstanceUrl(instanceId),
-        title: approved ? "Workflow completado" : "Workflow finalizado",
+        title: (approved
+            ? `Aprobación completada: ${subject}`
+            : `Aprobación finalizada: ${subject}`).slice(0, 191),
         visitSequence: 0,
     });
 };

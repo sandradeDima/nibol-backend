@@ -40,7 +40,7 @@ export const sendVerificationEmailToUser = async (user, verificationLink) => {
         },
     });
     if (result.success) {
-        logger.info("Verification email processed.", {
+        logger.info("Se procesó el correo electrónico de verificación.", {
             deliveryMode: result.providerMode === "json" ? "captured" : "sent",
             email: user.email,
             messageId: result.messageId,
@@ -63,7 +63,7 @@ export const sendVerificationEmailToUser = async (user, verificationLink) => {
         userName: user.name,
         verificationLink: redactSensitiveUrl(verificationLink),
     };
-    logger.error("Verification email delivery failed.", metadata);
+    logger.error("Falló la entrega del correo electrónico de verificación.", metadata);
     throw new AppError("No se pudo enviar el correo de verificacion.", 502, metadata);
 };
 export const resendVerificationEmailToUser = async (user, callbackURL = DEFAULT_EMAIL_VERIFICATION_CALLBACK_URL) => {

@@ -9,7 +9,7 @@ import { actionPlanIdParamSchema, createExtensionRequestSchema, extensionRequest
 const value = (input) => typeof input === "string" ? input : undefined;
 const access = (request) => {
     if (!request.authorizationSummary)
-        throw new AppError("Authorization required.", 401);
+        throw new AppError("Se requiere autorización.", 401);
     return request.authorizationSummary;
 };
 const parsedId = (request, schema) => schema.parse({ id: value(request.params.id) }).id;
@@ -94,7 +94,7 @@ export const extensionRequestsController = {
     },
     async sendToManager(request, response) {
         const result = await service.submit(parsedId(request, extensionRequestIdParamSchema), access(request));
-        await log(request, "action_plans.submit_to_audit", result.current, result.previous);
+        await log(request, "deadline_extensions.request", result.current, result.previous);
         sendSuccess(response, result.current);
     },
     async update(request, response) {

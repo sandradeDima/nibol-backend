@@ -1,4 +1,4 @@
-import { Prisma } from "../../generated/prisma/client.js";
+import { parseDatabaseJson, toDatabaseJson } from "./logging-utils.js";
 import { buildObservationScopeWhere } from "./authorization-service.js";
 import { prisma } from "../utils/prisma.js";
 import { AppError } from "../utils/app-error.js";
@@ -50,7 +50,7 @@ const safeValue = (value, key) => {
     return String(value);
 };
 export const sanitizeActivityData = (value) => safeValue(value);
-const asJson = (value) => safeValue(value) ?? Prisma.JsonNull;
+const asJson = (value) => toDatabaseJson(safeValue(value));
 const isSystemOperator = (access) => {
     return access.dataScope === "ALL";
 };
@@ -240,15 +240,15 @@ const mapActivity = (activity, includeTechnicalDetails) => ({
     entityId: includeTechnicalDetails ? activity.entityId : null,
     entityType: activity.entityType,
     id: includeTechnicalDetails ? activity.id : undefined,
-    metadata: activity.metadataJson,
-    newData: activity.newDataJson,
+    metadata: parseDatabaseJson(activity.metadataJson, "entity_activities.metadata_json"),
+    newData: parseDatabaseJson(activity.newDataJson, "entity_activities.new_data_json"),
     observation: activity.observation
         ? {
             code: `${activity.observation.auditReport.reportNumber} / OBS-${String(activity.observation.observationNumber).padStart(3, "0")}`,
             title: activity.observation.title,
         }
         : null,
-    previousData: activity.previousDataJson,
+    previousData: parseDatabaseJson(activity.previousDataJson, "entity_activities.previous_data_json"),
     relatedAuditLogId: includeTechnicalDetails
         ? activity.relatedAuditLogId
         : null,
@@ -323,7 +323,9 @@ export const entityActivityService = {
     },
     async list(query, access) {
         const where = buildWhere(query, access);
-        const includeTechnicalDetails = Boolean(query.includeTechnicalDetails && isSystemOperator(access));
+        const includeTechnicalDetails = Boolean(query.includeTechnicalDetails &&
+            (isSystemOperator(access) ||
+                access.permissions.includes("activity.technical")));
         const [total, activities] = await prisma.$transaction([
             prisma.entityActivity.count({ where }),
             prisma.entityActivity.findMany({

@@ -28,7 +28,7 @@ const getQueryValue = (value) => {
 const getRequiredUserId = (value) => {
     const userId = Array.isArray(value) ? value[0] : value;
     if (!userId) {
-        throw new AppError("User id is required.", 400);
+        throw new AppError("Se requiere el identificador del usuario.", 400);
     }
     return userIdParamSchema.parse({
         id: userId,
@@ -37,7 +37,7 @@ const getRequiredUserId = (value) => {
 const getAuthenticatedUserId = (request) => {
     const userId = request.authSession?.user.id;
     if (!userId) {
-        throw new AppError("Authentication required.", 401);
+        throw new AppError("Debe iniciar sesión para continuar.", 401);
     }
     return userId;
 };
@@ -61,7 +61,7 @@ usersRouter.post("/users/profile/change-password", requireAuth(), asyncHandler(a
 usersRouter.post("/users/profile/avatar", requireAuth(), upload.single("avatar"), asyncHandler(async (request, response) => {
     const file = request.file;
     if (!file) {
-        throw new AppError("Avatar file is required.", 400);
+        throw new AppError("Debe seleccionar una imagen de perfil.", 400);
     }
     const metadata = avatarUploadSchema.parse({
         mimetype: file.mimetype,

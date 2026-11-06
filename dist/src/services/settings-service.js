@@ -204,6 +204,9 @@ export class SettingsService {
     }
     async updateSettings(input, context) {
         const currentSnapshot = await this.getSnapshot(true);
+        let adminUserIds = [];
+        const notificationMessage = "Se actualizaron los ajustes de la aplicación. Revise la marca, los datos del remitente y las preferencias de idioma y formato.";
+        const notificationDedupeKey = `settings-updated:${randomUUID()}`;
         await prisma.$transaction(async (transaction) => {
             await this.persistSettings(input, currentSnapshot, transaction);
             const nextSnapshot = await this.loadSettingsSnapshot(transaction);
@@ -222,7 +225,7 @@ export class SettingsService {
                 entityId: nextSnapshot.recordId,
                 entityType: "setting",
                 metadata: {
-                    summary: "Application settings were updated.",
+                    summary: "Se actualizaron los ajustes de la aplicación.",
                     updatedFields: [
                         "appName",
                         "dateFormat",
@@ -236,22 +239,33 @@ export class SettingsService {
             }, {
                 db: transaction,
             });
+            adminUserIds = await listActiveAdminUserIds(transaction);
             await notificationService.createMany({
-                message: "Application settings were updated. Review branding, sender identity, and localization defaults if this affects your workflow.",
-                title: "Settings updated",
+                message: notificationMessage,
+                title: "Ajustes actualizados",
                 type: "info",
-                userIds: await listActiveAdminUserIds(transaction),
+                userIds: adminUserIds,
             }, {
                 db: transaction,
             });
         });
         this.clearCache();
+        await Promise.all(adminUserIds.map((userId) => notificationService.sendEmailNotification({
+            dedupeKey: notificationDedupeKey,
+            eventType: null,
+            message: notificationMessage,
+            title: "Ajustes actualizados",
+            userId,
+        })));
         return this.getSettings();
     }
     async uploadLogo(file, context) {
         const currentSnapshot = await this.getSnapshot(true);
         const fileName = buildLogoFileName(file.originalName);
         const destination = path.join(logoUploadsDir, fileName);
+        let adminUserIds = [];
+        const notificationMessage = "Se actualizaron los ajustes de la aplicación. Cambiaron el logotipo y los recursos visuales compartidos.";
+        const notificationDedupeKey = `settings-updated:${randomUUID()}`;
         await writeFile(destination, file.buffer);
         const logoUrl = buildLogoUrl(fileName);
         await prisma.$transaction(async (transaction) => {
@@ -296,23 +310,31 @@ export class SettingsService {
                 entityId: nextSnapshot.recordId,
                 entityType: "setting",
                 metadata: {
-                    summary: "The application logo was updated.",
+                    summary: "Se actualizó el logotipo de la aplicación.",
                     updatedFields: ["logo"],
                 },
             }, {
                 db: transaction,
             });
+            adminUserIds = await listActiveAdminUserIds(transaction);
             await notificationService.createMany({
-                message: "Application settings were updated. The logo and shared branding assets changed.",
-                title: "Settings updated",
+                message: notificationMessage,
+                title: "Ajustes actualizados",
                 type: "info",
-                userIds: await listActiveAdminUserIds(transaction),
+                userIds: adminUserIds,
             }, {
                 db: transaction,
             });
         });
         await removePreviousLogoIfLocal(currentSnapshot.logo);
         this.clearCache();
+        await Promise.all(adminUserIds.map((userId) => notificationService.sendEmailNotification({
+            dedupeKey: notificationDedupeKey,
+            eventType: null,
+            message: notificationMessage,
+            title: "Ajustes actualizados",
+            userId,
+        })));
         return this.getSettings();
     }
 }

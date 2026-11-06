@@ -11,15 +11,15 @@ const runOnce = () => {
         .then((summary) => {
         if (summary.lockSkipped)
             return;
-        logger.debug("Workflow timer processor completed.", {
+        logger.debug("Finalizó el procesador de temporizadores de flujos de trabajo.", {
             completedCount: summary.completedCount,
             failedCount: summary.failedCount,
             skippedCount: summary.skippedCount,
         });
     })
         .catch((error) => {
-        logger.error("Workflow timer processor failed.", {
-            message: error instanceof Error ? error.message : "Unknown error",
+        logger.error("Falló el procesador de temporizadores de flujos de trabajo.", {
+            message: error instanceof Error ? error.message : "Error desconocido",
         });
     });
 };

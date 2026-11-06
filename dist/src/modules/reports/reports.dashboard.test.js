@@ -24,6 +24,8 @@ const row = (suffix) => ({
     observation: {
         code: `INF-${suffix} / OBS-001`,
         id: `observation-${suffix}`,
+        mainObservation: `Observación principal ${suffix}`,
+        number: `INF-${suffix}-01`,
         status: { isFinal: false, key: "INICIADO", name: "Iniciado" },
         title: `Observación ${suffix}`,
     },

@@ -1,6 +1,5 @@
-import { Prisma } from "../../generated/prisma/client.js";
 import { prisma } from "../utils/prisma.js";
-import { buildDateRangeFilter, titleCaseEntityType, toLogJsonValue, } from "./logging-utils.js";
+import { buildDateRangeFilter, parseDatabaseJson, titleCaseEntityType, toDatabaseJson, } from "./logging-utils.js";
 const buildOrderBy = (sortBy, sortDirection) => {
     switch (sortBy) {
         case "action":
@@ -128,7 +127,7 @@ export const activityLogService = {
                 entityType: titleCaseEntityType(activityLog.entityType),
                 id: activityLog.id,
                 ipAddress: activityLog.ipAddress,
-                metadata: activityLog.metadata,
+                metadata: parseDatabaseJson(activityLog.metadata, "activity_logs.metadata"),
                 user: activityLog.user,
             })),
             pagination: {
@@ -156,7 +155,7 @@ export const activityLogService = {
                     : {}),
                 ...(payload.metadata !== undefined
                     ? {
-                        metadata: toLogJsonValue(payload.metadata) ?? Prisma.JsonNull,
+                        metadata: toDatabaseJson(payload.metadata),
                     }
                     : {}),
                 ...(payload.userId

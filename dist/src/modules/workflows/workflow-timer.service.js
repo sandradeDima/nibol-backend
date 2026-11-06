@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { NotificationDeliveryStatus, NotificationPriority, ScheduledJobExecutionStatus, } from "../../../generated/prisma/client.js";
+import { NotificationDeliveryStatus, NotificationPriority, ScheduledJobExecutionStatus, } from "../../types/database-enums.js";
 import { AppError } from "../../utils/app-error.js";
 import { ADMIN_ROLE_CODE } from "../../permissions/role-codes.js";
 import { logger } from "../../utils/logger.js";
 import { prisma } from "../../utils/prisma.js";
+import { parseDatabaseJson, parseDatabaseJsonArray, toDatabaseJson, } from "../../services/logging-utils.js";
 import { env } from "../../utils/env.js";
 import { WORKFLOW_DEFAULT_DUE_SOON_HOURS, WORKFLOW_TIMER_MAX_ATTEMPTS, WORKFLOW_TIMER_PROCESSING_TIMEOUT_MS, WORKFLOW_TIMER_PROCESSOR_JOB_NAME, WORKFLOW_TIMER_TYPES, } from "./workflows.constants.js";
 import { calculateWorkflowDeadline, calculateWorkflowThresholdAt, getWorkflowSlaState, } from "./workflow-sla.js";
@@ -11,9 +12,12 @@ import { buildWorkflowInstanceUrl, createWorkflowNotificationIntent, createWorkf
 import { restoreWorkflowRuntimeContext, } from "./workflow-runtime-context.js";
 import { writeRuntimeAuditEvent, writeRuntimeTransitionLog, } from "./workflow-runtime-events.js";
 import { loadPinnedWorkflowGraph } from "./workflow-runtime-graph.js";
-const asJson = (value) => (value === null || value === undefined ? {} : value);
+const asJson = (value) => toDatabaseJson(value ?? {});
 const isTimerType = (value) => WORKFLOW_TIMER_TYPES.includes(value);
 const configRecord = (value) => {
+    if (typeof value === "string") {
+        value = parseDatabaseJson(value, "workflow_timers.configuration_json");
+    }
     if (typeof value !== "object" || value === null || Array.isArray(value))
         return {};
     return value;
@@ -372,9 +376,7 @@ const executeEscalation = async ({ configuration, context, db, instance, task, t
                 assignedUserId: null,
             };
         const history = [
-            ...(Array.isArray(task.assignmentHistoryJson)
-                ? task.assignmentHistoryJson
-                : []),
+            ...parseDatabaseJsonArray(task.assignmentHistoryJson, "workflow_tasks.assignment_history_json"),
             {
                 actorType: "SYSTEM",
                 date: now.toISOString(),
@@ -737,7 +739,7 @@ export const processPendingWorkflowTimers = async (input) => {
                 where: { id: timerId },
             })
                 .catch(() => undefined);
-            logger.error("Workflow timer failed.", {
+            logger.error("Falló el temporizador del flujo de trabajo.", {
                 errorCode: failure.code,
                 timerId,
             });
@@ -868,7 +870,7 @@ export const workflowTimerService = {
             summary.failures.push(...deliveryFailures.map((result) => ({
                 errorCode: "WORKFLOW_NOTIFICATION_EMAIL_FAILED",
                 message: result.error ??
-                    "No fue posible entregar una notificación de workflow.",
+                    "No fue posible entregar una notificación del flujo de trabajo.",
                 timerId: result.deliveryId,
             })));
             summary.lockSkipped = false;

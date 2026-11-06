@@ -1,8 +1,8 @@
 import { activityLogService } from "../../services/activity-log-service.js";
 import { auditLogService } from "../../services/audit-log-service.js";
-import { toLogJsonValue } from "../../services/logging-utils.js";
+import { toDatabaseJson } from "../../services/logging-utils.js";
 import { getSafeRuntimeContextSummary } from "./workflow-runtime-context.js";
-const asJson = (value) => toLogJsonValue(value) ?? {};
+const asJson = (value) => toDatabaseJson(value);
 export const writeRuntimeTransitionLog = async ({ context, db, decision, details, eventType, instanceId, performedById, sourceNodeId, targetNodeId, triggerType, }) => {
     await db.workflowTransitionLog.create({
         data: {

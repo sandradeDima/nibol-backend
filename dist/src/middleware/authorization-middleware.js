@@ -21,7 +21,7 @@ const storeAuthorizationSummary = async (request) => {
 export const requireAuth = () => {
     return async (request, response, next) => {
         if (!request.authSession?.session) {
-            sendError(response, "Authentication required.", 401);
+            sendError(response, "Debe iniciar sesión para continuar.", 401);
             return;
         }
         try {
@@ -37,7 +37,7 @@ export const requirePermission = (permission) => {
     return async (request, response, next) => {
         const userId = getAuthenticatedUserId(request);
         if (!userId) {
-            sendError(response, "Authentication required.", 401);
+            sendError(response, "Debe iniciar sesión para continuar.", 401);
             return;
         }
         try {
@@ -46,7 +46,7 @@ export const requirePermission = (permission) => {
             });
             await storeAuthorizationSummary(request);
             if (!hasPermission) {
-                sendError(response, `Missing required permission: ${permission}.`, 403);
+                sendError(response, `Falta el permiso requerido: ${permission}.`, 403);
                 return;
             }
             next();
@@ -60,7 +60,7 @@ export const requireAnyPermission = (permissions) => {
     return async (request, response, next) => {
         const userId = getAuthenticatedUserId(request);
         if (!userId) {
-            sendError(response, "Authentication required.", 401);
+            sendError(response, "Debe iniciar sesión para continuar.", 401);
             return;
         }
         try {
@@ -69,7 +69,7 @@ export const requireAnyPermission = (permissions) => {
             });
             await storeAuthorizationSummary(request);
             if (!hasPermission) {
-                sendError(response, `Missing one of the required permissions: ${permissions.join(", ")}.`, 403);
+                sendError(response, `Falta uno de los permisos requeridos: ${permissions.join(", ")}.`, 403);
                 return;
             }
             next();
@@ -83,7 +83,7 @@ export const requireAllPermissions = (permissions) => {
     return async (request, response, next) => {
         const userId = getAuthenticatedUserId(request);
         if (!userId) {
-            sendError(response, "Authentication required.", 401);
+            sendError(response, "Debe iniciar sesión para continuar.", 401);
             return;
         }
         try {
@@ -106,7 +106,7 @@ export const requireAdmin = () => {
     return async (request, response, next) => {
         const userId = getAuthenticatedUserId(request);
         if (!userId) {
-            sendError(response, "Authentication required.", 401);
+            sendError(response, "Debe iniciar sesión para continuar.", 401);
             return;
         }
         try {
@@ -116,7 +116,7 @@ export const requireAdmin = () => {
                 }));
             request.authorizationSummary = summary;
             if (!summary.isAdmin) {
-                sendError(response, "Admin access is required.", 403);
+                sendError(response, "Se requieren permisos de administración.", 403);
                 return;
             }
             next();

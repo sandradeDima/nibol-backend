@@ -1,6 +1,11 @@
 export const DEADLINE_REMINDER_JOB_NAME = "deadline-reminder";
 export const DEADLINE_REMINDER_LOCK_NAME = "deadline-reminder";
 export const DEADLINE_REMINDER_EVENT_TYPE = "DEADLINE_REMINDER_DIGEST";
+export const DEADLINE_REMINDER_ALERT_DEFAULTS = {
+    include_reminder_overdue: true,
+    include_reminder_due_today: true,
+    include_reminder_upcoming: true,
+};
 export const DEADLINE_REMINDER_ROLES = [
     "AREA_RESPONSIBLE",
     "EXECUTOR",

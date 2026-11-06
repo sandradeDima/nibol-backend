@@ -21,7 +21,7 @@ const getQueryValue = (value) => {
 const getRequiredInvitationId = (value) => {
     const invitationId = Array.isArray(value) ? value[0] : value;
     if (!invitationId) {
-        throw new AppError("Invitation id is required.", 400);
+        throw new AppError("Se requiere el identificador de la invitación.", 400);
     }
     return invitationIdParamSchema.parse({
         id: invitationId,
@@ -30,7 +30,7 @@ const getRequiredInvitationId = (value) => {
 const getAuthenticatedUserId = (request) => {
     const userId = request.authSession?.user.id;
     if (!userId) {
-        throw new AppError("Authentication required.", 401);
+        throw new AppError("Debe iniciar sesión para continuar.", 401);
     }
     return userId;
 };

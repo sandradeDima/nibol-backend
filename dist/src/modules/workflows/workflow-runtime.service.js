@@ -1,4 +1,4 @@
-import { NotificationPriority, } from "../../../generated/prisma/client.js";
+import { NotificationPriority } from "../../types/database-enums.js";
 import { AppError } from "../../utils/app-error.js";
 import { resolveRuntimeAssignment, } from "./workflow-assignment-resolver.js";
 import { buildWorkflowRuntimeContext, restoreWorkflowRuntimeContext, } from "./workflow-runtime-context.js";
@@ -7,11 +7,11 @@ import { loadPinnedWorkflowGraph, getRuntimeNode, } from "./workflow-runtime-gra
 import { WORKFLOW_RUNTIME_ERROR_CODES, WorkflowRuntimeError, } from "./workflow-runtime-errors.js";
 import { selectRuntimeTransition, summarizeConditionEvaluations, } from "./workflow-transition-resolver.js";
 import { WORKFLOW_GRAPH_LIMITS } from "./workflows.constants.js";
-import { toLogJsonValue } from "../../services/logging-utils.js";
+import { toDatabaseJson } from "../../services/logging-utils.js";
 import { getWorkflowEntityAdapter } from "./workflow-entity-adapters.js";
 import { buildWorkflowInstanceUrl, createTaskAssignedNotification, createWorkflowCompletionNotification, createWorkflowNotificationIntent, getWorkflowTaskAssignmentRecipientsForTask, resolveWorkflowNotificationRecipients, } from "./workflow-notification.service.js";
 import { createWorkflowTaskTimers } from "./workflow-timer.service.js";
-const asJson = (value) => toLogJsonValue(value) ?? {};
+const asJson = (value) => toDatabaseJson(value);
 const getAssignmentSnapshot = (resolution) => ({
     ...(resolution.assignedAreaId
         ? { assignedAreaId: resolution.assignedAreaId }
@@ -28,9 +28,9 @@ const getAssignmentSnapshot = (resolution) => ({
         : {}),
     strategy: resolution.strategy,
 });
-const ensureHumanTask = async ({ actor, context, db, instanceId, node, now, }) => {
+const ensureHumanTask = async ({ actor, context, db, instance, instanceId, node, now, }) => {
     if (!node || (node.type !== "STAGE" && node.type !== "APPROVAL")) {
-        throw new WorkflowRuntimeError(WORKFLOW_RUNTIME_ERROR_CODES.RUNTIME_CONFIGURATION, "El runtime intentó crear una tarea para un nodo no accionable.");
+        throw new WorkflowRuntimeError(WORKFLOW_RUNTIME_ERROR_CODES.RUNTIME_CONFIGURATION, "El motor de ejecución intentó crear una tarea para un nodo no accionable.");
     }
     const activeTask = await db.workflowTask.findFirst({
         orderBy: { entrySequence: "desc" },
@@ -103,7 +103,8 @@ const ensureHumanTask = async ({ actor, context, db, instanceId, node, now, }) =
     const assignmentRecipients = await getWorkflowTaskAssignmentRecipientsForTask(db, task.id);
     const assignmentNotification = await createTaskAssignedNotification({
         db,
-        instance: { id: instanceId },
+        context,
+        instance: { ...instance, id: instanceId },
         recipients: assignmentRecipients,
         task: {
             dueAt: timerSetup.dueAt,
@@ -217,7 +218,7 @@ const mapEndResultToStatus = (finalResult) => {
 };
 const completeAtEnd = async ({ actor, context, db, instanceId, instance, node, now, }) => {
     if (!node || node.configurationJson.nodeType !== "END") {
-        throw new WorkflowRuntimeError(WORKFLOW_RUNTIME_ERROR_CODES.RUNTIME_CONFIGURATION, "El runtime intentó completar una instancia fuera de un nodo final.");
+        throw new WorkflowRuntimeError(WORKFLOW_RUNTIME_ERROR_CODES.RUNTIME_CONFIGURATION, "El motor de ejecución intentó completar una instancia fuera de un nodo final.");
     }
     const finalResult = node.configurationJson.finalResult;
     const status = mapEndResultToStatus(finalResult);
@@ -267,7 +268,7 @@ const completeAtEnd = async ({ actor, context, db, instanceId, instance, node, n
             throw error;
         throw new WorkflowRuntimeError(WORKFLOW_RUNTIME_ERROR_CODES.INTEGRATION_FAILED, error instanceof AppError
             ? error.message
-            : "No se pudo actualizar el registro relacionado al completar el workflow.", 409);
+            : "No se pudo actualizar el registro relacionado al completar el flujo de trabajo.", 409);
     }
     await db.workflowInstance.update({
         data: {
@@ -304,13 +305,21 @@ const completeAtEnd = async ({ actor, context, db, instanceId, instance, node, n
         metadata: { finalResult, nodeKey: node.nodeKey },
         newValues: { completedAt: now.toISOString(), finalResult, status },
     });
-    if (node.configurationJson.notifyParticipants) {
+    if (node.configurationJson.notifyParticipants ||
+        instance.processType === "DEADLINE_EXTENSION" ||
+        instance.processType === "OBSERVATION_CLOSURE") {
         await createWorkflowCompletionNotification({
             context: nextContext,
             db,
+            ...(instance.processType === "DEADLINE_EXTENSION" ||
+                instance.processType === "OBSERVATION_CLOSURE"
+                ? { entityId: instance.entityId }
+                : {}),
             finalResult,
             instanceId,
-            targetUrl: buildWorkflowInstanceUrl(instanceId),
+            targetUrl: instance.processType === "DEADLINE_EXTENSION"
+                ? `/ampliaciones-plazo?extensionId=${encodeURIComponent(instance.entityId)}`
+                : buildWorkflowInstanceUrl(instanceId),
         });
     }
     return status;
@@ -331,7 +340,7 @@ const executeAutomaticNodesInternal = async ({ actor = null, db, instanceId, now
         where: { id: instanceId },
     });
     if (!instance) {
-        throw new WorkflowRuntimeError(WORKFLOW_RUNTIME_ERROR_CODES.INSTANCE_NOT_ACTIONABLE, "La instancia de workflow no existe.", 404);
+        throw new WorkflowRuntimeError(WORKFLOW_RUNTIME_ERROR_CODES.INSTANCE_NOT_ACTIONABLE, "La instancia del flujo de trabajo no existe.", 404);
     }
     if (isTerminalRuntimeStatus(instance.status)) {
         return { status: instance.status };
@@ -368,6 +377,7 @@ const executeAutomaticNodesInternal = async ({ actor = null, db, instanceId, now
                 actor,
                 context,
                 db,
+                instance,
                 instanceId,
                 node: currentNode,
                 now,

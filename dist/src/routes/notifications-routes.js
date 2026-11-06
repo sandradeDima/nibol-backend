@@ -4,7 +4,7 @@ import { requirePermission } from "../middleware/authorization-middleware.js";
 import { notificationService } from "../services/notification-service.js";
 import { AppError } from "../utils/app-error.js";
 import { sendPaginated, sendSuccess } from "../utils/response.js";
-import { createNotificationSchema, listNotificationsQuerySchema, notificationIdParamSchema, } from "../validators/notifications-validator.js";
+import { createNotificationSchema, createNotificationsSchema, listNotificationsQuerySchema, notificationIdParamSchema, } from "../validators/notifications-validator.js";
 const getQueryValue = (value) => {
     if (typeof value === "string") {
         return value;
@@ -20,7 +20,7 @@ const getQueryValue = (value) => {
 const getRequiredNotificationId = (value) => {
     const notificationId = Array.isArray(value) ? value[0] : value;
     if (!notificationId) {
-        throw new AppError("Notification id is required.", 400);
+        throw new AppError("Se requiere el identificador de la notificación.", 400);
     }
     return notificationIdParamSchema.parse({
         id: notificationId,
@@ -29,7 +29,7 @@ const getRequiredNotificationId = (value) => {
 const getAuthenticatedUserId = (request) => {
     const userId = request.authSession?.user.id;
     if (!userId) {
-        throw new AppError("Authentication required.", 401);
+        throw new AppError("Debe iniciar sesión para continuar.", 401);
     }
     return userId;
 };
@@ -49,9 +49,32 @@ notificationsRouter.get("/notifications", requirePermission("notifications.view"
     const result = await notificationService.listNotifications(getAuthenticatedUserId(request), query);
     sendPaginated(response, result.data, result.pagination);
 }));
+notificationsRouter.post("/notifications/bulk", requirePermission("notifications.create"), asyncHandler(async (request, response) => {
+    const payload = createNotificationsSchema.parse(request.body);
+    const result = await notificationService.createMany(payload);
+    sendSuccess(response, result, 201);
+}));
 notificationsRouter.post("/notifications", requirePermission("notifications.create"), asyncHandler(async (request, response) => {
     const payload = createNotificationSchema.parse(request.body);
-    const notification = await notificationService.create(payload);
+    const [notification, emailQueued] = await Promise.all([
+        notificationService.create(payload),
+        notificationService.sendEmailNotification({
+            ...(payload.dedupeKey !== undefined
+                ? { dedupeKey: payload.dedupeKey }
+                : {}),
+            ...(payload.eventType !== undefined
+                ? { eventType: payload.eventType }
+                : {}),
+            message: payload.message,
+            ...(payload.targetUrl !== undefined
+                ? { targetUrl: payload.targetUrl }
+                : {}),
+            title: payload.title,
+            userId: payload.userId,
+        }),
+    ]);
+    if (!notification && !emailQueued)
+        throw new AppError("La categoría de notificación está desactivada.", 409);
     sendSuccess(response, notification, 201);
 }));
 notificationsRouter.post("/notifications/:id/read", requirePermission("notifications.view"), asyncHandler(async (request, response) => {
@@ -62,7 +85,7 @@ notificationsRouter.post("/notifications/read-all", requirePermission("notificat
     const result = await notificationService.markAllRead(getAuthenticatedUserId(request));
     sendSuccess(response, result);
 }));
-notificationsRouter.delete("/notifications/:id", requirePermission("notifications.view"), asyncHandler(async (request, response) => {
+notificationsRouter.delete("/notifications/:id", requirePermission("notifications.delete"), asyncHandler(async (request, response) => {
     await notificationService.delete(getRequiredNotificationId(request.params.id), getAuthenticatedUserId(request));
     sendSuccess(response, {
         deleted: true,
