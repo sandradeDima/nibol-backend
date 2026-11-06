@@ -244,8 +244,9 @@ const legacyReviewTask = (
       false);
   const canAct = access.isAdmin || isAreaResponsible;
   const allowedActions = [
-    ...(canAct &&
-    authorizationService.can(access, "deadline_extensions.approve")
+    ...((canAct &&
+      authorizationService.can(access, "deadline_extensions.approve")) ||
+    canReviewRecordAsProcessOwner(record, access)
       ? ["APPROVE"]
       : []),
     ...(canAct && authorizationService.can(access, "deadline_extensions.reject")
@@ -285,8 +286,8 @@ const restrictReviewTaskToAssignedRole = (
     ),
   );
   const canAct =
-    access.roleCode === "AREA_RESPONSIBLE" &&
-    isAssignedAsAreaResponsible &&
+    ((access.roleCode === "AREA_RESPONSIBLE" && isAssignedAsAreaResponsible) ||
+      canReviewRecordAsProcessOwner(record, access)) &&
     reviewTask.canAct;
   return {
     ...reviewTask,
@@ -345,17 +346,26 @@ const extensionWorkflowPermissions = (access: AuthorizationSummary) => [
     : []),
 ];
 
-const canReviewAsProcessOwner = (access: AuthorizationSummary) =>
+const isProcessOwner = (access: AuthorizationSummary) =>
   (access.roleCode === "PROCESS_OWNER" ||
-    access.roleCodes?.includes("PROCESS_OWNER")) &&
-  ["deadline_extensions.approve", "deadline_extensions.reject"].some(
-    (permission) => authorizationService.can(access, permission),
-  );
+    access.roleCodes?.includes("PROCESS_OWNER") === true);
 
 const processOwnerRequestWhere = (access: AuthorizationSummary) => ({
   OR: [
-    { observationArea: { processOwnerUserId: access.userId } },
-    { actionPlan: { observationArea: { processOwnerUserId: access.userId } } },
+    {
+      observationArea: {
+        areaResponsibleUserId: access.userId,
+        processOwnerUserId: access.userId,
+      },
+    },
+    {
+      actionPlan: {
+        observationArea: {
+          areaResponsibleUserId: access.userId,
+          processOwnerUserId: access.userId,
+        },
+      },
+    },
   ],
 });
 
@@ -363,9 +373,11 @@ const canReviewRecordAsProcessOwner = (
   record: ExtensionRecord,
   access: AuthorizationSummary,
 ) =>
-  canReviewAsProcessOwner(access) &&
-  (record.observationArea?.processOwnerUserId === access.userId ||
-    record.actionPlan?.observationArea.processOwnerUserId === access.userId);
+  isProcessOwner(access) &&
+  (record.observationArea?.processOwnerUserId === access.userId &&
+    record.observationArea.areaResponsibleUserId === access.userId ||
+    record.actionPlan?.observationArea.processOwnerUserId === access.userId &&
+      record.actionPlan.observationArea.areaResponsibleUserId === access.userId);
 
 const legacyReviewableWhere = (
   access: AuthorizationSummary,
@@ -424,7 +436,7 @@ const findReviewable = async (
   id: string,
   access: AuthorizationSummary,
 ): Promise<ExtensionRecord> => {
-  const processOwnerRequest = canReviewAsProcessOwner(access)
+  const processOwnerRequest = isProcessOwner(access)
     ? await prisma.deadlineExtensionRequest.findFirst({
         select: { id: true },
         where: {
@@ -665,7 +677,7 @@ export const extensionRequestsService = {
         403,
       );
     const additionalAuthorizedEntityIds =
-      query.reviewQueue && canReviewAsProcessOwner(access)
+      query.reviewQueue && isProcessOwner(access)
         ? (
             await prisma.deadlineExtensionRequest.findMany({
               select: { id: true },
@@ -997,13 +1009,19 @@ export const extensionRequestsService = {
     const previous = await findReviewable(id, access);
     const workflowInstanceId = previous.workflowInstanceId;
     const usedWorkflow = Boolean(workflowInstanceId);
-    if (
-      !usedWorkflow &&
-      !(await authorizationService.canForAssignments(
+    const permission = approved
+      ? "deadline_extensions.approve"
+      : "deadline_extensions.reject";
+    const canReview = usedWorkflow
+      ? authorizationService.can(access, permission)
+      : await authorizationService.canForAssignments(
         access,
-        approved ? "deadline_extensions.approve" : "deadline_extensions.reject",
+        permission,
         assignmentContext(previous),
-      ))
+      );
+    if (
+      !canReview &&
+      !(approved && canReviewRecordAsProcessOwner(previous, access))
     )
       throw new AppError("No tiene permiso para revisar esta ampliación.", 403);
     const alreadyReviewedStatus = approved

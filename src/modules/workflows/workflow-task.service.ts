@@ -112,30 +112,34 @@ const isTaskActor = async (
     task.instance.entityType === "deadline_extension_request" &&
     (access.roleCode === "PROCESS_OWNER" ||
       access.roleCodes?.includes("PROCESS_OWNER")) &&
-    (action
-      ? action === "APPROVE"
-        ? access.permissions.includes("deadline_extensions.approve")
-        : action === "REJECT" &&
-          access.permissions.includes("deadline_extensions.reject")
-      : access.permissions.some((permission) =>
-          permission === "deadline_extensions.approve" ||
-          permission === "deadline_extensions.reject",
-        ))
+    (action === undefined || action === "APPROVE")
   ) {
     const request = await db.deadlineExtensionRequest.findFirst({
       select: {
         actionPlan: {
           select: {
-            observationArea: { select: { processOwnerUserId: true } },
+            observationArea: {
+              select: {
+                areaResponsibleUserId: true,
+                processOwnerUserId: true,
+              },
+            },
           },
         },
-        observationArea: { select: { processOwnerUserId: true } },
+        observationArea: {
+          select: {
+            areaResponsibleUserId: true,
+            processOwnerUserId: true,
+          },
+        },
       },
       where: { deletedAt: null, id: task.instance.entityId },
     });
     if (
-      request?.observationArea?.processOwnerUserId === userId ||
-      request?.actionPlan?.observationArea.processOwnerUserId === userId
+      (request?.observationArea?.processOwnerUserId === userId &&
+        request.observationArea.areaResponsibleUserId === userId) ||
+      (request?.actionPlan?.observationArea.processOwnerUserId === userId &&
+        request.actionPlan.observationArea.areaResponsibleUserId === userId)
     )
       return true;
   }
@@ -291,10 +295,20 @@ export const findActiveWorkflowTasksForEntities = async (input: {
   const result = new Map<string, ActiveWorkflowTaskSummary>();
   for (const task of tasks) {
     if (result.has(task.instance.entityId)) continue;
+    const permissions = input.permissions?.includes(
+      workflowTaskActionPermissions.APPROVE,
+    )
+      ? input.permissions
+      : input.additionalAuthorizedEntityIds?.includes(task.instance.entityId)
+        ? [
+            ...(input.permissions ?? []),
+            workflowTaskActionPermissions.APPROVE,
+          ]
+        : input.permissions;
     result.set(task.instance.entityId, {
       allowedActions: getAllowedActions(
         getNodeConfiguration(task.node.configurationJson),
-        input.permissions,
+        permissions,
       ),
       canAct: true,
       id: task.id,

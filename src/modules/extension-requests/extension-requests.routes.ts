@@ -52,7 +52,7 @@ extensionRequestsRouter.post(
 );
 extensionRequestsRouter.post(
   "/extension-requests/:id/manager-approve",
-  requirePermission(permissions.approve),
+  requireAuth(),
   asyncHandler(controller.managerApprove),
 );
 extensionRequestsRouter.post(
