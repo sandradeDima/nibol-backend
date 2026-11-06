@@ -123,7 +123,7 @@ export const deadlineReminderEmailTemplate: EmailTemplateDefinition<"deadlineRem
         )
         .join("");
       const contentHtml = `
-      <p style="margin:0 0 20px;">Buenas tardes estimados:</p>
+      <p style="margin:0 0 20px;">Estimados</p>
       <p style="margin:0 0 20px;">A la fecha, las siguientes observaciones permanecen pendientes de cierre:</p>
       ${areaSections}
       <p style="margin:24px 0;"><a href="${escapeHtml(variables.platformLink)}" style="background:#07142d;border-radius:8px;color:#ffffff;display:inline-block;font-weight:700;padding:13px 18px;text-decoration:none;">Ver pendientes en NIBOL</a></p>
@@ -136,7 +136,7 @@ export const deadlineReminderEmailTemplate: EmailTemplateDefinition<"deadlineRem
         }),
         subject: variables.subject,
         text: joinTextBlocks(
-          "Buenas tardes estimados:",
+          "Estimados",
           "A la fecha, las siguientes observaciones permanecen pendientes de cierre:",
           ...areas.map(
             ({ area, count, riskCounts, statusCounts }) =>

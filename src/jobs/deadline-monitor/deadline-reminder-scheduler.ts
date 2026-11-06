@@ -3,6 +3,23 @@ import { env } from "../../utils/env.js";
 import { logger } from "../../utils/logger.js";
 
 let timerHandle: NodeJS.Timeout | null = null;
+const laPazTime = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "America/La_Paz",
+  hourCycle: "h23",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+});
+
+// shortcut: assumes 24-hour La Paz days; recalculate by date if that timezone adopts DST.
+const millisecondsUntilNextRun = (): number => {
+  const now = new Date();
+  const [hour, minute, second] = laPazTime.format(now).split(":").map(Number);
+  const secondsUntilRun =
+    (8 * 60 * 60 - (hour * 60 * 60 + minute * 60 + second) + 86_400) %
+      86_400 || 86_400;
+  return secondsUntilRun * 1_000 - now.getMilliseconds();
+};
 
 const runOnce = (): void => {
   void deadlineReminderService
@@ -26,17 +43,24 @@ const runOnce = (): void => {
     });
 };
 
+const scheduleNextRun = (): void => {
+  timerHandle = setTimeout(() => {
+    timerHandle = null;
+    runOnce();
+    scheduleNextRun();
+  }, millisecondsUntilNextRun());
+  timerHandle.unref();
+};
+
 export const deadlineReminderScheduler = {
   start(): void {
     if (timerHandle || env.NODE_ENV === "test") return;
-    timerHandle = setInterval(runOnce, env.DEADLINE_REMINDER_INTERVAL_MS);
-    timerHandle.unref();
-    runOnce();
+    scheduleNextRun();
   },
 
   stop(): void {
     if (!timerHandle) return;
-    clearInterval(timerHandle);
+    clearTimeout(timerHandle);
     timerHandle = null;
   },
 };

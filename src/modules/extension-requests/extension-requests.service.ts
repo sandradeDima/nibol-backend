@@ -267,6 +267,7 @@ const restrictReviewTaskToAssignedRole = (
 ): ReviewTaskSummary | null => {
   if (
     !reviewTask ||
+    reviewTask.id ||
     !["AREA_RESPONSIBLE", "PROCESS_OWNER", "EXECUTOR"].includes(
       access.roleCode ?? "",
     )
@@ -941,7 +942,10 @@ export const extensionRequestsService = {
     access: AuthorizationSummary,
   ) {
     const previous = await findReviewable(id, access);
+    const workflowInstanceId = previous.workflowInstanceId;
+    const usedWorkflow = Boolean(workflowInstanceId);
     if (
+      !usedWorkflow &&
       !(await authorizationService.canForAssignments(
         access,
         approved ? "deadline_extensions.approve" : "deadline_extensions.reject",
@@ -967,8 +971,6 @@ export const extensionRequestsService = {
         "Debe ingresar un comentario para rechazar la ampliación.",
         400,
       );
-    const workflowInstanceId = previous.workflowInstanceId;
-    const usedWorkflow = Boolean(workflowInstanceId);
     if (
       !workflowInstanceId &&
       !access.isAdmin &&

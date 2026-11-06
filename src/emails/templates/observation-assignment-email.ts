@@ -108,7 +108,7 @@ export const observationAssignmentEmailTemplate: EmailTemplateDefinition<"observ
           ? `En relación con el Informe de Auditoría Interna ${reportReference}, se detallan a continuación las observaciones asignadas para su gestión:`
           : `En relación con los informes de Auditoría Interna ${reportReference}, se detallan a continuación las observaciones asignadas para su gestión:`;
       const contentHtml = `
-        <p style="font-weight:700;margin:0 0 16px;">Buenas tardes estimados:</p>
+        <p style="font-weight:700;margin:0 0 16px;">Estimados</p>
         <p style="font-weight:600;margin:0 0 14px;">${reportIntro}</p>
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;margin:0 0 18px;">
           <thead>
@@ -136,7 +136,7 @@ export const observationAssignmentEmailTemplate: EmailTemplateDefinition<"observ
         }),
         subject: `Observaciones asignadas · ${variables.total} observaciones`,
         text: joinTextBlocks(
-          "Buenas tardes estimados:",
+          "Estimados",
           `${
             variables.reports.length === 1
               ? "En relación con el Informe de Auditoría Interna "

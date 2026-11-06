@@ -21,11 +21,6 @@ const envSchema = z.object({
   DATABASE_URL: z
     .string()
     .startsWith("sqlserver://", "DATABASE_URL debe usar sqlserver://"),
-  DEADLINE_REMINDER_INTERVAL_MS: z.coerce
-    .number()
-    .int()
-    .min(60_000)
-    .default(86_400_000),
   FRONTEND_URL: z.string().url().default("http://localhost:3000"),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   MICROSOFT_CLIENT_ID: z.string().min(1).optional(),
